@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.security;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.security
+ * - File       : AppUserDetails.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : The signed-in user: identity, permissions and account state
+ * </pre>
+ */
+
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;

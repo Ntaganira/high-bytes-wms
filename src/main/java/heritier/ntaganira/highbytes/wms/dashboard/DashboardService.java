@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.dashboard;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.dashboard
+ * - File       : DashboardService.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Dashboard reads: KPIs, pending approvals, recent movements, low stock, chart
+ * </pre>
+ */
+
 import heritier.ntaganira.highbytes.wms.dashboard.DashboardViews.*;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;

@@ -35,11 +35,15 @@ spring:
   quartz:
     job-store-type: jdbc         # jobs must survive a restart
     jdbc:
-      initialize-schema: never   # Flyway creates the Quartz tables
+      initialize-schema: never   # Flyway owns them: V7__quartz_tables.sql
     properties:
       org.quartz.scheduler.instanceId: AUTO
       org.quartz.jobStore.isClustered: false
-      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate   # BYTEA, not BLOB
+      # PostgreSQL stores the job-data column as BYTEA. The standard
+      # StdJDBCDelegate calls getBytes() on it and misreads it — and the
+      # failure appears when a persisted job is RELOADED, not at startup,
+      # so a clean boot proves nothing.
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
 
   servlet:
     multipart:

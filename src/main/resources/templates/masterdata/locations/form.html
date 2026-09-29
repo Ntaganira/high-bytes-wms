@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New location' : 'Edit location'">Location</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">MASTER DATA · LOCATION</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New location' : 'Edit ' + ${form.code}">New location</h1>
+  </div>
+
+  <div th:if="${#fields.hasGlobalErrors('form')}" class="alert alert-danger" role="alert">
+    <p th:each="e : ${#fields.globalErrors('form')}" th:text="${e}" class="mb-0"></p>
+  </div>
+
+  <div th:if="${form.holdsStock}" class="release-blocked mb-3" role="status">
+    <i class="bi bi-info-circle" aria-hidden="true"></i>
+    <div>
+      <strong>This location holds stock</strong>
+      <span>Its branch and type are locked. Changing either would move stock between
+            branches, or reclassify duty-suspended goods, without a document saying so.
+            Transfer the stock out first.</span>
+    </div>
+  </div>
+
+  <form th:action="${form.new} ? @{/locations} : @{'/locations/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-7">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-geo-alt" aria-hidden="true"></i>
+              <h2 class="card-title">Location</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label for="branchId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Branch <span class="text-danger">*</span>
+              </label>
+              <select id="branchId" th:field="*{branchId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('branchId')} ? 'is-invalid'"
+                      th:disabled="${form.holdsStock}">
+                <option value="">— choose —</option>
+                <option th:each="b : ${branches}" th:value="${b.id()}" th:text="${b.displayLabel()}">Gahanga</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('branchId')}" th:errors="*{branchId}">error</div>
+              <!-- A disabled select posts nothing; carry the value so it survives. -->
+              <input type="hidden" th:if="${form.holdsStock}" th:field="*{branchId}">
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="locationType" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Type <span class="text-danger">*</span>
+              </label>
+              <select id="locationType" th:field="*{locationType}" class="form-select"
+                      th:classappend="${#fields.hasErrors('locationType')} ? 'is-invalid'"
+                      th:disabled="${form.holdsStock}">
+                <option th:each="t : ${locationTypes}" th:value="${t}" th:text="${t.label()}">Warehouse</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('locationType')}" th:errors="*{locationType}">error</div>
+              <input type="hidden" th:if="${form.holdsStock}" th:field="*{locationType}">
+              <div class="form-text" th:each="t : ${locationTypes}"
+                   th:if="${form.locationType != null and form.locationType.name() == t.name()}"
+                   th:text="${t.description()}">Ordinary saleable stock.</div>
+            </div>
+
+            <div class="col-12 col-md-4">
+              <label for="code" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Code <span class="text-danger">*</span>
+              </label>
+              <input id="code" th:field="*{code}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('code')} ? 'is-invalid'"
+                     placeholder="KGL-MAIN" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('code')}" th:errors="*{code}">error</div>
+              <div class="form-text">Unique within the branch.</div>
+            </div>
+
+            <div class="col-12 col-md-8">
+              <label for="name" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Name <span class="text-danger">*</span>
+              </label>
+              <input id="name" th:field="*{name}" class="form-control"
+                     th:classappend="${#fields.hasErrors('name')} ? 'is-invalid'"
+                     placeholder="Gahanga main store">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-lg-5">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-sliders" aria-hidden="true"></i>
+              <h2 class="card-title">Behaviour</h2>
+            </div>
+          </div>
+
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="bonded" th:field="*{bonded}">
+            <label class="form-check-label" for="bonded">
+              Bonded
+              <span class="text-body-secondary small d-block">
+                Duty-suspended. Every receipt and release needs a customs reference.
+              </span>
+            </label>
+            <div class="text-danger small mt-1" th:if="${#fields.hasErrors('bonded')}" th:errors="*{bonded}">error</div>
+          </div>
+
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="sellable" th:field="*{sellable}">
+            <label class="form-check-label" for="sellable">
+              Holds saleable stock
+              <span class="text-body-secondary small d-block">
+                Off for quarantine and transit: the stock is real and counted, but cannot be dispatched.
+              </span>
+            </label>
+          </div>
+
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="active" th:field="*{active}">
+            <label class="form-check-label" for="active">
+              Active
+              <span class="text-body-secondary small d-block">
+                An inactive location takes no new movements. Past ones still point at it.
+              </span>
+            </label>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Create location' : 'Save changes'">Create</span>
+      </button>
+      <a th:href="${form.new} ? @{/locations} : @{'/locations/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

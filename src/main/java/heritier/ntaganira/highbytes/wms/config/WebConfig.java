@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.config;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.config
+ * - File       : WebConfig.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Supplies the auditorAware bean: the signed-in user, for JPA auditing
+ * </pre>
+ */
+
 import heritier.ntaganira.highbytes.wms.security.AppUserDetails;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.common.web;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.common.web
+ * - File       : GlobalModelAdvice.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Model attributes every page needs: branch, business date, lock state, nav counts
+ * </pre>
+ */
+
 import heritier.ntaganira.highbytes.wms.branch.BranchService;
 import heritier.ntaganira.highbytes.wms.branch.BranchView;
 import heritier.ntaganira.highbytes.wms.security.AppUserDetails;

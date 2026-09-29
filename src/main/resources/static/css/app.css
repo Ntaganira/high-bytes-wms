@@ -320,6 +320,7 @@ th.num, td.num { text-align: right; }
   padding: 4px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
   text-transform: uppercase; letter-spacing: .3px;
 }
+.status-active    { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
 .status-draft     { background: var(--badge-locked-bg);    color: var(--badge-locked-text); }
 .status-pending   { background: var(--badge-held-bg);      color: var(--badge-held-text); }
 .status-held      { background: var(--badge-held-bg);      color: var(--badge-held-text); }

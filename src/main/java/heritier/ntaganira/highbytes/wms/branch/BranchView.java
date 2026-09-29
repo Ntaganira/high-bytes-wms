@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.branch;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.branch
+ * - File       : BranchView.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : A trading location (branch) as the screens read it
+ * </pre>
+ */
+
 import java.util.UUID;
 
 /** A trading location. Kigali is the main branch; further branches are configuration. */

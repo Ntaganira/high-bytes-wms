@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Locations &amp; Bins</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">MASTER DATA</p>
+      <h1 class="page-title">Locations &amp; Bins</h1>
+      <p class="page-sub">
+        Total stock is every location added together — transit and quarantine included.
+      </p>
+    </div>
+    <a th:href="@{/locations/new}" class="btn btn-primary-action" sec:authorize="hasAuthority('location.manage')">
+      <i class="bi bi-plus-lg"></i> New location
+    </a>
+  </div>
+
+  <form class="d-flex flex-wrap gap-3 align-items-center mb-3" method="get" th:action="@{/locations}">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="allBranches" name="allBranches"
+             value="true" th:checked="${allBranches}" onchange="this.form.submit()">
+      <label class="form-check-label small" for="allBranches">All branches</label>
+    </div>
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" id="includeInactive" name="includeInactive"
+             value="true" th:checked="${includeInactive}" onchange="this.form.submit()">
+      <label class="form-check-label small" for="includeInactive">Show inactive</label>
+    </div>
+    <noscript><button type="submit" class="btn btn-sm btn-primary">Apply</button></noscript>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Code</th>
+            <th scope="col">Name</th>
+            <th scope="col">Branch</th>
+            <th scope="col">Type</th>
+            <th scope="col" class="num">Bins</th>
+            <th scope="col" class="num">Items held</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="l : ${locations}" th:classappend="${!l.active()} ? 'opacity-75'">
+            <td><a class="doc-link" th:href="@{'/locations/' + ${l.id()}}" th:text="${l.code()}">KGL-MAIN</a></td>
+            <td th:text="${l.name()}">Gahanga main store</td>
+            <td class="text-body-secondary" th:text="${l.branchName()}">Gahanga Main Warehouse</td>
+            <td>
+              <span th:text="${l.locationType().label()}">Warehouse</span>
+              <span class="status-badge status-bonded ms-1" th:if="${l.bonded()}">
+                <i class="bi bi-shield-lock-fill"></i> BONDED
+              </span>
+            </td>
+            <td class="num mono" th:text="${l.binCount()}">4</td>
+            <td class="num mono" th:text="${l.distinctItems()}">12</td>
+            <td>
+              <span th:if="${l.active()}" th:replace="~{fragments/ui :: chip('ACTIVE')}"></span>
+              <span th:unless="${l.active()}" th:replace="~{fragments/ui :: chip('LOCKED')}"></span>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(locations)}">
+            <td colspan="7">
+              <div th:replace="~{fragments/ui :: emptyState('bi-geo-alt', 'No locations', 'Create a location, or tick “All branches”.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

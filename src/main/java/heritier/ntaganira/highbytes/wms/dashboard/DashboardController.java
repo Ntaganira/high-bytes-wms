@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.dashboard;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.dashboard
+ * - File       : DashboardController.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Serves the dashboard and switches the session's branch
+ * </pre>
+ */
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import heritier.ntaganira.highbytes.wms.branch.BranchView;
