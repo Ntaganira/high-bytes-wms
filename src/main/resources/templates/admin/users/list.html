@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Users</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">ADMINISTRATION</p>
+      <h1 class="page-title">Users</h1>
+      <p class="page-sub">Every account, what it may do, and its state. Accounts are deactivated, never deleted.</p>
+    </div>
+    <a th:href="@{/admin/users/new}" class="btn btn-primary-action">
+      <i class="bi bi-person-plus"></i> New user
+    </a>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/admin/users}">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-4">
+        <label for="q" class="form-label small fw-semibold" style="color: var(--color-heading)">Search</label>
+        <input id="q" name="q" type="search" class="form-control" th:value="${q}"
+               placeholder="Name, username or email">
+      </div>
+      <div class="col-6 col-md-3">
+        <label for="role" class="form-label small fw-semibold" style="color: var(--color-heading)">Holds role</label>
+        <select id="role" name="role" class="form-select">
+          <option value="">Any role</option>
+          <option th:each="r : ${roles}" th:value="${r.id()}" th:text="${r.name()}"
+                  th:selected="${role != null and role == r.id()}">Finance Department</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="status" class="form-label small fw-semibold" style="color: var(--color-heading)">Accounts</label>
+        <select id="status" name="status" class="form-select">
+          <option th:each="f : ${filters}" th:value="${f}" th:text="${f.label()}"
+                  th:selected="${status == f}">Current accounts</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1">
+          <i class="bi bi-funnel"></i> Apply
+        </button>
+        <a th:href="@{/admin/users}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Username</th>
+            <th scope="col">Roles in force</th>
+            <th scope="col">Home branch</th>
+            <th scope="col">Last sign-in</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="u : ${users}" th:classappend="${!u.active()} ? 'opacity-75'">
+            <td>
+              <a th:href="@{'/admin/users/' + ${u.id()}}" th:text="${u.fullName()}">Jeanne Uwase</a>
+              <div class="small text-body-secondary" th:if="${u.mustChangePassword()}">
+                <i class="bi bi-key" aria-hidden="true"></i> Temporary password
+              </div>
+            </td>
+            <td class="mono" th:text="${u.username()}">juwase</td>
+            <td class="text-wrap" style="min-width: 14rem"
+                th:text="${u.roles()} ?: 'No role'"
+                th:classappend="${u.roles() == null} ? 'text-body-secondary'">Finance Department</td>
+            <td th:text="${u.homeBranchName()} ?: '—'">Gahanga Main Warehouse</td>
+            <td class="mono text-body-secondary"
+                th:text="${u.lastLoginAt() != null} ? ${#temporals.format(u.lastLoginAt(), 'dd MMM yyyy HH:mm')} : 'Never'">29 Sep 2026 08:12</td>
+            <td><span th:replace="~{fragments/ui :: chip(${u.status()})}"></span></td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(users)}">
+            <td colspan="6">
+              <div th:replace="~{fragments/ui :: emptyState('bi-people', 'No accounts match', 'Clear the filters, or create an account.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="text-body-secondary small mt-2" th:if="${!#lists.isEmpty(users)}">
+    <span th:text="${#lists.size(users)}">4</span> accounts. Roles in force today; a role granted at one
+    branch shows that branch's code.
+  </p>
+
+</div>
+</body>
+</html>

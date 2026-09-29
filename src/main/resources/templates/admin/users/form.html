@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New user' : 'Edit user'">User</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">ADMINISTRATION · USER</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New user' : 'Edit ' + ${form.username}">New user</h1>
+    <p class="page-sub" th:if="${form.new}">Roles are granted on the account's page once it exists, one dated grant at a time.</p>
+  </div>
+
+  <!-- Errors that belong to no single field. This sits outside the form's
+       th:object, so the path names the object itself: '${form}'. -->
+  <div th:if="${#fields.hasErrors('${form}')}" class="alert alert-danger" role="alert">
+    <p th:each="e : ${#fields.errors('${form}')}" th:text="${e}" class="mb-0"></p>
+  </div>
+
+  <form th:action="${form.new} ? @{/admin/users} : @{'/admin/users/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-7">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-person-badge" aria-hidden="true"></i>
+              <h2 class="card-title">Account</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-5">
+              <label for="username" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Username <span class="text-danger" th:if="${form.new}">*</span>
+              </label>
+              <input th:if="${form.new}" id="username" th:field="*{username}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('username')} ? 'is-invalid'"
+                     placeholder="juwase" autocomplete="off">
+              <input th:unless="${form.new}" id="username" class="form-control mono bg-body-secondary"
+                     th:value="${form.username}" readonly>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('username')}" th:errors="*{username}">error</div>
+              <div class="form-text" th:if="${form.new}">Lower case. It cannot change later: every signature carries it.</div>
+              <div class="form-text" th:unless="${form.new}">Fixed: every signature and audit row carries it.</div>
+            </div>
+
+            <div class="col-12 col-md-7">
+              <label for="fullName" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Full name <span class="text-danger">*</span>
+              </label>
+              <input id="fullName" th:field="*{fullName}" class="form-control"
+                     th:classappend="${#fields.hasErrors('fullName')} ? 'is-invalid'"
+                     placeholder="Jeanne Uwase">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('fullName')}" th:errors="*{fullName}">error</div>
+            </div>
+
+            <div class="col-12 col-md-7">
+              <label for="email" class="form-label small fw-semibold" style="color: var(--color-heading)">Email</label>
+              <input id="email" th:field="*{email}" type="email" class="form-control"
+                     th:classappend="${#fields.hasErrors('email')} ? 'is-invalid'"
+                     placeholder="juwase@highbytes.rw" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('email')}" th:errors="*{email}">error</div>
+            </div>
+
+            <div class="col-12 col-md-5">
+              <label for="phone" class="form-label small fw-semibold" style="color: var(--color-heading)">Phone</label>
+              <input id="phone" th:field="*{phone}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('phone')} ? 'is-invalid'"
+                     placeholder="+250 788 000 000">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('phone')}" th:errors="*{phone}">error</div>
+            </div>
+
+            <div class="col-12 col-md-7">
+              <label for="homeBranchId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Home branch <span class="text-danger">*</span>
+              </label>
+              <select id="homeBranchId" th:field="*{homeBranchId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('homeBranchId')} ? 'is-invalid'">
+                <option value="">— choose —</option>
+                <option th:each="b : ${branches}" th:value="${b.id()}" th:text="${b.displayLabel()}">Gahanga</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('homeBranchId')}" th:errors="*{homeBranchId}">error</div>
+              <div class="form-text">Where the account lands after sign-in. What it may do comes from its roles.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-lg-5">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-calendar-range" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">Last leave</h2>
+                <p class="card-sub">Board paper §5.1: ten consecutive working days a year</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-6">
+              <label for="lastLeaveStart" class="form-label small fw-semibold" style="color: var(--color-heading)">From</label>
+              <input id="lastLeaveStart" th:field="*{lastLeaveStart}" type="date" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('lastLeaveStart')} ? 'is-invalid'">
+            </div>
+            <div class="col-6">
+              <label for="lastLeaveEnd" class="form-label small fw-semibold" style="color: var(--color-heading)">To</label>
+              <input id="lastLeaveEnd" th:field="*{lastLeaveEnd}" type="date" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('lastLeaveEnd')} ? 'is-invalid'">
+            </div>
+            <div class="col-12">
+              <div class="text-danger small" th:if="${#fields.hasErrors('lastLeaveEnd')}" th:errors="*{lastLeaveEnd}">error</div>
+              <div class="text-danger small" th:if="${#fields.hasErrors('lastLeaveStart')}" th:errors="*{lastLeaveStart}">error</div>
+              <div class="form-text">Mandatory leave is a control: work that needs its author present every
+                day comes to light when they are away. An account with no leave in twelve months is reportable.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="release-blocked mt-3" role="status" th:if="${form.new}">
+      <i class="bi bi-key" aria-hidden="true"></i>
+      <div>
+        <strong>A temporary password is issued when you save</strong>
+        <span>It is shown to you once. Give it to the user in person; they must choose their own at first sign-in.</span>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Create account' : 'Save changes'">Create account</span>
+      </button>
+      <a th:href="${form.new} ? @{/admin/users} : @{'/admin/users/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

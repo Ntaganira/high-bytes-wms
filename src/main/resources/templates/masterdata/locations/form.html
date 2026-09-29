@@ -11,11 +11,14 @@
 
   <div class="mb-4">
     <p class="eyebrow">MASTER DATA · LOCATION</p>
-    <h1 class="page-title" th:text="${form.new} ? 'New location' : 'Edit ' + ${form.code}">New location</h1>
+    <h1 class="page-title" th:text="${form.new} ? 'New location' : 'Edit ' + (${storedCode} ?: ${form.code})">New location</h1>
   </div>
 
-  <div th:if="${#fields.hasGlobalErrors('form')}" class="alert alert-danger" role="alert">
-    <p th:each="e : ${#fields.globalErrors('form')}" th:text="${e}" class="mb-0"></p>
+  <!-- Errors that belong to no single field, such as a refused change to a
+       location that holds stock. This sits outside the form's th:object, so
+       the path names the object itself: '${form}'. -->
+  <div th:if="${#fields.hasErrors('${form}')}" class="alert alert-danger" role="alert">
+    <p th:each="e : ${#fields.errors('${form}')}" th:text="${e}" class="mb-0"></p>
   </div>
 
   <div th:if="${form.holdsStock}" class="release-blocked mb-3" role="status">

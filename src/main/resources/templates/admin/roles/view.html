@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${role.name()}">Role</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">ADMINISTRATION · ROLE</p>
+      <h1 class="page-title" th:text="${role.name()}">Finance Department</h1>
+      <p class="page-sub d-flex flex-wrap align-items-center gap-2">
+        <span class="mono" th:text="${role.code()}">FINANCE</span>
+        <span th:replace="~{fragments/ui :: chip(${role.status()})}"></span>
+        <th:block th:if="${role.policyDefined()}"><span th:replace="~{fragments/ui :: chip('POLICY')}"></span></th:block>
+      </p>
+    </div>
+
+    <!-- Offered only when it could succeed; the service refuses the rest anyway. -->
+    <div class="d-flex flex-wrap align-items-start gap-2" th:unless="${heldByMe}">
+      <a th:href="@{'/admin/roles/' + ${role.id()} + '/edit'}" class="btn btn-outline-secondary"
+         th:unless="${role.policyDefined()}">
+        <i class="bi bi-pencil"></i> Edit details
+      </a>
+      <a th:href="@{'/admin/roles/' + ${role.id()} + '/permissions'}" class="btn btn-outline-secondary"
+         th:unless="${role.policyDefined()}">
+        <i class="bi bi-list-check"></i> Edit permissions
+      </a>
+
+      <details class="inline-action" th:if="${role.active() and !role.policyDefined()}">
+        <summary class="btn btn-outline-danger"><i class="bi bi-slash-circle"></i> Deactivate</summary>
+        <form th:action="@{'/admin/roles/' + ${role.id()} + '/deactivate'}" method="post"
+              class="hb-card hb-card-body small" style="max-width: 22rem">
+          <label for="deactivateReason" class="form-label fw-semibold" style="color: var(--color-heading)">Reason</label>
+          <input id="deactivateReason" name="reason" class="form-control form-control-sm mb-2" required maxlength="240"
+                 placeholder="Merged into Store Keeper">
+          <p class="mb-2 text-body-secondary" th:text="${role.holderCount()} == 0
+               ? 'Nobody holds this role today.'
+               : ${role.holderCount()} + ' holder(s) lose its permissions on their next page. Their assignments stay on record.'">
+            3 holders lose its permissions.</p>
+          <button type="submit" class="btn btn-sm btn-danger">Deactivate role</button>
+        </form>
+      </details>
+      <form th:if="${!role.active()}" th:action="@{'/admin/roles/' + ${role.id()} + '/reactivate'}"
+            method="post" class="m-0">
+        <button type="submit" class="btn btn-outline-success"><i class="bi bi-arrow-counterclockwise"></i> Reactivate</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${heldByMe}">
+    <i class="bi bi-person-lock" aria-hidden="true"></i>
+    <div>
+      <strong>You hold this role</strong>
+      <span>Another administrator must change it, even its name: nobody administers their own access,
+        and your actions are recorded under this role's name.</span>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${role.policyDefined()}">
+    <i class="bi bi-shield-lock" aria-hidden="true"></i>
+    <div>
+      <strong>Defined by the policy</strong>
+      <span>The segregation rules or approval chains name this role and assume what it carries, so its
+        permissions, name and description change only by a reviewed migration, never here, and it is never
+        deactivated. People are still given it and have it revoked as usual.</span>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${role.permissionCount() == 0 and role.stepCount() > 0}">
+    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+    <div>
+      <strong>This role signs approval steps but permits nothing</strong>
+      <span>Its holders cannot open the documents their signature is waiting on. The migration that
+        builds each document gives it the view and action permissions its steps need.</span>
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-5">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-info-circle" aria-hidden="true"></i>
+            <h2 class="card-title">Details</h2>
+          </div>
+        </div>
+        <p th:text="${role.description()} ?: 'No description.'" th:classappend="${role.description() == null} ? 'text-body-secondary'">
+          Issues delivery authorizations, posts valuations.</p>
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-body-secondary fw-normal">Structure</dt>
+          <dd class="col-7" th:text="${role.structure().label()}">Both structures</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Permissions</dt>
+          <dd class="col-7" th:text="${role.policyDefined()} ? 'Fixed by the policy: changed by migration only' : 'Chosen here'">Chosen here</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Protected</dt>
+          <dd class="col-7" th:text="${role.protectedRole()} ? 'Yes: never deactivated' : 'No'">No</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Holders today</dt>
+          <dd class="col-7 mono" th:text="${role.holderCount()}">3</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-7">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Permissions</h2>
+              <p class="card-sub" th:text="${role.permissionCount()} + ' granted'">17 granted</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:if="${#lists.isEmpty(groups)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-list-check', 'Permits nothing', 'Holders of this role can do nothing with it until permissions are chosen.')}"></div>
+        </th:block>
+        <div th:each="g : ${groups}" class="mb-3">
+          <div class="small fw-semibold" style="color: var(--color-heading)" th:text="${g.label()}">Dispatch</div>
+          <div class="perm-row" th:each="p : ${g.permissions()}">
+            <div class="flex-grow-1">
+              <div class="perm-code" th:text="${p.code()}">dispatch.approve</div>
+              <div class="perm-desc" th:text="${p.description()}">Approve a delivery authorization</div>
+            </div>
+            <span th:replace="~{fragments/ui :: chip(${p.duty()})}"></span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-6">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-people" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Holders</h2>
+              <p class="card-sub">Assignments in force or due to start</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive" th:unless="${#lists.isEmpty(holders)}">
+          <table class="table hb-table mb-0">
+            <thead><tr><th scope="col">Person</th><th scope="col">Where</th><th scope="col">Until</th><th scope="col">State</th></tr></thead>
+            <tbody>
+              <tr th:each="h : ${holders}">
+                <td>
+                  <a th:href="@{'/admin/users/' + ${h.userId()}}" th:text="${h.fullName()}">Jeanne Uwase</a>
+                  <span class="d-block small text-body-secondary" th:if="${h.delegation()}">Leave cover</span>
+                </td>
+                <td th:text="${h.scope()}">All branches</td>
+                <td class="mono" th:text="${h.validTo() != null} ? ${#temporals.format(h.validTo(), 'dd MMM yyyy')} : '—'">—</td>
+                <td><span th:replace="~{fragments/ui :: chip(${h.state()})}"></span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <th:block th:if="${#lists.isEmpty(holders)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-people', 'Nobody holds this role', 'Grant it from a user’s page.')}"></div>
+        </th:block>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-6">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-diagram-3" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Signs in approval chains</h2>
+              <p class="card-sub">Chains in force or scheduled</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive" th:unless="${#lists.isEmpty(steps)}">
+          <table class="table hb-table mb-0">
+            <thead><tr><th scope="col">Document</th><th scope="col">Step</th><th scope="col">In force</th></tr></thead>
+            <tbody>
+              <tr th:each="s : ${steps}">
+                <td>
+                  <span th:text="${s.documentType()}">Delivery Authorization Order</span>
+                  <span class="d-block small text-body-secondary mono" th:text="${s.formReference()} + ' · v' + ${s.version()}">DAO-004 · v1</span>
+                </td>
+                <td class="mono" th:text="${s.sequenceNo()} + ' · ' + ${s.actionLabel()}">1 · PREPARE</td>
+                <td class="mono small"
+                    th:text="${#temporals.format(s.effectiveFrom(), 'dd MMM yyyy')} + ' – ' + (${s.effectiveTo() != null} ? ${#temporals.format(s.effectiveTo().minusDays(1), 'dd MMM yyyy')} : 'open')">01 Jul 2026 – 31 Dec 2026</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <th:block th:if="${#lists.isEmpty(steps)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-diagram-3', 'Signs no step', 'No approval chain in force or scheduled names this role.')}"></div>
+        </th:block>
+      </section>
+    </div>
+
+    <div class="col-12" th:unless="${#lists.isEmpty(segregation)}">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-sign-stop" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Cannot be held with</h2>
+              <p class="card-sub">Segregation rules naming this role</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table mb-0">
+            <thead><tr><th scope="col">Role</th><th scope="col">Rule</th><th scope="col">Why</th><th scope="col">Source</th></tr></thead>
+            <tbody>
+              <tr th:each="s : ${segregation}">
+                <td><a th:href="@{'/admin/roles/' + ${s.otherId()}}" th:text="${s.other()}">Warehouse Manager</a></td>
+                <td class="mono" th:text="${s.enforcement()}">BLOCK</td>
+                <td class="text-wrap" th:text="${s.rationale()}">Assurance cannot test work it performed itself.</td>
+                <td class="text-body-secondary" th:text="${s.sourceRef()}">Board paper Table 6</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Change history</h2>
+              <p class="card-sub">Every change to this role, newest first</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Changes to this role and its permissions will be listed here.')}"></div>
+        </th:block>
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

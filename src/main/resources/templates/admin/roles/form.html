@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New role' : 'Edit role'">Role</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">ADMINISTRATION · ROLE</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New role' : 'Edit ' + ${form.code}">New role</h1>
+    <p class="page-sub" th:if="${form.new}">A new role permits nothing. You choose its permissions next.</p>
+  </div>
+
+  <div th:if="${#fields.hasErrors('${form}')}" class="alert alert-danger" role="alert">
+    <p th:each="e : ${#fields.errors('${form}')}" th:text="${e}" class="mb-0"></p>
+  </div>
+
+  <form th:action="${form.new} ? @{/admin/roles} : @{'/admin/roles/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <section class="hb-card hb-card-body" style="max-width: 48rem">
+      <div class="row g-3">
+        <div class="col-12 col-md-5">
+          <label for="code" class="form-label small fw-semibold" style="color: var(--color-heading)">
+            Code <span class="text-danger" th:if="${form.new}">*</span>
+          </label>
+          <input th:if="${form.new}" id="code" th:field="*{code}" class="form-control mono"
+                 th:classappend="${#fields.hasErrors('code')} ? 'is-invalid'"
+                 placeholder="STORE_KEEPER" autocomplete="off">
+          <input th:unless="${form.new}" id="code" class="form-control mono bg-body-secondary"
+                 th:value="${form.code}" readonly>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('code')}" th:errors="*{code}">error</div>
+          <div class="form-text" th:if="${form.new}">Capitals and underscores. It cannot change later.</div>
+          <div class="form-text" th:unless="${form.new}">Fixed: approval chains and segregation rules name it.</div>
+        </div>
+
+        <div class="col-12 col-md-7">
+          <label for="name" class="form-label small fw-semibold" style="color: var(--color-heading)">
+            Name <span class="text-danger">*</span>
+          </label>
+          <input id="name" th:field="*{name}" class="form-control"
+                 th:classappend="${#fields.hasErrors('name')} ? 'is-invalid'"
+                 placeholder="Store Keeper">
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
+          <div class="form-text">Holders see it as their title; the audit trail keeps the name used at the time.</div>
+        </div>
+
+        <div class="col-12">
+          <label for="description" class="form-label small fw-semibold" style="color: var(--color-heading)">What the role is for</label>
+          <textarea id="description" th:field="*{description}" class="form-control" rows="3" maxlength="400"
+                    th:classappend="${#fields.hasErrors('description')} ? 'is-invalid'"
+                    placeholder="Receives goods at the gate and records what arrived."></textarea>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('description')}" th:errors="*{description}">error</div>
+        </div>
+
+        <div class="col-12">
+          <span class="form-label small fw-semibold d-block mb-1" style="color: var(--color-heading)">Structure</span>
+          <div class="form-check" th:each="st : ${structures}">
+            <input class="form-check-input" type="radio" th:field="*{structure}" th:value="${st}">
+            <label class="form-check-label" th:for="${#ids.prev('structure')}">
+              <span th:text="${st.label()}">Both structures</span>
+              <span class="text-body-secondary small d-block" th:text="${st.description()}">Exists under both.</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Create role and choose permissions' : 'Save changes'">Create role</span>
+      </button>
+      <a th:href="${form.new} ? @{/admin/roles} : @{'/admin/roles/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

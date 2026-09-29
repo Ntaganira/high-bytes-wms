@@ -7,6 +7,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title layout:title-pattern="$CONTENT_TITLE · HIGH BYTES WMS">HIGH BYTES WMS</title>
+  <link rel="icon" type="image/svg+xml" th:href="@{/favicon.svg}">
 
   <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
   <link rel="stylesheet" th:href="@{/webjars/bootstrap-icons/font/bootstrap-icons.min.css}">
@@ -40,6 +41,10 @@
     <div th:if="${flashSuccess}" class="alert alert-success d-flex align-items-start gap-2" role="alert">
       <i class="bi bi-check-circle-fill"></i>
       <span th:text="${flashSuccess}">Done</span>
+    </div>
+    <div th:if="${flashWarning}" class="alert alert-warning d-flex align-items-start gap-2" role="alert">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <span th:text="${flashWarning}">Done, but note</span>
     </div>
 
     <th:block layout:fragment="content"></th:block>

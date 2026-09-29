@@ -116,7 +116,7 @@ public class ItemController {
                        Model model) {
 
         var item = items.findById(id, branch == null ? null : branch.id())
-                .orElseThrow(() -> new ItemNotFoundException(id));
+                .orElseThrow(() -> new ItemService.ItemNotFoundException(id));
 
         model.addAttribute("item", item);
         model.addAttribute("transacted", items.hasBeenTransacted(id));
@@ -132,6 +132,7 @@ public class ItemController {
         var form = items.formFor(id);
         form.setTransacted(items.hasBeenTransacted(id));
         model.addAttribute("form", form);
+        model.addAttribute("storedCode", form.getItemCode());
         addLookups(model);
         return "masterdata/items/form";
     }
@@ -144,6 +145,10 @@ public class ItemController {
                          @ModelAttribute("currentBranch") BranchView branch,
                          Model model,
                          RedirectAttributes redirect) {
+
+        // Before validation, so an invalid form for a missing item is a 404 too.
+        // A re-rendered form is headed with the stored code, not the one typed.
+        model.addAttribute("storedCode", items.formFor(id).getItemCode());
 
         validateCrossFields(form, binding);
         if (binding.hasErrors()) {
@@ -205,12 +210,5 @@ public class ItemController {
     private void addLookups(Model model) {
         model.addAttribute("units", lookups.units());
         model.addAttribute("categories", lookups.categories());
-    }
-
-    @ResponseStatus(org.springframework.http.HttpStatus.NOT_FOUND)
-    static class ItemNotFoundException extends RuntimeException {
-        ItemNotFoundException(UUID id) {
-            super("No item with id " + id);
-        }
     }
 }

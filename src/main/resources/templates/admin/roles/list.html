@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Roles &amp; Permissions</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">ADMINISTRATION</p>
+      <h1 class="page-title">Roles &amp; Permissions</h1>
+      <p class="page-sub">A role groups permissions. People are given roles; permissions are never given to a person directly.</p>
+    </div>
+    <a th:href="@{/admin/roles/new}" class="btn btn-primary-action">
+      <i class="bi bi-plus-lg"></i> New role
+    </a>
+  </div>
+
+  <section class="hb-card mb-3">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Role</th>
+            <th scope="col">Structure</th>
+            <th scope="col" class="num">Permissions</th>
+            <th scope="col" class="num">Holders</th>
+            <th scope="col" class="num">Chain steps</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="r : ${roles}" th:classappend="${!r.active()} ? 'opacity-75'">
+            <td>
+              <a th:href="@{'/admin/roles/' + ${r.id()}}" th:text="${r.name()}">Finance Department</a>
+              <span class="d-block small text-body-secondary mono" th:text="${r.code()}">FINANCE</span>
+            </td>
+            <td th:text="${r.structure().label()}">Both structures</td>
+            <td class="num">
+              <span th:text="${r.permissionCount()}">17</span>
+              <!-- A role that signs a chain step but permits nothing cannot sign it. -->
+              <i class="bi bi-exclamation-triangle-fill text-warning ms-1" th:if="${r.permissionCount() == 0 and r.stepCount() > 0}"
+                 title="Signs approval steps but carries no permission" aria-label="Signs approval steps but carries no permission"></i>
+            </td>
+            <td class="num" th:text="${r.holderCount()}">3</td>
+            <td class="num" th:text="${r.stepCount()}">4</td>
+            <td>
+              <div class="d-flex flex-wrap gap-1">
+                <span th:replace="~{fragments/ui :: chip(${r.status()})}"></span>
+                <th:block th:if="${r.policyDefined()}"><span th:replace="~{fragments/ui :: chip('POLICY')}"></span></th:block>
+                <th:block th:if="${r.administers()}"><span th:replace="~{fragments/ui :: chip('ADMINISTER')}"></span></th:block>
+              </div>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(roles)}">
+            <td colspan="6">
+              <div th:replace="~{fragments/ui :: emptyState('bi-shield', 'No roles', 'Create the first role.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="text-body-secondary small">
+    Holders counts active accounts with the role in force today. Chain steps counts the approval steps
+    the role signs in chains in force or scheduled; a role that signs any cannot be deactivated.
+    A POLICY role is named by the segregation rules or an approval chain, so what it permits changes
+    by migration only.
+  </p>
+
+  <!-- The segregation rules. Data, not code; changed only by migration, with the decision recorded. -->
+  <section class="hb-card hb-card-body mt-3">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-sign-stop" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Segregation of duties</h2>
+          <p class="card-sub">Pairs of roles one person may not hold at the same time. A grant that would
+            break a BLOCK rule is refused.</p>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr><th scope="col">Role</th><th scope="col">Cannot be held with</th><th scope="col">Rule</th><th scope="col">Why</th><th scope="col">Source</th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="s : ${rules}">
+            <td th:text="${s.roleA()}">Internal Controller &amp; Compliance</td>
+            <td><a th:href="@{'/admin/roles/' + ${s.otherId()}}" th:text="${s.other()}">Warehouse &amp; Inventory Manager</a></td>
+            <td class="mono" th:text="${s.enforcement()}">BLOCK</td>
+            <td class="text-wrap" th:text="${s.rationale()}">Assurance cannot test work it performed itself.</td>
+            <td class="text-body-secondary" th:text="${s.sourceRef()}">Board paper Table 6</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small text-body-secondary mt-3 mb-0">The pairs follow the rights, not the names: a role created
+      here that carries a right only one side of a pair has counts as that side. Separately, nobody may hold an
+      administration right alongside anything operational (a transactional or master-data right, or an approval
+      step), whatever the roles are called. Both rules are the system's, not rows here, so a role created
+      tomorrow is covered by them too.</p>
+  </section>
+
+</div>
+</body>
+</html>

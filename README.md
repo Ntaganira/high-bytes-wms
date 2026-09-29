@@ -41,25 +41,22 @@ mvn spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
 Flyway applies the schema on first start. Sign in as `admin` /
-`ChangeMe#2026`.
+`ChangeMe#2026`; you must choose a new password before anything else.
 
 ### The admin account cannot open most screens
 
 It holds five permissions, all administrative, and none transactional. That
 is the segregation rule, not a bug: whoever manages access must not be able
-to grant themselves a posting right, use it, and take it away again.
+to grant themselves a posting right, use it, and take it away again. Since
+V9 the database refuses it, for every role, and master data and approval
+signatures with it.
 
-For a real setup, create a second user with the Warehouse Manager role. For
-a quick look around:
-
-```sql
-INSERT INTO role_permission (role_id, permission_id)
-SELECT r.id, p.id FROM role r, permission p
- WHERE r.code = 'SYS_ADMIN'
-   AND p.code IN ('item.view','item.manage','location.manage','stock.view');
-```
-
-Undo it before the client sees the system.
+To look around, create a user under **Administration → Users**, grant it
+**Warehouse & Inventory Manager** on its page, and sign in as it with the
+temporary password shown. Item and location management (`item.manage`,
+`location.manage`) are held by no seeded role: create a role carrying them
+on **Roles & Permissions** and grant it to a user. The roles the policy
+defines are read-only there; their permissions change by migration.
 
 ## What the schema enforces
 
@@ -89,6 +86,20 @@ missing number is a reportable incident.
 
 **The audit log is append-only**, with the same trigger treatment.
 
+**Access is checked where it is granted.** A role assignment that breaks a
+segregation rule (`sod_rule`), or gives one person an administration right
+alongside anything operational over the same dates, is refused at commit.
+The rules follow the rights, not the role names: Internal Controller rights
+copied into a new role still cannot sit with Finance, and the Internal
+Controller holds no transactional or master-data right beyond its own. A
+right no policy role carries yet, such as release at the gate, cannot be
+given to any role until the migration that builds its screen says whose it
+is. What the policy's own roles permit, the segregation rules and the
+permission catalogue change only by migration. Nobody can grant or revoke their own roles. Assignments are
+revoked, never edited, deleted or backdated, so "who could release goods on
+12 October" stays answerable. An access change commits together with its
+audit row or not at all, and a refused one is recorded too.
+
 ## The two approval chains
 
 Board Paper HB/BD/2026/09-05 replaces the Inventory Policy's four-signature
@@ -114,7 +125,11 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── audit/         the audit trail: snapshots, diffs, reads
 │   └── web/           global model attributes, login
 ├── branch/
-├── security/          user details, permission loading
+├── security/          user details, branch-scoped permissions, sign-in accounting
+├── admin/
+│   ├── user/          users, role grants, password reset, unlock
+│   └── role/          roles and the permission matrix
+├── profile/           my profile, change password
 ├── dashboard/
 ├── masterdata/
 │   ├── item/          item master with glass attributes
@@ -139,6 +154,8 @@ modules along the existing package seams.
 | `V6__seed_admin.sql` | The first administrator |
 | `V7__quartz_tables.sql` | Quartz 2.3.2 scheduler schema |
 | `V8__item_categories.sql` | Glass, silicones, steel, hardware, consumables |
+| `V9__access_control.sql` | Segregation (by right as well as by role) and invariant 8 enforced on grants; policy roles, rules and permissions fixed outside migrations; assignments as history; session stamps |
+| `V10__access_control_hardening.sql` | Every seeded role protected; the Internal Controller holds no operational right beyond its own; rights no policy role carries cannot be handed out; policy changes judged for every user |
 
 Never edit an applied migration. Add a new one.
 
@@ -157,6 +174,19 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 ## What works today
 
 - Sign in, session auth, permission-based authorisation
+- Users: create with a one-time temporary password, edit, deactivate,
+  reset password, unlock; grant roles at every branch or one, dated, or as
+  leave cover; revoke with a reason
+- Roles: create, edit, the permission matrix, deactivate; holders, the
+  approval steps each role signs, and the segregation rules. Roles the
+  policy defines are shown read-only
+- My profile: your roles and rights, your recent sign-ins and every change
+  made to your account; change password, and a temporary password must be
+  replaced first
+- Access changes apply on the user's next request; deactivation or a
+  password reset ends their sessions; five wrong passwords, at sign-in or
+  as the current password on a change, lock an account for 15 minutes;
+  every sign-in, failure and sign-out is audited
 - Branch switcher, with bonded branches flagged
 - Dashboard: KPIs, movement chart, approval queue, low stock — all reading
   the ledger
@@ -167,8 +197,8 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 ## Not built yet
 
 Goods received, dispatch, transfers, cutting, damage, counts, daily close,
-and the admin screens for users, roles and workflows. The schema for all of
-them is in place.
+and the admin screens for workflows, branches and the audit log. The schema
+for all of them is in place.
 
 ## Two rules the UI enforces that the SRS does not state
 

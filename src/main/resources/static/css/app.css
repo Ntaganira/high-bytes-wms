@@ -336,6 +336,19 @@ th.num, td.num { text-align: right; }
 .status-cancelled { background: var(--badge-locked-bg);    color: var(--badge-locked-text); text-decoration: line-through; }
 .status-bonded    { background: var(--badge-bonded-bg);    color: var(--badge-bonded-text); }
 .status-locked    { background: var(--badge-locked-bg);    color: var(--badge-locked-text); }
+.status-inactive  { background: var(--badge-locked-bg);    color: var(--badge-locked-text); }
+.status-scheduled { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
+.status-expired   { background: var(--badge-locked-bg);    color: var(--badge-locked-text); }
+.status-revoked   { background: var(--badge-locked-bg);    color: var(--badge-locked-text); text-decoration: line-through; }
+.status-protected { background: var(--badge-bonded-bg);    color: var(--badge-bonded-text); }
+.status-policy    { background: var(--badge-bonded-bg);    color: var(--badge-bonded-text); }
+
+/* Duties a permission carries. Administration and transactions never share
+   a role, so their two colours never sit on one role's list. */
+.status-administer { background: var(--badge-bonded-bg);   color: var(--badge-bonded-text); }
+.status-transact   { background: var(--badge-held-bg);     color: var(--badge-held-text); }
+.status-configure  { background: var(--badge-progress-bg); color: var(--badge-progress-text); }
+.status-read       { background: var(--badge-locked-bg);   color: var(--badge-locked-text); }
 
 .stock-pill {
   display: inline-grid; place-items: center;
@@ -396,6 +409,37 @@ th.num, td.num { text-align: right; }
 .audit-arrow  { color: var(--color-muted); }
 .audit-actor  { color: var(--color-muted); font-size: .78rem; margin-top: 8px; }
 .audit-actor strong { color: var(--color-heading); }
+.audit-reason { color: var(--color-text); font-size: .8rem; margin-top: 6px; }
+
+/* ---- Access administration ----------------------------------------------
+   A temporary password is shown once. Monospaced and large, because it is
+   read out or copied by hand; select-all so one click takes all of it. */
+.secret-box {
+  border: 1px solid var(--color-warning);
+  border-left-width: 4px;
+  background: var(--color-warning-light);
+  color: var(--badge-held-text);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+}
+.secret-value {
+  display: inline-block;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 1.35rem; font-weight: 600; letter-spacing: 1px;
+  color: var(--color-heading); background: var(--color-card);
+  border: 1px dashed var(--color-control-border); border-radius: var(--radius-sm);
+  padding: 4px 12px; user-select: all;
+}
+
+.perm-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--color-divider); }
+.perm-row:last-child { border-bottom: 0; }
+.perm-code { font-family: var(--font-mono); font-size: .8rem; color: var(--color-heading); }
+.perm-desc { font-size: .8rem; color: var(--color-muted); }
+
+/* An action that asks for a reason opens in place, without script. */
+.inline-action > summary { list-style: none; cursor: pointer; display: inline-block; }
+.inline-action > summary::-webkit-details-marker { display: none; }
+.inline-action[open] > summary { margin-bottom: 8px; }
 
 /* ---- Login ------------------------------------------------------------- */
 .login-shell {

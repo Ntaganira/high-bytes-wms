@@ -11,15 +11,32 @@ package heritier.ntaganira.highbytes.wms.config;
  * </pre>
  */
 
+import heritier.ntaganira.highbytes.wms.common.web.ErrorPages;
+import heritier.ntaganira.highbytes.wms.security.AccountStateFilter;
 import heritier.ntaganira.highbytes.wms.security.AppUserDetailsService;
+import heritier.ntaganira.highbytes.wms.security.SessionAccess;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.AccessDeniedHandlerImpl;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.authentication.ExceptionMappingAuthenticationFailureHandler;
+import org.springframework.security.web.context.DelegatingSecurityContextRepository;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CsrfException;
+import org.springframework.security.web.session.HttpSessionEventPublisher;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+
+import java.util.Map;
 
 /**
  * Session-based authentication.
@@ -35,19 +52,42 @@ import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    /** Holding any one of these lets a user read some kind of document. */
+    private static final String[] DOCUMENT_VIEW = {
+            "receiving.view", "dispatch.view", "transfer.view", "cutting.view",
+            "damage.view", "count.view", "ticket.view"
+    };
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12);
     }
 
+    /** Where the signed-in user is kept between requests. Shared with SessionAccess. */
+    @Bean
+    public SecurityContextRepository securityContextRepository() {
+        return new DelegatingSecurityContextRepository(
+                new RequestAttributeSecurityContextRepository(),
+                new HttpSessionSecurityContextRepository());
+    }
+
+    /** Tells the session registry when a session ends, so it counts only live ones. */
+    @Bean
+    public HttpSessionEventPublisher httpSessionEventPublisher() {
+        return new HttpSessionEventPublisher();
+    }
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http,
-                                           AppUserDetailsService userDetailsService) throws Exception {
+                                           AppUserDetailsService userDetailsService,
+                                           SecurityContextRepository contexts,
+                                           SessionAccess sessions,
+                                           JdbcClient jdbc) throws Exception {
         http
             .userDetailsService(userDetailsService)
 
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/css/**", "/js/**", "/webjars/**", "/favicon.ico").permitAll()
+                .requestMatchers("/css/**", "/js/**", "/webjars/**", "/favicon.ico", "/favicon.svg").permitAll()
                 .requestMatchers("/login", "/error").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
 
@@ -57,21 +97,38 @@ public class SecurityConfig {
                 .requestMatchers("/admin/branches/**")  .hasAuthority("admin.branches")
                 .requestMatchers("/admin/audit/**")     .hasAuthority("audit.view")
 
-                .requestMatchers("/receiving/**")  .hasAuthority("receiving.view")
-                .requestMatchers("/dispatch/**")   .hasAuthority("dispatch.view")
-                .requestMatchers("/transfers/**")  .hasAuthority("transfer.view")
-                .requestMatchers("/cutting/**")    .hasAuthority("cutting.view")
-                .requestMatchers("/damage/**")     .hasAuthority("damage.view")
-                .requestMatchers("/counts/**")     .hasAuthority("count.view")
-                .requestMatchers("/stock/**")      .hasAuthority("stock.view")
+                .requestMatchers("/receiving/**")      .hasAuthority("receiving.view")
+                .requestMatchers("/dispatch/**")       .hasAuthority("dispatch.view")
+                .requestMatchers("/delivery-notes/**") .hasAuthority("dispatch.view")
+                .requestMatchers("/transfers/**")      .hasAuthority("transfer.view")
+                .requestMatchers("/cutting/**")        .hasAuthority("cutting.view")
+                .requestMatchers("/damage/**")         .hasAuthority("damage.view")
+                .requestMatchers("/tickets/**")        .hasAuthority("ticket.view")
+                .requestMatchers("/counts/**")         .hasAuthority("count.view")
+                .requestMatchers("/variances/**")      .hasAuthority("count.view")
+                .requestMatchers("/stock/**")          .hasAuthority("stock.view")
+                .requestMatchers("/daily-close/**")    .hasAuthority("close.view")
+                .requestMatchers("/reports/**")        .hasAuthority("report.view")
 
+                // Documents and approvals span every document type, so the
+                // gate is "can read at least one". Which documents a user may
+                // open is for the document service to decide, per type.
+                .requestMatchers("/documents/**", "/approvals/**").hasAnyAuthority(DOCUMENT_VIEW)
+
+                // /profile/** is everyone's own account: signed in is enough.
                 .anyRequest().authenticated())
+
+            .securityContext(context -> context.securityContextRepository(contexts))
+
+            // Before authorization, so a revoked right is already gone when
+            // this request is judged, and a deactivated account never is.
+            .addFilterBefore(new AccountStateFilter(jdbc, sessions), AuthorizationFilter.class)
 
             .formLogin(form -> form
                 .loginPage("/login")
                 .loginProcessingUrl("/login")
                 .defaultSuccessUrl("/", false)
-                .failureUrl("/login?error")
+                .failureHandler(signInFailure())
                 .permitAll())
 
             .logout(logout -> logout
@@ -84,11 +141,36 @@ public class SecurityConfig {
                 .sessionFixation(fixation -> fixation.migrateSession())
                 .maximumSessions(3))
 
+            .exceptionHandling(errors -> errors.accessDeniedHandler(accessDenied()))
+
             // CSRF stays on. Every mutating request carries the token —
             // forms through the hidden field, htmx through the header set
             // in app.js.
             .csrf(csrf -> {});
 
         return http.build();
+    }
+
+    /** A locked account is told so; every other failure reads the same, so usernames cannot be probed. */
+    private static ExceptionMappingAuthenticationFailureHandler signInFailure() {
+        var failure = new ExceptionMappingAuthenticationFailureHandler();
+        failure.setDefaultFailureUrl("/login?error");
+        failure.setExceptionMappings(Map.of(LockedException.class.getName(), "/login?locked"));
+        return failure;
+    }
+
+    /**
+     * A 403. A missing or stale CSRF token is flagged first, so the error
+     * page can say the form expired rather than tell someone who holds the
+     * right that they lack it.
+     */
+    private static AccessDeniedHandler accessDenied() {
+        var standard = new AccessDeniedHandlerImpl();
+        return (request, response, denied) -> {
+            if (denied instanceof CsrfException) {
+                request.setAttribute(ErrorPages.FORM_EXPIRED, Boolean.TRUE);
+            }
+            standard.handle(request, response, denied);
+        };
     }
 }

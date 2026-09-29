@@ -41,8 +41,23 @@ else.
 7. **The audit log is append-only**, with actor name, username, role and
    branch captured as text at write time. Never resolve those by join at
    read time: renaming a role must not rewrite history.
-8. **Whoever manages access holds no transactional rights.** The `admin`
-   account cannot post, approve or release anything. That is deliberate.
+8. **Whoever manages access takes no part in operations.** The `admin`
+   account cannot post, approve, release or edit master data. That is
+   deliberate. V9 enforces it for every role, including ones created at
+   runtime: nobody holds an `admin.*` permission over overlapping dates with
+   a transactional or master-data permission, or with a role that signs an
+   approval step, and no role carries both (`access_conflict()`).
+9. **Access is history, and checked when granted.** A role assignment is
+   revoked, never edited, deleted or backdated, and names who granted and
+   who revoked it. Nobody grants or revokes their own roles. A grant that
+   breaks a `sod_rule` BLOCK pair or invariant 8 is refused at commit,
+   whatever code path made it. Segregation follows the rights, not the
+   name: a runtime role carrying a right only one side of a pair has counts
+   as that side. The Internal Controller (an assurance role) holds no
+   transactional or master-data right beyond its own. A transactional right
+   no policy role carries cannot be handed out at runtime: the rules cannot
+   see it. What the policy's roles permit, their names, the `sod_rule` rows
+   and the permission catalogue change by migration only (V9, V10).
 
 ## The two approval chains
 
@@ -81,7 +96,11 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── audit/     AuditService, AuditSnapshot, AuditEntry, AuditAction
 │   └── web/       GlobalModelAdvice, LoginController
 ├── branch/
-├── security/      AppUserDetails, AppUserDetailsService
+├── security/      AppUserDetails, AccountStateFilter, SignInEvents, PasswordRules
+├── admin/
+│   ├── user/      users, role grants and revocations, password reset, unlock
+│   └── role/      roles, the permission matrix, segregation rules (read-only)
+├── profile/       My profile, change password (forced for temporary ones)
 ├── dashboard/
 ├── masterdata/
 │   ├── item/      item master, glass attributes
@@ -97,12 +116,24 @@ Schema for the unbuilt modules is already in place (V3, V4).
 
 - **Authorities are permission codes** (`dispatch.release`), never role
   names. Roles group permissions and are created at runtime.
+- **A role granted at one branch applies only there.** The authorities are
+  the permissions at the branch the user is working in. For a record that
+  belongs to another branch, check `CurrentUser.requireAt(permission,
+  branchId)` in the service, as `LocationService` does.
+- **Access changes apply on the user's next request.** `AccountStateFilter`
+  compares `security_stamp` and `session_epoch` with the session. V9
+  triggers restamp on any grant, revocation or role change; a new column
+  that changes what someone may do must restamp too.
 - `sec:authorize` in templates **hides**; `@PreAuthorize` on the service
   method **authorizes**. Always do both — a hidden button stops nobody
   holding a URL.
 - Deactivate, never delete, anything that has been transacted.
 - Every mutating service method writes an `AuditSnapshot` through
   `AuditService`. Unchanged fields are omitted from the diff automatically.
+  An access change (users, roles, passwords) uses `recordAccessChange`,
+  which joins the change's transaction: the change and its record commit
+  together or not at all. A refused access change is recorded as `REJECT`
+  with `record`, which survives the rollback.
 - Status chips come from `fragments/ui :: chip(status)`. Never hand-write
   chip markup — the palette rules die the moment it appears in twelve
   templates.
@@ -137,10 +168,48 @@ Schema for the unbuilt modules is already in place (V3, V4).
   is *reloaded*, not at startup, so a clean boot proves nothing.
 - **Never edit an applied migration.** Flyway compares checksums.
 - **The `admin` account cannot open `/items`.** That is invariant 8, not a
-  bug. Create a Warehouse Manager account for testing.
+  bug. Create a user under Administration → Users and grant it Warehouse
+  Manager. It must replace its temporary password at first sign-in, as must
+  the seeded `admin` (V6 sets `must_change_password`).
+- **Nobody edits a role they hold**, not even its name. With a single
+  administrator, the System Administrator role can only change through a
+  second administrator. That is the rule working.
+- **A role the policy defines is read-only on Roles & Permissions**: every
+  role V5 seeded (all protected since V10), any assurance role, and any
+  role named by a `sod_rule` or signing a step in any chain
+  (`role_is_policy_defined()`). Its permissions, name and description
+  change in a migration, which must say so first with
+  `SET LOCAL highbytes.migration = 'on';` — so must one that changes a
+  `sod_rule` row or a permission's code, module or action. The triggers
+  refuse those changes otherwise, and judge the result for every user at
+  commit (`access_conflict_anywhere()`), so a migration that makes someone's
+  roles conflict fails.
+- **Each document module's migration places its rights on the Board role
+  that owns them.** Until then a right such as `dispatch.release`,
+  `transfer.approve` or `ticket.create` is carried by no policy role, so no
+  role created at runtime may carry it either. Placing it is what lets the
+  segregation rules judge who else may hold it. The chain signers seeded
+  with no permissions (Assistant WH Manager, Head of Inventory, the 2027
+  roles) get theirs the same way. Give a right to the role whose step it
+  signs, and ask the client when the chain does not say.
+- **The access checks run at COMMIT** (deferred constraint triggers). A
+  service asks `access_conflict()` first so the refusal carries its reason;
+  a psql test must `SET CONSTRAINTS ALL IMMEDIATE`, as `verify-controls.sql`
+  does.
 - **Thickness is locked once stock has moved** against an item. Past
   dispatches record it as verified at the gate.
 - **A location holding stock cannot change branch or type.**
+- **Cast every nullable parameter tested with `IS NULL`** (`:q::text`,
+  `:id::uuid`). PostgreSQL cannot type a bare NULL and fails the whole
+  query, which took the item list down whenever the search box was empty.
+- **Never put `th:replace` on an element that also has `th:each` or
+  `th:if`.** Thymeleaf replaces first, so the loop variable is null and the
+  condition is ignored. Put the loop or condition on a wrapping `th:block`.
+- **Outside a form's `th:object`, name the object in `#fields`:**
+  `#fields.hasErrors('${form}')`. There is no `hasGlobalErrors('form')`.
+- **Linked but unbuilt screens are listed in `ErrorPages.PLANNED`**, which
+  turns their 404 into a "not built yet" page. Remove a screen's entry when
+  you build it. A new top-level path also needs its rule in `SecurityConfig`.
 
 ## Running
 
@@ -172,7 +241,8 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 6. Returns & Damage — quarantine, write-off approval
 7. Counts + Variances — blind entry, adjustment tickets
 8. Daily Close
-9. Admin screens — users, roles, workflow editor
+9. Admin screens — ~~users, roles~~ done; workflow editor, branches and
+   the audit log viewer remain
 
 ## Open questions for the client
 

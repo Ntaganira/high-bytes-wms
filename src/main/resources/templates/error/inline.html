@@ -1,0 +1,8 @@
+<!-- A page failed after part of it had reached the browser. Tomcat includes
+     this into what was already sent, so it is one notice, not a page: no
+     html, no head, no layout. Chosen by ErrorPages. -->
+<div xmlns:th="http://www.thymeleaf.org" class="alert alert-danger my-3" role="alert">
+  <strong>This page did not finish loading.</strong>
+  Reload it. If it keeps failing, give the system administrator this reference:
+  <span class="mono" th:text="${path} + ' · ' + ${#dates.format(timestamp, 'yyyy-MM-dd HH:mm:ss')}">/items/… · 2026-09-29 21:40:00</span>
+</div>

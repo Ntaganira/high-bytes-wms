@@ -14,7 +14,7 @@ package heritier.ntaganira.highbytes.wms.common.web;
 import heritier.ntaganira.highbytes.wms.branch.BranchService;
 import heritier.ntaganira.highbytes.wms.branch.BranchView;
 import heritier.ntaganira.highbytes.wms.security.AppUserDetails;
-import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.ControllerAdvice;
@@ -22,7 +22,6 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Model attributes every page needs: which branch, which business date,
@@ -31,11 +30,16 @@ import java.util.UUID;
  * <p>The close state is on every screen deliberately. When a posting is
  * refused for being backdated, the user has already been looking at the
  * reason.
+ *
+ * <p>The branch comes from the signed-in user, whose permissions were
+ * loaded for it, so the screen and the rights always name the same branch.
+ * The switcher offers only the branches the user holds a role at.
  */
 @ControllerAdvice
 public class GlobalModelAdvice {
 
-    public static final String BRANCH_SESSION_KEY = "hb.currentBranchId";
+    /** The current branch, looked up once per request however many attributes need it. */
+    private static final String BRANCH_REQUEST_KEY = GlobalModelAdvice.class.getName() + ".branch";
 
     private static final String CLOSE_STATUS = """
             SELECT status FROM daily_close
@@ -66,16 +70,19 @@ public class GlobalModelAdvice {
 
     @ModelAttribute("availableBranches")
     public List<BranchView> availableBranches(@AuthenticationPrincipal AppUserDetails user) {
-        return user == null ? List.of() : branches.findAll();
+        if (user == null) return List.of();
+        return branches.findAll().stream()
+                .filter(b -> user.accessibleBranchIds().contains(b.id()))
+                .toList();
     }
 
     @ModelAttribute("currentBranch")
-    public BranchView currentBranch(@AuthenticationPrincipal AppUserDetails user, HttpSession session) {
+    public BranchView currentBranch(@AuthenticationPrincipal AppUserDetails user, HttpServletRequest request) {
         if (user == null) return null;
-        UUID chosen = (UUID) session.getAttribute(BRANCH_SESSION_KEY);
-        return branches.findById(chosen)
-                .or(() -> branches.defaultFor(user.homeBranchId()))
-                .orElse(null);
+        if (request.getAttribute(BRANCH_REQUEST_KEY) instanceof BranchView cached) return cached;
+        BranchView branch = branches.findById(user.branchId()).orElse(null);
+        if (branch != null) request.setAttribute(BRANCH_REQUEST_KEY, branch);
+        return branch;
     }
 
     @ModelAttribute("businessDate")
@@ -84,8 +91,8 @@ public class GlobalModelAdvice {
     }
 
     @ModelAttribute("dayLocked")
-    public boolean dayLocked(@AuthenticationPrincipal AppUserDetails user, HttpSession session) {
-        BranchView branch = currentBranch(user, session);
+    public boolean dayLocked(@AuthenticationPrincipal AppUserDetails user, HttpServletRequest request) {
+        BranchView branch = currentBranch(user, request);
         if (branch == null) return false;
         return jdbc.sql(CLOSE_STATUS)
                 .param("branchId", branch.id())
@@ -112,8 +119,8 @@ public class GlobalModelAdvice {
      * over top navigation.
      */
     @ModelAttribute("navCounts")
-    public NavCounts navCounts(@AuthenticationPrincipal AppUserDetails user, HttpSession session) {
-        BranchView branch = currentBranch(user, session);
+    public NavCounts navCounts(@AuthenticationPrincipal AppUserDetails user, HttpServletRequest request) {
+        BranchView branch = currentBranch(user, request);
         if (branch == null) return NavCounts.empty();
         return jdbc.sql(NAV_COUNTS)
                 .param("branchId", branch.id())

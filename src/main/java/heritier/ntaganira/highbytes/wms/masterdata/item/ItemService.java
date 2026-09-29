@@ -16,10 +16,12 @@ import heritier.ntaganira.highbytes.wms.common.audit.AuditAction;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditService;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditSnapshot;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 import java.math.BigDecimal;
 import java.sql.Types;
@@ -77,8 +79,10 @@ public class ItemService {
     public List<ItemRow> search(UUID branchId, String query, ProductType type,
                                 boolean includeInactive, boolean belowReorderOnly) {
 
+        // Every nullable parameter tested with IS NULL carries a cast: PostgreSQL
+        // cannot type a bare NULL and fails the whole query.
         String sql = SELECT + """
-             WHERE (:query IS NULL OR i.item_code ILIKE :like OR i.description ILIKE :like)
+             WHERE (:query::text IS NULL OR i.item_code ILIKE :like OR i.description ILIKE :like)
                AND (:type::text IS NULL OR i.product_type = :type)
                AND (:includeInactive OR i.is_active)
              ORDER BY i.is_active DESC, i.item_code
@@ -113,6 +117,14 @@ public class ItemService {
                 .single();
     }
 
+    public boolean exists(UUID id) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM item WHERE id = :id)")
+                .param("id", id, Types.OTHER)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /** The item as its form holds it; a 404 when no item has that id. */
     public ItemForm formFor(UUID id) {
         return jdbc.sql("""
                 SELECT id, item_code, description, category_id, product_type, colour,
@@ -138,7 +150,8 @@ public class ItemService {
                     f.setActive(rs.getBoolean("is_active"));
                     return f;
                 })
-                .single();
+                .optional()
+                .orElseThrow(() -> new ItemNotFoundException(id));
     }
 
     // ---- writes ----------------------------------------------------------
@@ -261,10 +274,14 @@ public class ItemService {
         snap.field("Item code",       before == null ? null : before.getItemCode(),      after.getItemCode());
         snap.field("Description",     before == null ? null : before.getDescription(),   after.getDescription());
         snap.field("Product type",    before == null ? null : before.getProductType(),   after.getProductType());
+        snap.field("Category",        before == null ? null : categoryName(before.getCategoryId()),
+                                      categoryName(after.getCategoryId()));
         snap.field("Colour",          before == null ? null : before.getColour(),        after.getColour());
         snap.field("Thickness (mm)",  before == null ? null : before.getThicknessMm(),   after.getThicknessMm());
         snap.field("Width (mm)",      before == null ? null : before.getWidthMm(),       after.getWidthMm());
         snap.field("Height (mm)",     before == null ? null : before.getHeightMm(),      after.getHeightMm());
+        snap.field("Base unit",       before == null ? null : uomCode(before.getBaseUomId()),
+                                      uomCode(after.getBaseUomId()));
         snap.field("Reorder level",   before == null ? null : before.getReorderLevel(),  after.getReorderLevel());
         snap.field("Maximum level",   before == null ? null : before.getMaxStockLevel(), after.getMaxStockLevel());
         snap.field("Active",          before == null ? null : before.isActive(),         after.isActive());
@@ -273,6 +290,19 @@ public class ItemService {
 
     private String label(ItemForm form) {
         return "Item · " + form.getItemCode();
+    }
+
+    /** Units and categories are audited by what they are called, not by id. */
+    private String uomCode(UUID id) {
+        if (id == null) return null;
+        return jdbc.sql("SELECT code FROM uom WHERE id = :id")
+                .param("id", id, Types.OTHER).query(String.class).optional().orElse(null);
+    }
+
+    private String categoryName(UUID id) {
+        if (id == null) return null;
+        return jdbc.sql("SELECT name FROM item_category WHERE id = :id")
+                .param("id", id, Types.OTHER).query(String.class).optional().orElse(null);
     }
 
     private static String blankToNull(String value) {
@@ -301,6 +331,13 @@ public class ItemService {
     }
 
     // ---- failures the user should see, not a stack trace -------------------
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public static class ItemNotFoundException extends RuntimeException {
+        public ItemNotFoundException(UUID id) {
+            super("No item with id " + id);
+        }
+    }
 
     public static class ItemCodeTakenException extends RuntimeException {
         public ItemCodeTakenException(String code) {

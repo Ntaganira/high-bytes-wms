@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign in · HIGH BYTES WMS</title>
+  <link rel="icon" type="image/svg+xml" th:href="@{/favicon.svg}">
   <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
   <link rel="stylesheet" th:href="@{/webjars/bootstrap-icons/font/bootstrap-icons.min.css}">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap">
@@ -32,7 +33,13 @@
     </div>
     <div th:if="${param.locked}" class="alert alert-warning py-2 small" role="alert">
       <i class="bi bi-lock me-1"></i>
-      This account is locked. Ask an administrator to unlock it.
+      This account is locked after too many failed sign-ins. Try again in
+      <span th:text="${lockoutMinutes}">15</span> minutes, or ask an administrator to unlock it.
+    </div>
+    <div th:if="${param.ended}" class="alert alert-info py-2 small" role="alert">
+      <i class="bi bi-info-circle me-1"></i>
+      Your session was ended because your account changed: a new password, or the
+      account was deactivated. Sign in again if you can.
     </div>
     <div th:if="${param.logout}" class="alert alert-success py-2 small" role="alert">
       <i class="bi bi-check-circle me-1"></i>

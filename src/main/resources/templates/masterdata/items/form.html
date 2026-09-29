@@ -11,11 +11,13 @@
 
   <div class="mb-4">
     <p class="eyebrow">MASTER DATA · ITEM</p>
-    <h1 class="page-title" th:text="${form.new} ? 'New item' : 'Edit ' + ${form.itemCode}">New item</h1>
+    <h1 class="page-title" th:text="${form.new} ? 'New item' : 'Edit ' + (${storedCode} ?: ${form.itemCode})">New item</h1>
   </div>
 
-  <div th:if="${#fields.hasGlobalErrors('form')}" class="alert alert-danger" role="alert">
-    <p th:each="e : ${#fields.globalErrors('form')}" th:text="${e}" class="mb-0"></p>
+  <!-- Errors that belong to no single field. This sits outside the form's
+       th:object, so the path names the object itself: '${form}'. -->
+  <div th:if="${#fields.hasErrors('${form}')}" class="alert alert-danger" role="alert">
+    <p th:each="e : ${#fields.errors('${form}')}" th:text="${e}" class="mb-0"></p>
   </div>
 
   <!-- An item that has moved cannot have its measured specification rewritten. -->

@@ -18,11 +18,16 @@
       th:classappend="'status-' + ${#strings.toLowerCase(status)}"
       th:with="icon=${
         status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' or status == 'ACTIVE' ? 'bi-check-circle-fill' :
-        status == 'HELD'      or status == 'PENDING'  ? 'bi-clock-fill' :
+        status == 'HELD'      or status == 'PENDING'  or status == 'SCHEDULED' ? 'bi-clock-fill' :
         status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' ? 'bi-exclamation-octagon-fill' :
         status == 'TRANSIT'   or status == 'PROGRESS' ? 'bi-arrow-repeat' :
-        status == 'BONDED'    ? 'bi-shield-lock-fill' :
-        status == 'CANCELLED' ? 'bi-x-circle-fill' :
+        status == 'BONDED'    or status == 'PROTECTED' or status == 'POLICY' ? 'bi-shield-lock-fill' :
+        status == 'CANCELLED' or status == 'REVOKED'  ? 'bi-x-circle-fill' :
+        status == 'INACTIVE'  or status == 'EXPIRED'  ? 'bi-dash-circle-fill' :
+        status == 'ADMINISTER' ? 'bi-person-gear' :
+        status == 'TRANSACT'  ? 'bi-pen-fill' :
+        status == 'CONFIGURE' ? 'bi-sliders' :
+        status == 'READ'      ? 'bi-eye-fill' :
         status == 'LOCKED'    ? 'bi-lock-fill' : 'bi-circle-fill'}">
   <i class="bi" th:classappend="${icon}" aria-hidden="true"></i>
   <span th:text="${status}">STATUS</span>
@@ -37,7 +42,7 @@
   <div class="d-flex align-items-center gap-3">
     <span class="serial fs-6 fw-semibold" th:text="${doc.serialNo}">GRN-KGL-2026-0412</span>
     <span th:replace="~{fragments/ui :: chip(${doc.status})}"></span>
-    <span th:replace="~{fragments/ui :: chip('BONDED')}" th:if="${doc.bonded}"></span>
+    <th:block th:if="${doc.bonded}"><span th:replace="~{fragments/ui :: chip('BONDED')}"></span></th:block>
   </div>
   <div class="text-body-secondary small ms-auto">
     <span th:text="${doc.branchName}">Gahanga, Kigali</span>
@@ -110,7 +115,7 @@
           th:text="' — ' + ${#strings.toLowerCase(entry.action)} + ' ' + ${#temporals.format(entry.occurredAt, 'dd MMMM yyyy HH:mm')} + ' CAT'"></span>
   </div>
 
-  <table class="audit-diff mt-2">
+  <table class="audit-diff mt-2" th:unless="${#lists.isEmpty(entry.changes)}">
     <thead>
       <tr><th scope="col">Field</th><th scope="col">Before</th><th scope="col"></th><th scope="col">After</th></tr>
     </thead>
@@ -125,15 +130,51 @@
     </tbody>
   </table>
 
+  <!-- Why it was done, when the person doing it had to say. -->
+  <div class="audit-reason" th:if="${entry.reason}">
+    <span class="text-body-secondary">Reason:</span> <span th:text="${entry.reason}">Left the company</span>
+  </div>
+
   <div class="audit-actor">
     Changed by <strong th:text="${entry.actorName}">Jean Bosco M.</strong>
-    (<span th:text="${entry.actorUsername}">jbosco</span>,
-     <span th:text="${entry.actorRole}">System Administrator</span>,
-     <span th:text="${entry.branchName}">Kigali</span>)
+    (<span th:text="${entry.actorUsername}">jbosco</span><th:block th:if="${entry.actorRole}">,
+     <span th:text="${entry.actorRole}">System Administrator</span></th:block><th:block th:if="${entry.branchName}">,
+     <span th:text="${entry.branchName}">Kigali</span></th:block>)
     <th:block th:if="${entry.clientAddress}">
       from <span th:text="${entry.clientAddress}">10.4.2.18</span>
     </th:block>
   </div>
+</div>
+
+
+<!-- ===================================================================
+     Sign-ins of one account, newest first: who got in, who was refused,
+     and from where. The holder reads it on My profile, where a sign-in
+     they did not make is theirs to notice.
+     =================================================================== -->
+<div th:fragment="signInList(signIns)">
+  <div class="table-responsive" th:unless="${#lists.isEmpty(signIns)}">
+    <table class="table hb-table compact mb-0">
+      <thead><tr><th scope="col">When</th><th scope="col">What</th><th scope="col">From</th></tr></thead>
+      <tbody>
+        <tr th:each="s : ${signIns}">
+          <td class="mono" th:text="${#temporals.format(s.occurredAt(), 'dd MMM HH:mm')}">29 Sep 08:12</td>
+          <td class="text-wrap">
+            <span th:switch="${s.action()}">
+              <span th:case="'LOGIN'">Signed in</span>
+              <span th:case="'LOGOUT'">Signed out</span>
+              <span th:case="*" class="text-danger">Refused</span>
+            </span>
+            <span class="d-block small text-body-secondary" th:if="${s.reason()}" th:text="${s.reason()}">Wrong password</span>
+          </td>
+          <td class="mono small" th:text="${s.clientAddress()} ?: '—'">10.4.2.18</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <th:block th:if="${#lists.isEmpty(signIns)}">
+    <div th:replace="~{fragments/ui :: emptyState('bi-door-closed', 'No sign-ins yet', 'Attempts to sign in to this account will be listed here.')}"></div>
+  </th:block>
 </div>
 
 

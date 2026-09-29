@@ -89,8 +89,7 @@
             <td class="num text-body-secondary"
                 th:text="${i.reorderLevel() != null} ? ${#numbers.formatDecimal(i.reorderLevel(), 0, 'COMMA', 0, 'POINT')} : '—'">60</td>
             <td>
-              <span th:if="${i.active()}" th:replace="~{fragments/ui :: chip('ACTIVE')}"></span>
-              <span th:unless="${i.active()}" th:replace="~{fragments/ui :: chip('LOCKED')}"></span>
+              <span th:replace="~{fragments/ui :: chip(${i.active()} ? 'ACTIVE' : 'INACTIVE')}"></span>
             </td>
           </tr>
           <tr th:if="${#lists.isEmpty(items)}">

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>My profile</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">MY PROFILE</p>
+      <h1 class="page-title" th:text="${me.fullName()}">Jeanne Uwase</h1>
+      <p class="page-sub"><span class="mono" th:text="${me.username()}">juwase</span></p>
+    </div>
+    <a th:href="@{/profile/password}" class="btn btn-primary-action">
+      <i class="bi bi-key"></i> Change password
+    </a>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-xl-5">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-person-badge" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Your account</h2>
+              <p class="card-sub">Only an administrator can change these details, and not their own</p>
+            </div>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-body-secondary fw-normal">Email</dt>
+          <dd class="col-7" th:text="${me.email()} ?: '—'">juwase@highbytes.rw</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Phone</dt>
+          <dd class="col-7 mono" th:text="${me.phone()} ?: '—'">+250 788 000 000</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Home branch</dt>
+          <dd class="col-7" th:text="${me.homeBranchName()} ?: '—'">Gahanga</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Working at</dt>
+          <dd class="col-7" th:text="${currentBranch?.name} ?: '—'">Gahanga</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Password set</dt>
+          <dd class="col-7 mono"
+              th:text="${me.passwordChangedAt() != null} ? ${#temporals.format(me.passwordChangedAt(), 'dd MMM yyyy HH:mm')} : '—'">29 Sep 2026</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-7">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-shield-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Your roles</h2>
+              <p class="card-sub">In force, or due to start</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive" th:unless="${#lists.isEmpty(assignments)}">
+          <table class="table hb-table mb-0">
+            <thead><tr><th scope="col">Role</th><th scope="col">Where</th><th scope="col">Terms</th><th scope="col">State</th></tr></thead>
+            <tbody>
+              <tr th:each="a : ${assignments}">
+                <td th:text="${a.roleName()}">Finance Department</td>
+                <td th:text="${a.scope()}">All branches</td>
+                <td class="small text-wrap" th:text="${a.terms()}">From 29 Sep 2026</td>
+                <td><span th:replace="~{fragments/ui :: chip(${a.state()})}"></span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <th:block th:if="${#lists.isEmpty(assignments)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-shield', 'No role yet', 'An administrator grants roles. Until then you can sign in but do nothing.')}"></div>
+        </th:block>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">What you may do today</h2>
+              <p class="card-sub">A role granted at one branch applies only there</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive" th:unless="${#lists.isEmpty(held)}">
+          <table class="table hb-table mb-0">
+            <thead><tr><th scope="col">Permission</th><th scope="col">What it allows</th><th scope="col">Where</th></tr></thead>
+            <tbody>
+              <tr th:each="p : ${held}">
+                <td class="mono" th:text="${p.code()}">dispatch.approve</td>
+                <td class="text-wrap" th:text="${p.description()}">Approve a delivery authorization</td>
+                <td th:text="${p.scope()}">All branches</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <th:block th:if="${#lists.isEmpty(held)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-list-check', 'Nothing yet', 'No role in force grants you a permission today.')}"></div>
+        </th:block>
+      </section>
+    </div>
+
+    <!-- The holder is the one person who would notice a sign-in, or a
+         password change, that they did not make. -->
+    <div class="col-12 col-xl-5">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-door-open" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Your recent sign-ins</h2>
+              <p class="card-sub">One you did not make means someone else knows your password: change it, and tell the Internal Controller</p>
+            </div>
+          </div>
+        </div>
+        <div th:replace="~{fragments/ui :: signInList(${signIns})}"></div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-7">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Changes to your account</h2>
+              <p class="card-sub">Roles, passwords and details, newest first, and who made each change</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Changes to your account will be listed here.')}"></div>
+        </th:block>
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

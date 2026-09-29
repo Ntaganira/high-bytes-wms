@@ -18,6 +18,10 @@
 -- ---------------------------------------------------------------------
 BEGIN;
 
+-- The access checks normally run at commit. Here each check must fire
+-- inside the block that provokes it.
+SET CONSTRAINTS ALL IMMEDIATE;
+
 INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
 VALUES ('_verify', 'Verification Fixture', 'x', TRUE, FALSE);
 
@@ -186,7 +190,7 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------
--- 9. Segregation: whoever manages access holds no transactional rights
+-- 9. Segregation: whoever manages access holds nothing operational
 -- ---------------------------------------------------------------------
 DO $$
 DECLARE n INT;
@@ -196,11 +200,11 @@ BEGIN
     JOIN role_permission rp ON rp.role_id = r.id
     JOIN permission p ON p.id = rp.permission_id
    WHERE r.code = 'SYS_ADMIN'
-     AND p.action IN ('POST','APPROVE','RELEASE','CREATE','VERIFY');
+     AND p.duty IN ('TRANSACT', 'CONFIGURE');
   IF n = 0 THEN
-    RAISE NOTICE 'ok    9   the administrator role holds no transactional rights';
+    RAISE NOTICE 'ok    9   the administrator role holds nothing operational';
   ELSE
-    RAISE WARNING 'FAIL  9   SYS_ADMIN holds % transactional permissions', n;
+    RAISE WARNING 'FAIL  9   SYS_ADMIN holds % operational permissions', n;
   END IF;
 END $$;
 
@@ -212,6 +216,378 @@ DO $$ BEGIN
   SELECT '_VERIFY-NOTHICK', 'No thickness', 'GLASS', id FROM uom WHERE code = 'SHEET';
   RAISE WARNING 'FAIL 10   glass without a thickness was accepted';
 EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   10   glass must carry a thickness';
+END $$;
+
+-- ---------------------------------------------------------------------
+-- Access fixtures: one person per check, so no check sees another's
+-- grants. Every grant names the fixture as the one who made it.
+-- ---------------------------------------------------------------------
+INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
+VALUES ('_verify_sod',    'Verification Segregation',   'x', TRUE, FALSE),
+       ('_verify_admin',  'Verification Admin',         'x', TRUE, FALSE),
+       ('_verify_signer', 'Verification Signer',        'x', TRUE, FALSE),
+       ('_verify_md',     'Verification Master Data',   'x', TRUE, FALSE),
+       ('_verify_move',   'Verification Job Change',    'x', TRUE, FALSE),
+       ('_verify_hist',   'Verification History',       'x', TRUE, FALSE),
+       ('_verify_self',   'Verification Self',          'x', TRUE, FALSE),
+       ('_verify_new',    'Verification New Grants',    'x', TRUE, FALSE),
+       ('_verify_split',  'Verification Split Rights',  'x', TRUE, FALSE),
+       ('_verify_copy',   'Verification Copied Rights', 'x', TRUE, FALSE),
+       ('_verify_store',  'Verification Store Keeper',  'x', TRUE, FALSE),
+       ('_verify_ic1',    'Verification Controller 1',  'x', TRUE, FALSE),
+       ('_verify_ic2',    'Verification Controller 2',  'x', TRUE, FALSE),
+       ('_verify_rv',     'Verification Verifier',      'x', TRUE, FALSE),
+       ('_verify_mig',    'Verification Migration',     'x', TRUE, FALSE);
+
+-- Roles made at runtime: nothing in the policy names them.
+INSERT INTO role (code, name) VALUES
+       ('_VERIFY_APPROVER', 'Verification Approver'),
+       ('_VERIFY_MIXED',    'Verification Mixed'),
+       ('_VERIFY_ITEMS',    'Verification Item Keeper'),
+       ('_VERIFY_BOTH',     'Verification Both Sides'),
+       ('_VERIFY_ASSURE',   'Verification Assurance Copy'),
+       ('_VERIFY_FINANCE',  'Verification Finance Copy'),
+       ('_VERIFY_STORE',    'Verification Store Keeper'),
+       ('_VERIFY_CLOSER',   'Verification Day Closer'),
+       ('_VERIFY_DVERIFY',  'Verification Dispatch Verifier');
+
+INSERT INTO role_permission (role_id, permission_id)
+SELECT r.id, p.id
+  FROM role r
+  JOIN permission p ON (r.code, p.code) IN (
+       ('_VERIFY_APPROVER', 'dispatch.approve'),  -- Finance's
+       ('_VERIFY_MIXED',    'admin.users'),
+       ('_VERIFY_MIXED',    'stock.view'),
+       ('_VERIFY_ITEMS',    'item.manage'),
+       ('_VERIFY_BOTH',     'count.verify'),      -- the Internal Controller's, not Finance's
+       ('_VERIFY_ASSURE',   'count.verify'),
+       ('_VERIFY_FINANCE',  'count.approve'),     -- Finance's, not the Internal Controller's
+       ('_VERIFY_STORE',    'receiving.create'),  -- the Warehouse Manager's
+       ('_VERIFY_STORE',    'count.enter'),
+       ('_VERIFY_CLOSER',   'close.lock'),        -- the Managing Director's
+       ('_VERIFY_DVERIFY',  'dispatch.verify'));  -- the Warehouse Manager's and the Internal Controller's
+
+-- A grant of a role to a user, made by the verification fixture.
+CREATE FUNCTION pg_temp.grant_role(p_user TEXT, p_role TEXT,
+                                   p_from DATE DEFAULT CURRENT_DATE, p_to DATE DEFAULT NULL)
+RETURNS UUID AS $$
+    INSERT INTO user_role (user_id, role_id, valid_from, valid_to, assigned_by)
+    SELECT u.id, r.id, p_from, p_to, g.id
+      FROM app_user u, role r, app_user g
+     WHERE u.username = p_user AND r.code = p_role AND g.username = '_verify'
+    RETURNING id;
+$$ LANGUAGE sql;
+
+-- ---------------------------------------------------------------------
+-- 11. Segregation of duties: a forbidden pair is refused on one person
+-- ---------------------------------------------------------------------
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_sod', 'WH_MANAGER');
+  PERFORM pg_temp.grant_role('_verify_sod', 'INTERNAL_CTRL');
+  RAISE WARNING 'FAIL 11   one person was given Warehouse Manager and Internal Controller';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   11   a segregation pair is refused on one person';
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 12. Whoever administers access takes no part in operations, for roles
+--     made at runtime too, which no segregation rule names
+-- ---------------------------------------------------------------------
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_admin', 'SYS_ADMIN');
+  PERFORM pg_temp.grant_role('_verify_admin', '_VERIFY_APPROVER');
+  RAISE WARNING 'FAIL 12a  an administrator was also given an approval right';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12a  an administrator cannot also hold a transactional role';
+END $$;
+
+DO $$ BEGIN
+  INSERT INTO role_permission (role_id, permission_id)
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_MIXED' AND p.code = 'dispatch.approve';
+  RAISE WARNING 'FAIL 12b  a role was given administration and an approval right';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12b  a role cannot carry administration and transactions';
+END $$;
+
+-- An UPDATE reaches the same place as an INSERT, and is judged the same.
+DO $$ BEGIN
+  UPDATE role_permission SET permission_id = (SELECT id FROM permission WHERE code = 'dispatch.approve')
+   WHERE role_id = (SELECT id FROM role WHERE code = '_VERIFY_MIXED')
+     AND permission_id = (SELECT id FROM permission WHERE code = 'stock.view');
+  RAISE WARNING 'FAIL 12c  an UPDATE gave a role administration and an approval right';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12c  rewriting a permission is judged like adding one';
+END $$;
+
+-- A role that signs an approval step is operational without a single permission.
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_signer', 'SYS_ADMIN');
+  PERFORM pg_temp.grant_role('_verify_signer', 'INV_TX_OFFICER');
+  RAISE WARNING 'FAIL 12d  an administrator was also given a role that signs approval steps';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12d  an administrator cannot also sign approval steps';
+END $$;
+
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_md', 'SYS_ADMIN');
+  PERFORM pg_temp.grant_role('_verify_md', '_VERIFY_ITEMS');
+  RAISE WARNING 'FAIL 12e  an administrator was also given master-data rights';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12e  an administrator cannot also manage master data';
+END $$;
+
+-- A role that administers cannot be made a signer of an approval chain.
+DO $$ BEGIN
+  INSERT INTO workflow_step (workflow_definition_id, sequence_no, required_role_id, action_label)
+  SELECT wd.id, 99, r.id, 'APPROVE'
+    FROM workflow_definition wd
+    JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'TRF'
+    JOIN role r ON r.code = '_VERIFY_MIXED'
+   ORDER BY wd.effective_from DESC
+   LIMIT 1;
+  RAISE WARNING 'FAIL 12g  an administration role was made to sign an approval step';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12g  an administration role cannot sign approval steps';
+END $$;
+
+-- A job change is not a conflict: administration ending before the
+-- transactional role begins is allowed.
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_move', 'SYS_ADMIN', CURRENT_DATE, CURRENT_DATE + 30);
+  PERFORM pg_temp.grant_role('_verify_move', 'FINANCE',   CURRENT_DATE + 31);
+  RAISE NOTICE 'ok   12f  administration may be followed by a transactional role';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE WARNING 'FAIL 12f  a job change was refused as a conflict';
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 13. A role assignment is history: revoked, never rewritten or deleted
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE a UUID; g UUID;
+BEGIN
+  a := pg_temp.grant_role('_verify_hist', 'SALES');
+  SELECT id INTO g FROM app_user WHERE username = '_verify';
+
+  BEGIN
+    DELETE FROM user_role WHERE id = a;
+    RAISE WARNING 'FAIL 13a  a role assignment was deleted';
+  EXCEPTION WHEN others THEN RAISE NOTICE 'ok   13a  role assignments cannot be deleted';
+  END;
+
+  BEGIN
+    UPDATE user_role SET valid_from = CURRENT_DATE - 365 WHERE id = a;
+    RAISE WARNING 'FAIL 13b  a role assignment was backdated';
+  EXCEPTION WHEN others THEN RAISE NOTICE 'ok   13b  role assignments cannot be rewritten';
+  END;
+
+  BEGIN
+    UPDATE user_role SET id = gen_random_uuid() WHERE id = a;
+    RAISE WARNING 'FAIL 13c  a role assignment was given another identity';
+  EXCEPTION WHEN others THEN RAISE NOTICE 'ok   13c  a role assignment keeps its identity';
+  END;
+
+  BEGIN
+    UPDATE user_role SET revoked_at = now(), revoke_reason = 'Verification' WHERE id = a;
+    RAISE WARNING 'FAIL 13d  a revocation naming nobody was accepted';
+  EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   13d  a revocation names who made it';
+  END;
+
+  BEGIN
+    UPDATE user_role SET revoked_at = now(), revoked_by = g, revoke_reason = '  ' WHERE id = a;
+    RAISE WARNING 'FAIL 13e  a revocation without a reason was accepted';
+  EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   13e  a revocation says why';
+  END;
+
+  UPDATE user_role SET revoked_at = now(), revoked_by = g, revoke_reason = 'Verification' WHERE id = a;
+  BEGIN
+    UPDATE user_role SET revoked_at = NULL, revoked_by = NULL, revoke_reason = NULL WHERE id = a;
+    RAISE WARNING 'FAIL 13f  a revoked role assignment was restored';
+  EXCEPTION WHEN others THEN RAISE NOTICE 'ok   13f  a revocation is final';
+  END;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 14. Nobody grants themselves a role, and a grant is honest about who
+--     made it and from when
+-- ---------------------------------------------------------------------
+DO $$ BEGIN
+  INSERT INTO user_role (user_id, role_id, assigned_by)
+  SELECT u.id, r.id, u.id FROM app_user u, role r WHERE u.username = '_verify_self' AND r.code = 'SALES';
+  RAISE WARNING 'FAIL 14a  a user granted themselves a role';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   14a  nobody grants themselves a role';
+END $$;
+
+DO $$ BEGIN
+  INSERT INTO user_role (user_id, role_id)
+  SELECT u.id, r.id FROM app_user u, role r WHERE u.username = '_verify_new' AND r.code = 'SALES';
+  RAISE WARNING 'FAIL 14b  a grant naming nobody was accepted';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   14b  a grant names who made it';
+END $$;
+
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_new', 'SALES', CURRENT_DATE - 1);
+  RAISE WARNING 'FAIL 14c  a grant was backdated';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   14c  a grant cannot start in the past';
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 15. What the policy defines changes only by migration
+-- ---------------------------------------------------------------------
+DO $$ BEGIN
+  INSERT INTO role_permission (role_id, permission_id)
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'receiving.post';
+  RAISE WARNING 'FAIL 15a  the Internal Controller was given a posting right at runtime';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   15a  a policy role cannot gain a permission';
+END $$;
+
+DO $$ BEGIN
+  DELETE FROM role_permission
+   WHERE role_id = (SELECT id FROM role WHERE code = 'WH_MANAGER')
+     AND permission_id = (SELECT id FROM permission WHERE code = 'dispatch.verify');
+  RAISE WARNING 'FAIL 15b  a policy role lost a permission at runtime';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   15b  a policy role cannot lose a permission';
+END $$;
+
+DO $$ BEGIN
+  INSERT INTO role_permission (role_id, permission_id)
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'HEAD_INVENTORY' AND p.code = 'transfer.view';
+  RAISE WARNING 'FAIL 15c  a chain-signing role was changed at runtime';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   15c  a role that signs a chain step is the policy''s too';
+END $$;
+
+DO $$ BEGIN
+  UPDATE permission SET action = 'VIEW' WHERE code = 'dispatch.release';
+  RAISE WARNING 'FAIL 15d  a transactional permission was reclassified as read-only';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   15d  a permission cannot be reclassified';
+END $$;
+
+DO $$ BEGIN
+  UPDATE sod_rule SET is_active = FALSE WHERE enforcement = 'BLOCK';
+  RAISE WARNING 'FAIL 15e  the segregation rules were switched off';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   15e  the segregation rules cannot be changed';
+END $$;
+
+DO $$ BEGIN
+  UPDATE role SET is_protected = FALSE WHERE code = 'INTERNAL_CTRL';
+  RAISE WARNING 'FAIL 15f  a protected role was unprotected';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   15f  a protected role stays protected';
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 16. Segregation follows the rights, not the role's name
+-- ---------------------------------------------------------------------
+DO $$ BEGIN
+  INSERT INTO role_permission (role_id, permission_id)
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_BOTH' AND p.code = 'count.approve';
+  RAISE WARNING 'FAIL 16a  one role was given the rights of both sides of a segregation pair';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   16a  one role cannot carry both sides of a pair';
+END $$;
+
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_split', '_VERIFY_ASSURE');
+  PERFORM pg_temp.grant_role('_verify_split', '_VERIFY_FINANCE');
+  RAISE WARNING 'FAIL 16b  two new roles carried a forbidden pair to one person';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   16b  a pair split across new roles is refused';
+END $$;
+
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_copy', 'FINANCE');
+  PERFORM pg_temp.grant_role('_verify_copy', '_VERIFY_ASSURE');
+  RAISE WARNING 'FAIL 16c  the Internal Controller''s rights reached Finance in another role';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   16c  a copied right counts as the role it came from';
+END $$;
+
+-- ...but only against the pairs its rights fall into: warehouse rights
+-- next to Finance, a pair the Board allows, stay allowed.
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_store', 'FINANCE');
+  PERFORM pg_temp.grant_role('_verify_store', '_VERIFY_STORE');
+  RAISE NOTICE 'ok   16d  a new role is judged only against the pairs its rights fall into';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE WARNING 'FAIL 16d  a combination no rule forbids was refused';
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 17. Role names are unique: holders and the audit trail read the name
+-- ---------------------------------------------------------------------
+DO $$ BEGIN
+  INSERT INTO role (code, name) VALUES ('_VERIFY_TWIN', 'finance department');
+  RAISE WARNING 'FAIL 17   two roles share a name';
+EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'ok   17   role names are unique';
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 18. Assurance, rights the policy has not placed, and the policy's roles
+-- ---------------------------------------------------------------------
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_ic1', 'INTERNAL_CTRL');
+  PERFORM pg_temp.grant_role('_verify_ic1', '_VERIFY_CLOSER');
+  RAISE WARNING 'FAIL 18a  the Internal Controller was also given a day-close right';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18a  the Internal Controller holds no transactional right beyond its own';
+END $$;
+
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_ic2', 'INTERNAL_CTRL');
+  PERFORM pg_temp.grant_role('_verify_ic2', '_VERIFY_ITEMS');
+  RAISE WARNING 'FAIL 18b  the Internal Controller was also given master-data rights';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18b  the Internal Controller holds no master-data right';
+END $$;
+
+-- A right the Warehouse Manager shares with the Internal Controller does not
+-- make its holder the Internal Controller: the Warehouse Manager may sit
+-- with Finance, so may a dispatch verifier.
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_rv', 'FINANCE');
+  PERFORM pg_temp.grant_role('_verify_rv', '_VERIFY_DVERIFY');
+  RAISE NOTICE 'ok   18c  a right a permitted role shares is not read as the other side''s';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE WARNING 'FAIL 18c  a combination the policy allows was refused';
+END $$;
+
+-- The same person, once dispatch verification is no longer the Warehouse
+-- Manager's: a migration's change to a policy role is judged for everyone.
+DO $$ BEGIN
+  PERFORM pg_temp.grant_role('_verify_mig', 'FINANCE');
+  PERFORM pg_temp.grant_role('_verify_mig', '_VERIFY_DVERIFY');
+  PERFORM set_config('highbytes.migration', 'on', true);
+  DELETE FROM role_permission
+   WHERE role_id = (SELECT id FROM role WHERE code = 'WH_MANAGER')
+     AND permission_id = (SELECT id FROM permission WHERE code = 'dispatch.verify');
+  PERFORM set_config('highbytes.migration', 'off', true);
+  RAISE WARNING 'FAIL 18d  a migration left someone holding what the rules now forbid';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18d  a change to a policy role is judged for everyone';
+END $$;
+
+DO $$ BEGIN
+  INSERT INTO role_permission (role_id, permission_id)
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_CLOSER' AND p.code = 'dispatch.release';
+  RAISE WARNING 'FAIL 18e  a right no policy role carries was handed out';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18e  a right the policy has not placed cannot be handed out';
+END $$;
+
+DO $$ BEGIN
+  INSERT INTO role_permission (role_id, permission_id)
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'COO' AND p.code = 'report.view';
+  RAISE WARNING 'FAIL 18f  a seeded role was changed at runtime';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18f  every role the policy seeded is fixed';
+END $$;
+
+DO $$ BEGIN
+  UPDATE role SET name = 'Cleaner' WHERE code = 'INTERNAL_CTRL';
+  RAISE WARNING 'FAIL 18g  a policy role was renamed';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18g  a policy role keeps its name';
+END $$;
+
+DO $$ BEGIN
+  UPDATE role SET is_active = FALSE WHERE code = 'INV_TX_OFFICER';
+  RAISE WARNING 'FAIL 18h  a policy role was deactivated';
+EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18h  a policy role is never deactivated';
+END $$;
+
+DO $$ BEGIN
+  INSERT INTO user_role (user_id, role_id, assigned_by, revoked_at, revoked_by, revoke_reason)
+  SELECT u.id, r.id, g.id, TIMESTAMPTZ '2020-01-01', g.id, 'Invented'
+    FROM app_user u, role r, app_user g
+   WHERE u.username = '_verify_new' AND r.code = 'SALES' AND g.username = '_verify';
+  RAISE WARNING 'FAIL 18i  an assignment arrived already revoked';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   18i  an assignment cannot arrive already revoked';
+END $$;
+
+DO $$ BEGIN
+  INSERT INTO role (code, name) VALUES ('_VERIFY_LOOKALIKE', 'Internal Contr' || chr(1086) || 'ller');
+  RAISE WARNING 'FAIL 18j  a role name with a Cyrillic letter was accepted';
+EXCEPTION WHEN check_violation THEN RAISE NOTICE 'ok   18j  role names are Latin script';
 END $$;
 
 ROLLBACK;
