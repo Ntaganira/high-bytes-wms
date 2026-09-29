@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<body>
+
+<!--
+  The navigation renders from permissions, not from a fixed list.
+  A group with no visible items disappears entirely rather than
+  greying out: most users never hold the administration permissions,
+  and showing them a locked door is noise (SRS §17 note).
+-->
+<aside th:fragment="sidebar"
+       class="app-sidebar offcanvas-lg offcanvas-start"
+       tabindex="-1" id="appSidebar" aria-label="Main navigation">
+
+  <div class="brand">
+    <div class="brand-logo" aria-hidden="true">HB</div>
+    <div>
+      <div class="brand-name">HIGH BYTES</div>
+      <div class="brand-sub">WAREHOUSE CONTROL</div>
+    </div>
+    <button type="button" class="btn-close btn-close-white ms-auto d-lg-none"
+            data-bs-dismiss="offcanvas" data-bs-target="#appSidebar" aria-label="Close menu"></button>
+  </div>
+
+  <nav class="side-nav">
+
+    <a th:href="@{/}" class="side-link"
+       th:classappend="${activeNav == 'dashboard'} ? 'active'"
+       th:attr="aria-current=${activeNav == 'dashboard'} ? 'page' : null">
+      <i class="bi bi-house-door-fill"></i> Dashboard
+    </a>
+
+    <!-- Documents -->
+    <th:block sec:authorize="hasAnyAuthority('receiving.view','dispatch.view','transfer.view','cutting.view','damage.view','ticket.view')">
+      <button class="side-label" type="button" data-bs-toggle="collapse"
+              data-bs-target="#navDocuments" aria-expanded="true" aria-controls="navDocuments">
+        Documents <i class="bi bi-chevron-down"></i>
+      </button>
+      <div class="collapse show" id="navDocuments">
+
+        <a th:href="@{/receiving}" class="side-link" sec:authorize="hasAuthority('receiving.view')"
+           th:classappend="${activeNav == 'receiving'} ? 'active'">
+          <i class="bi bi-box-seam"></i> Goods Received
+          <span class="side-badge held" th:if="${navCounts?.goodsReceivedPending > 0}"
+                th:text="${navCounts.goodsReceivedPending}"
+                th:attr="aria-label='|' + ${navCounts.goodsReceivedPending} + ' awaiting approval|'">0</span>
+        </a>
+
+        <a th:href="@{/dispatch}" class="side-link" sec:authorize="hasAuthority('dispatch.view')"
+           th:classappend="${activeNav == 'dispatch'} ? 'active'">
+          <i class="bi bi-clipboard-check"></i> Delivery Authorizations
+          <span class="side-badge held" th:if="${navCounts?.releasesHeld > 0}"
+                th:text="${navCounts.releasesHeld}"
+                th:attr="aria-label='|' + ${navCounts.releasesHeld} + ' releases held|'">0</span>
+        </a>
+
+        <a th:href="@{/delivery-notes}" class="side-link" sec:authorize="hasAuthority('dispatch.view')"
+           th:classappend="${activeNav == 'deliveryNotes'} ? 'active'">
+          <i class="bi bi-truck"></i> Delivery Notes
+          <span class="side-badge danger" th:if="${navCounts?.deliveryNotesOverdue > 0}"
+                th:text="${navCounts.deliveryNotesOverdue}"
+                th:attr="aria-label='|' + ${navCounts.deliveryNotesOverdue} + ' unacknowledged beyond three days|'">0</span>
+        </a>
+
+        <a th:href="@{/transfers}" class="side-link" sec:authorize="hasAuthority('transfer.view')"
+           th:classappend="${activeNav == 'transfers'} ? 'active'">
+          <i class="bi bi-arrow-left-right"></i> Transfers
+          <span class="side-badge transit" th:if="${navCounts?.transfersInTransit > 0}"
+                th:text="${navCounts.transfersInTransit}"
+                th:attr="aria-label='|' + ${navCounts.transfersInTransit} + ' in transit|'">0</span>
+        </a>
+
+        <a th:href="@{/cutting}" class="side-link" sec:authorize="hasAuthority('cutting.view')"
+           th:classappend="${activeNav == 'cutting'} ? 'active'">
+          <i class="bi bi-scissors"></i> Cutting Orders
+        </a>
+
+        <a th:href="@{/damage}" class="side-link" sec:authorize="hasAuthority('damage.view')"
+           th:classappend="${activeNav == 'damage'} ? 'active'">
+          <i class="bi bi-exclamation-triangle"></i> Returns &amp; Damage
+        </a>
+
+        <a th:href="@{/tickets}" class="side-link" sec:authorize="hasAuthority('ticket.view')"
+           th:classappend="${activeNav == 'tickets'} ? 'active'">
+          <i class="bi bi-ticket-perforated"></i> Transaction Tickets
+        </a>
+      </div>
+    </th:block>
+
+    <!-- Inventory -->
+    <th:block sec:authorize="hasAnyAuthority('stock.view','item.view','count.view')">
+      <button class="side-label" type="button" data-bs-toggle="collapse"
+              data-bs-target="#navInventory" aria-expanded="true" aria-controls="navInventory">
+        Inventory <i class="bi bi-chevron-down"></i>
+      </button>
+      <div class="collapse show" id="navInventory">
+
+        <a th:href="@{/stock}" class="side-link" sec:authorize="hasAuthority('stock.view')"
+           th:classappend="${activeNav == 'stock'} ? 'active'">
+          <i class="bi bi-box"></i> Stock Balances
+        </a>
+
+        <a th:href="@{/items}" class="side-link" sec:authorize="hasAuthority('item.view')"
+           th:classappend="${activeNav == 'items'} ? 'active'">
+          <i class="bi bi-grid-3x3-gap"></i> Item Master
+        </a>
+
+        <a th:href="@{/locations}" class="side-link" sec:authorize="hasAuthority('item.view')"
+           th:classappend="${activeNav == 'locations'} ? 'active'">
+          <i class="bi bi-geo-alt"></i> Locations &amp; Bins
+        </a>
+
+        <a th:href="@{/counts}" class="side-link" sec:authorize="hasAuthority('count.view')"
+           th:classappend="${activeNav == 'counts'} ? 'active'">
+          <i class="bi bi-clipboard-data"></i> Stock Counts
+          <span class="side-badge transit" th:if="${navCounts?.countsOpen > 0}"
+                th:text="${navCounts.countsOpen}"
+                th:attr="aria-label='|' + ${navCounts.countsOpen} + ' counts open|'">0</span>
+        </a>
+
+        <a th:href="@{/variances}" class="side-link" sec:authorize="hasAuthority('count.view')"
+           th:classappend="${activeNav == 'variances'} ? 'active'">
+          <i class="bi bi-graph-up-arrow"></i> Variances
+          <span class="side-badge danger" th:if="${navCounts?.variancesOpen > 0}"
+                th:text="${navCounts.variancesOpen}"
+                th:attr="aria-label='|' + ${navCounts.variancesOpen} + ' unresolved variances|'">0</span>
+        </a>
+      </div>
+    </th:block>
+
+    <!-- Reporting -->
+    <th:block sec:authorize="hasAnyAuthority('close.view','report.view')">
+      <button class="side-label" type="button" data-bs-toggle="collapse"
+              data-bs-target="#navReporting" aria-expanded="true" aria-controls="navReporting">
+        Reporting <i class="bi bi-chevron-down"></i>
+      </button>
+      <div class="collapse show" id="navReporting">
+        <a th:href="@{/daily-close}" class="side-link" sec:authorize="hasAuthority('close.view')"
+           th:classappend="${activeNav == 'dailyClose'} ? 'active'">
+          <i class="bi bi-calendar-check"></i> Daily Close
+        </a>
+        <a th:href="@{/reports}" class="side-link" sec:authorize="hasAuthority('report.view')"
+           th:classappend="${activeNav == 'reports'} ? 'active'">
+          <i class="bi bi-bar-chart"></i> Reports &amp; KPIs
+        </a>
+      </div>
+    </th:block>
+
+    <!-- Administration. Invisible to everyone who cannot use it. -->
+    <th:block sec:authorize="hasAnyAuthority('admin.users','admin.roles','admin.workflow','admin.branches','audit.view')">
+      <button class="side-label" type="button" data-bs-toggle="collapse"
+              data-bs-target="#navAdmin" aria-expanded="true" aria-controls="navAdmin">
+        Administration <i class="bi bi-chevron-down"></i>
+      </button>
+      <div class="collapse show" id="navAdmin">
+        <a th:href="@{/admin/users}" class="side-link" sec:authorize="hasAuthority('admin.users')"
+           th:classappend="${activeNav == 'users'} ? 'active'">
+          <i class="bi bi-person"></i> Users
+        </a>
+        <a th:href="@{/admin/roles}" class="side-link" sec:authorize="hasAuthority('admin.roles')"
+           th:classappend="${activeNav == 'roles'} ? 'active'">
+          <i class="bi bi-shield-check"></i> Roles &amp; Permissions
+        </a>
+        <a th:href="@{/admin/workflows}" class="side-link" sec:authorize="hasAuthority('admin.workflow')"
+           th:classappend="${activeNav == 'workflows'} ? 'active'">
+          <i class="bi bi-diagram-3"></i> Workflow Definitions
+        </a>
+        <a th:href="@{/admin/branches}" class="side-link" sec:authorize="hasAuthority('admin.branches')"
+           th:classappend="${activeNav == 'branches'} ? 'active'">
+          <i class="bi bi-building"></i> Branches
+        </a>
+        <a th:href="@{/admin/audit}" class="side-link" sec:authorize="hasAuthority('audit.view')"
+           th:classappend="${activeNav == 'audit'} ? 'active'">
+          <i class="bi bi-clock-history"></i> Audit Log
+        </a>
+      </div>
+    </th:block>
+
+  </nav>
+</aside>
+
+</body>
+</html>

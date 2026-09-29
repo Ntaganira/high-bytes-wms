@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Dashboard</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <!-- Page header -->
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow" th:text="${#strings.toUpperCase(currentBranch?.name)} + ' · ' + ${#temporals.format(businessDate, 'EEEE d MMMM yyyy')}">
+        GAHANGA, KIGALI · TUESDAY 29 SEPTEMBER 2026
+      </p>
+      <h1 class="page-title">Warehouse Dashboard</h1>
+      <p class="page-sub">Stock, movements and approvals for this branch.</p>
+    </div>
+    <div class="dropdown">
+      <button class="btn btn-primary-action dropdown-toggle" type="button"
+              data-bs-toggle="dropdown" aria-expanded="false">
+        <i class="bi bi-plus-lg"></i> New document <i class="bi bi-chevron-down small"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li sec:authorize="hasAuthority('receiving.create')">
+          <a class="dropdown-item" th:href="@{/receiving/new}"><i class="bi bi-box-seam"></i>Goods Received Note</a></li>
+        <li sec:authorize="hasAuthority('dispatch.create')">
+          <a class="dropdown-item" th:href="@{/dispatch/new}"><i class="bi bi-clipboard-check"></i>Delivery Authorization</a></li>
+        <li sec:authorize="hasAuthority('transfer.create')">
+          <a class="dropdown-item" th:href="@{/transfers/new}"><i class="bi bi-arrow-left-right"></i>Inter-branch Transfer</a></li>
+        <li sec:authorize="hasAuthority('cutting.create')">
+          <a class="dropdown-item" th:href="@{/cutting/new}"><i class="bi bi-scissors"></i>Cutting Order</a></li>
+        <li sec:authorize="hasAuthority('count.create')">
+          <a class="dropdown-item" th:href="@{/counts/new}"><i class="bi bi-clipboard-data"></i>Stock Count</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- KPIs. The ones the Board asked for, not generic counts:
+       a warehouse manager learns nothing from "total items 4,832". -->
+  <div class="row g-3 mb-3">
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="hb-card kpi">
+        <div class="kpi-icon items" aria-hidden="true"><i class="bi bi-box"></i></div>
+        <div>
+          <div class="kpi-label">Stock on hand</div>
+          <div class="kpi-value">
+            <span th:text="${kpi.stockValueDisplay}">2.41</span><span class="kpi-unit"> bn FRW</span>
+          </div>
+          <div class="kpi-trend">
+            <span th:class="${kpi.stockTrendUp} ? 'up' : 'bad'">
+              <i class="bi" th:classappend="${kpi.stockTrendUp} ? 'bi-arrow-up-right' : 'bi-arrow-down-right'"></i>
+              <span th:text="${kpi.stockTrendPercent} + '%'">3.2%</span>
+            </span>
+            <span class="gap">vs last week</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="hb-card kpi">
+        <div class="kpi-icon received" aria-hidden="true"><i class="bi bi-box-seam"></i></div>
+        <div>
+          <div class="kpi-label">Received this week</div>
+          <div class="kpi-value">
+            <span th:text="${#numbers.formatInteger(kpi.receivedThisWeek, 0, 'COMMA')}">1,210</span><span class="kpi-unit"> sheets</span>
+          </div>
+          <div class="kpi-trend">
+            <span class="fw-bold" style="color: var(--color-heading)" th:text="${kpi.receiptNoteCount}">18</span>
+            <span>goods received notes</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="hb-card kpi">
+        <div class="kpi-icon issues" aria-hidden="true"><i class="bi bi-shield-exclamation"></i></div>
+        <div>
+          <div class="kpi-label">Releases held</div>
+          <div class="kpi-value" th:text="${kpi.releasesHeld}">7</div>
+          <div class="kpi-trend">
+            <span class="warn" th:if="${kpi.releasesOver24h > 0}"
+                  th:text="${kpi.releasesOver24h} + ' over 24h'">3 over 24h</span>
+            <span th:text="${kpi.releasesOver24h > 0} ? 'awaiting signature' : 'none overdue'">awaiting signature</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="hb-card kpi">
+        <div class="kpi-icon delivery" aria-hidden="true"><i class="bi bi-clipboard-data"></i></div>
+        <div>
+          <div class="kpi-label">Inventory accuracy</div>
+          <div class="kpi-value">
+            <span th:text="${kpi.inventoryAccuracy}">99.2</span><span class="kpi-unit">%</span>
+          </div>
+          <div class="kpi-trend">
+            <span th:class="${kpi.accuracyOnTarget} ? 'up' : 'bad'"
+                  th:text="${kpi.accuracyOnTarget} ? 'above target' : 'below target'">above target</span>
+            <span>99.0% required</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Movement chart + the approval queue -->
+  <div class="row g-3 mb-3">
+    <div class="col-12 col-xxl-8">
+      <section class="hb-card hb-card-body" aria-labelledby="stockMovementTitle">
+        <div class="card-head flex-wrap">
+          <div class="card-title-row">
+            <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title" id="stockMovementTitle">Stock movement</h2>
+              <p class="card-sub" id="chartSubtitle">Sheets received vs dispatched, last 7 days</p>
+            </div>
+          </div>
+          <div class="period-group" role="group" aria-label="Chart period">
+            <button type="button" class="btn active" data-period="7" aria-pressed="true">7 days</button>
+            <button type="button" class="btn" data-period="30" aria-pressed="false">30 days</button>
+          </div>
+        </div>
+
+        <div class="position-relative" id="stockChart" role="img"
+             aria-label="Bar chart of sheets received versus dispatched per day">
+          <div class="bar-chart">
+            <div class="chart-y" id="chartY"></div>
+            <div class="chart-plot" id="chartPlot"><div class="chart-cols" id="chartCols"></div></div>
+          </div>
+          <div class="chart-x"><span></span><div class="chart-x-labels" id="chartX"></div></div>
+          <div class="chart-tip" id="chartTip"></div>
+        </div>
+        <div class="chart-legend">
+          <span><span class="swatch" style="background: var(--chart-received)"></span>Received</span>
+          <span><span class="swatch" style="background: var(--chart-delivery)"></span>Dispatched</span>
+        </div>
+        <!-- The chart reads its data from the server, not a hardcoded literal -->
+        <script type="application/json" id="chartData" th:utext="${chartDataJson}">{}</script>
+      </section>
+    </div>
+
+    <!-- Not "quick actions": this client's problem is stock leaving without
+         approval, not documents being slow to create. -->
+    <div class="col-12 col-xxl-4">
+      <section class="hb-card hb-card-body d-flex flex-column" aria-labelledby="approvalsTitle">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-pen" aria-hidden="true"></i>
+            <h2 class="card-title" id="approvalsTitle">Awaiting your signature</h2>
+          </div>
+          <span class="status-badge status-held" th:if="${!#lists.isEmpty(pendingApprovals)}"
+                th:text="${#lists.size(pendingApprovals)}">3</span>
+        </div>
+
+        <div th:if="${#lists.isEmpty(pendingApprovals)}"
+             th:replace="~{fragments/ui :: emptyState('bi-check2-circle', 'Nothing waiting on you', 'Documents needing your signature appear here.')}"></div>
+
+        <div th:each="p : ${pendingApprovals}" class="border-top py-3">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <a class="serial fw-semibold" th:href="@{'/documents/' + ${p.documentId}}" th:text="${p.serialNo}">DAO-KGL-2026-1187</a>
+            <span th:replace="~{fragments/ui :: chip(${p.status})}"></span>
+            <span class="ms-auto num small" th:text="${#numbers.formatDecimal(p.value, 0, 'COMMA', 0, 'POINT')}">8,420,000</span>
+          </div>
+          <div class="small" th:text="${p.summary}">Ikirezi Construction · 84 sheets, clear float 6mm</div>
+          <div class="small d-flex align-items-center gap-2 mt-1"
+               th:style="${p.hoursWaiting >= 24} ? 'color: var(--color-warning)' : 'color: var(--color-muted)'">
+            <i class="bi bi-clock"></i>
+            <span th:text="${p.awaitingRole} + ' · ' + ${p.hoursWaiting} + ' hours'">Internal Controller · 26 hours</span>
+          </div>
+        </div>
+
+        <div class="mt-auto pt-3 border-top" th:if="${!#lists.isEmpty(pendingApprovals)}">
+          <a th:href="@{/approvals}" class="fw-semibold">Open approval queue &rarr;</a>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Recent movements + below reorder -->
+  <div class="row g-3">
+    <div class="col-12 col-xxl-8">
+      <section class="hb-card hb-card-body" aria-labelledby="recentTitle">
+        <div class="card-head mb-3">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <h2 class="card-title" id="recentTitle">Recent movements</h2>
+          </div>
+          <a th:href="@{/stock/movements}" class="view-all">View all</a>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table">
+            <thead>
+              <tr>
+                <th scope="col">Document</th><th scope="col">Type</th>
+                <th scope="col">Item</th><th scope="col" class="num">Qty</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="m : ${recentMovements}">
+                <td><a class="doc-link" th:href="@{'/documents/' + ${m.documentId}}" th:text="${m.serialNo}">GRN-KGL-2026-0412</a></td>
+                <td th:text="${m.documentType}">Goods received</td>
+                <td th:text="${m.itemDescription}">Clear float 6mm 2140×3300</td>
+                <td class="num" th:text="${#numbers.formatDecimal(m.quantity, 0, 'COMMA', 0, 'POINT')}">240</td>
+                <td><span th:replace="~{fragments/ui :: chip(${m.status})}"></span></td>
+              </tr>
+              <tr th:if="${#lists.isEmpty(recentMovements)}">
+                <td colspan="5">
+                  <div th:replace="~{fragments/ui :: emptyState('bi-inbox', 'No movements yet', 'Posted receipts and dispatches appear here.')}"></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xxl-4">
+      <section class="hb-card hb-card-body" aria-labelledby="lowStockTitle">
+        <div class="card-head mb-3">
+          <div class="card-title-row">
+            <i class="bi bi-exclamation-triangle" style="color: var(--color-warning)" aria-hidden="true"></i>
+            <h2 class="card-title" id="lowStockTitle">Below reorder level</h2>
+          </div>
+          <a th:href="@{/stock(filter='below-reorder')}" class="view-all">View all</a>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact">
+            <thead>
+              <tr><th scope="col">Item</th><th scope="col">Bin</th>
+                  <th scope="col" class="num">On hand</th><th scope="col" class="num">Reorder</th></tr>
+            </thead>
+            <tbody>
+              <tr th:each="l : ${lowStock}">
+                <td>
+                  <span class="sev-dot" th:classappend="${l.critical} ? 'sev-urgent' : 'sev-low'"
+                        th:title="${l.critical} ? 'Critical' : 'Below minimum'"></span>
+                  <span th:text="${l.itemDescription}">Clear float 4mm</span>
+                  <span class="visually-hidden" th:text="${l.critical} ? ' (critical)' : ' (below minimum)'"></span>
+                </td>
+                <td class="mono" th:text="${l.binCode}">A1-02</td>
+                <td class="num">
+                  <span class="stock-pill" th:classappend="${l.critical} ? '' : 'warn'"
+                        th:text="${#numbers.formatDecimal(l.onHand, 0, 'COMMA', 0, 'POINT')}">18</span>
+                </td>
+                <td class="num" th:text="${#numbers.formatDecimal(l.reorderLevel, 0, 'COMMA', 0, 'POINT')}">60</td>
+              </tr>
+              <tr th:if="${#lists.isEmpty(lowStock)}">
+                <td colspan="4">
+                  <div th:replace="~{fragments/ui :: emptyState('bi-check2-circle', 'All above reorder', 'Items below their reorder level appear here.')}"></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

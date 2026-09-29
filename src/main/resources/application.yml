@@ -1,0 +1,137 @@
+spring:
+  application:
+    name: highbytes-wms
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/highbytes_wms}
+    username: ${DB_USER:highbytes}
+    password: ${DB_PASSWORD:highbytes}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      pool-name: hb-pool
+
+  jpa:
+    open-in-view: false          # a lazy load in a Thymeleaf template is a bug, not a feature
+    hibernate:
+      ddl-auto: validate         # Flyway owns the schema; Hibernate only checks it
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+          time_zone: Africa/Kigali
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    locations: classpath:db/migration
+    validate-on-migrate: true
+
+  thymeleaf:
+    cache: true                  # overridden in the dev profile
+
+  quartz:
+    job-store-type: jdbc         # jobs must survive a restart
+    jdbc:
+      initialize-schema: never   # Flyway creates the Quartz tables
+    properties:
+      org.quartz.scheduler.instanceId: AUTO
+      org.quartz.jobStore.isClustered: false
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate   # BYTEA, not BLOB
+
+  servlet:
+    multipart:
+      max-file-size: 15MB        # cutting drawings, scanned delivery notes
+      max-request-size: 20MB
+
+  mvc:
+    problemdetails:
+      enabled: true
+
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          max-age: 30d
+          cache-public: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      timeout: 45m
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${COOKIE_SECURE:false}
+  error:
+    whitelabel:
+      enabled: false
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    heritier.ntaganira.highbytes: INFO
+    org.springframework.security: INFO
+
+# --- Application settings -------------------------------------------------
+highbytes:
+  # The restructuring in Board Paper HB/BD/2026/09-05 takes effect on this date.
+  # Workflow definitions are selected by a document's creation date against it,
+  # so moving the restructuring is a configuration change, not a release.
+  restructuring-effective-date: 2027-01-01
+
+  # Business day close. A locked date refuses any movement dated inside it.
+  daily-close:
+    cron: "0 30 19 * * *"        # 19:30 Africa/Kigali
+    timezone: Africa/Kigali
+
+  escalation:
+    delivery-note-ack-days: 3    # FR-OUT-08
+    variance-resolution-days: 5  # FR-CNT-09
+
+  attachments:
+    root: ${ATTACHMENT_ROOT:./data/attachments}
+
+  security:
+    max-failed-logins: 5
+    lockout-minutes: 15
+    mandatory-leave-days: 10     # Board paper §5.1, fourth safeguard
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  thymeleaf:
+    cache: false
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+logging:
+  level:
+    heritier.ntaganira.highbytes: DEBUG
+    org.hibernate.SQL: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true

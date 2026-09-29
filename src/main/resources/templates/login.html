@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · HIGH BYTES WMS</title>
+  <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
+  <link rel="stylesheet" th:href="@{/webjars/bootstrap-icons/font/bootstrap-icons.min.css}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap">
+  <link rel="stylesheet" th:href="@{/css/tokens.css}">
+  <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+
+<div class="login-shell">
+  <div class="login-card">
+
+    <div class="login-brand">
+      <div class="brand-logo" aria-hidden="true">HB</div>
+      <div>
+        <div style="color: var(--color-heading); font-weight: 800; letter-spacing: .3px">HIGH BYTES</div>
+        <div style="color: var(--color-success); font-size: .66rem; font-weight: 700; letter-spacing: .8px">WAREHOUSE CONTROL</div>
+      </div>
+    </div>
+
+    <h1 class="login-title">Sign in</h1>
+    <p class="login-sub">Use the account issued to you. Every action you take is recorded against it.</p>
+
+    <div th:if="${param.error}" class="alert alert-danger py-2 small" role="alert">
+      <i class="bi bi-exclamation-circle me-1"></i>
+      Username or password is incorrect.
+    </div>
+    <div th:if="${param.locked}" class="alert alert-warning py-2 small" role="alert">
+      <i class="bi bi-lock me-1"></i>
+      This account is locked. Ask an administrator to unlock it.
+    </div>
+    <div th:if="${param.logout}" class="alert alert-success py-2 small" role="alert">
+      <i class="bi bi-check-circle me-1"></i>
+      You have been signed out.
+    </div>
+
+    <form th:action="@{/login}" method="post">
+      <div class="mb-3">
+        <label for="username" class="form-label fw-semibold small" style="color: var(--color-heading)">Username</label>
+        <input type="text" id="username" name="username" class="form-control"
+               autocomplete="username" required autofocus>
+      </div>
+      <div class="mb-4">
+        <label for="password" class="form-label fw-semibold small" style="color: var(--color-heading)">Password</label>
+        <input type="password" id="password" name="password" class="form-control"
+               autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary-action w-100 justify-content-center">
+        <i class="bi bi-box-arrow-in-right"></i> Sign in
+      </button>
+    </form>
+
+  </div>
+</div>
+
+</body>
+</html>

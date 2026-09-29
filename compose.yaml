@@ -1,0 +1,42 @@
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: highbytes-db
+    environment:
+      POSTGRES_DB: highbytes_wms
+      POSTGRES_USER: highbytes
+      POSTGRES_PASSWORD: highbytes
+      TZ: Africa/Kigali
+    ports:
+      - "5432:5432"
+    volumes:
+      - hb-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U highbytes -d highbytes_wms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    container_name: highbytes-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      DB_URL: jdbc:postgresql://db:5432/highbytes_wms
+      DB_USER: highbytes
+      DB_PASSWORD: highbytes
+      ATTACHMENT_ROOT: /data/attachments
+      TZ: Africa/Kigali
+    ports:
+      - "8080:8080"
+    volumes:
+      - hb-attachments:/data/attachments
+    profiles: ["full"]
+
+volumes:
+  hb-db-data:
+  hb-attachments:
