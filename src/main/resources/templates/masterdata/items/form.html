@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New item' : 'Edit item'">Item</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">MASTER DATA · ITEM</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New item' : 'Edit ' + ${form.itemCode}">New item</h1>
+  </div>
+
+  <div th:if="${#fields.hasGlobalErrors('form')}" class="alert alert-danger" role="alert">
+    <p th:each="e : ${#fields.globalErrors('form')}" th:text="${e}" class="mb-0"></p>
+  </div>
+
+  <!-- An item that has moved cannot have its measured specification rewritten. -->
+  <div th:if="${form.transacted}" class="release-blocked mb-3" role="status">
+    <i class="bi bi-info-circle" aria-hidden="true"></i>
+    <div>
+      <strong>Stock has moved against this item</strong>
+      <span>Thickness is locked: past dispatches record it as verified at the gate.
+            Create a new item if the specification is genuinely different.</span>
+    </div>
+  </div>
+
+  <form th:action="${form.new} ? @{/items} : @{'/items/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <div class="row g-3">
+
+      <!-- Identity -->
+      <div class="col-12 col-lg-7">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-tag" aria-hidden="true"></i>
+              <h2 class="card-title">Identity</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-5">
+              <label for="itemCode" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Item code <span class="text-danger">*</span>
+              </label>
+              <input id="itemCode" th:field="*{itemCode}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('itemCode')} ? 'is-invalid'"
+                     placeholder="GL-CF-6-2140X3300" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('itemCode')}"
+                   th:errors="*{itemCode}">error</div>
+              <div class="form-text">Quoted on every document. Cannot be reused once retired.</div>
+            </div>
+
+            <div class="col-12 col-md-7">
+              <label for="description" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Description <span class="text-danger">*</span>
+              </label>
+              <input id="description" th:field="*{description}" class="form-control"
+                     th:classappend="${#fields.hasErrors('description')} ? 'is-invalid'"
+                     placeholder="Clear float 6mm 2140x3300">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('description')}"
+                   th:errors="*{description}">error</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="productType" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Product type <span class="text-danger">*</span>
+              </label>
+              <select id="productType" th:field="*{productType}" class="form-select"
+                      th:classappend="${#fields.hasErrors('productType')} ? 'is-invalid'">
+                <option th:each="t : ${productTypes}" th:value="${t}" th:text="${t.label()}">Glass</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('productType')}"
+                   th:errors="*{productType}">error</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="categoryId" class="form-label small fw-semibold" style="color: var(--color-heading)">Category</label>
+              <select id="categoryId" th:field="*{categoryId}" class="form-select">
+                <option value="">— none —</option>
+                <option th:each="c : ${categories}" th:value="${c.id()}" th:text="${c.name()}">Float glass</option>
+              </select>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Specification -->
+      <div class="col-12 col-lg-5">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-rulers" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">Specification</h2>
+                <p class="card-sub">What the Internal Controller measures at the gate</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12">
+              <label for="colour" class="form-label small fw-semibold" style="color: var(--color-heading)">Colour</label>
+              <input id="colour" th:field="*{colour}" class="form-control" placeholder="Clear, tinted grey, bronze">
+            </div>
+
+            <div class="col-12">
+              <label for="thicknessMm" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Thickness (mm)
+              </label>
+              <input id="thicknessMm" th:field="*{thicknessMm}" type="number" step="0.01" min="0.01"
+                     class="form-control mono"
+                     th:classappend="${#fields.hasErrors('thicknessMm')} ? 'is-invalid'"
+                     th:readonly="${form.transacted}">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('thicknessMm')}"
+                   th:errors="*{thicknessMm}">error</div>
+              <div class="form-text">Required for glass. Verified with the approved device on every movement.</div>
+            </div>
+
+            <div class="col-6">
+              <label for="widthMm" class="form-label small fw-semibold" style="color: var(--color-heading)">Width (mm)</label>
+              <input id="widthMm" th:field="*{widthMm}" type="number" step="0.1" min="0.1"
+                     class="form-control mono"
+                     th:classappend="${#fields.hasErrors('widthMm')} ? 'is-invalid'">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('widthMm')}"
+                   th:errors="*{widthMm}">error</div>
+            </div>
+
+            <div class="col-6">
+              <label for="heightMm" class="form-label small fw-semibold" style="color: var(--color-heading)">Height (mm)</label>
+              <input id="heightMm" th:field="*{heightMm}" type="number" step="0.1" min="0.1"
+                     class="form-control mono"
+                     th:classappend="${#fields.hasErrors('heightMm')} ? 'is-invalid'">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('heightMm')}"
+                   th:errors="*{heightMm}">error</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Stock control -->
+      <div class="col-12 col-lg-7">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-box" aria-hidden="true"></i>
+              <h2 class="card-title">Stock control</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label for="baseUomId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Base unit <span class="text-danger">*</span>
+              </label>
+              <select id="baseUomId" th:field="*{baseUomId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('baseUomId')} ? 'is-invalid'">
+                <option value="">— choose —</option>
+                <option th:each="u : ${units}" th:value="${u.id()}" th:text="${u.label()}">SHEET — Sheet</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('baseUomId')}"
+                   th:errors="*{baseUomId}">error</div>
+              <div class="form-text">Every movement is stored in this unit.</div>
+            </div>
+
+            <div class="col-6 col-md-4">
+              <label for="reorderLevel" class="form-label small fw-semibold" style="color: var(--color-heading)">Reorder level</label>
+              <input id="reorderLevel" th:field="*{reorderLevel}" type="number" step="0.001" min="0"
+                     class="form-control mono"
+                     th:classappend="${#fields.hasErrors('reorderLevel')} ? 'is-invalid'">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('reorderLevel')}"
+                   th:errors="*{reorderLevel}">error</div>
+            </div>
+
+            <div class="col-6 col-md-4">
+              <label for="maxStockLevel" class="form-label small fw-semibold" style="color: var(--color-heading)">Maximum level</label>
+              <input id="maxStockLevel" th:field="*{maxStockLevel}" type="number" step="0.001" min="0"
+                     class="form-control mono"
+                     th:classappend="${#fields.hasErrors('maxStockLevel')} ? 'is-invalid'">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('maxStockLevel')}"
+                   th:errors="*{maxStockLevel}">error</div>
+            </div>
+
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="active" th:field="*{active}">
+                <label class="form-check-label" for="active">
+                  Active
+                  <span class="text-body-secondary small d-block">
+                    An inactive item cannot be put on a new document. It stays on every past one.
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Create item' : 'Save changes'">Create item</span>
+      </button>
+      <a th:href="${form.new} ? @{/items} : @{'/items/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+
+  </form>
+
+</div>
+</body>
+</html>

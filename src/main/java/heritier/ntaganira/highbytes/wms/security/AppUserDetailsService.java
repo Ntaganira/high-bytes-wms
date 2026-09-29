@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.security;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.security
+ * - File       : AppUserDetailsService.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Loads a user with the permissions their live role assignments grant
+ * </pre>
+ */
+
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;

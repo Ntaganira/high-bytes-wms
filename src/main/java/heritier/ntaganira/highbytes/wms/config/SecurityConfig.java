@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.config;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.config
+ * - File       : SecurityConfig.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Session-based authentication, URL authorization and CSRF settings
+ * </pre>
+ */
+
 import heritier.ntaganira.highbytes.wms.security.AppUserDetailsService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

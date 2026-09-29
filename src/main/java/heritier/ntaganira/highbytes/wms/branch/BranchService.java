@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.branch;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.branch
+ * - File       : BranchService.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Reads branches: all, by id, and the default for a user's home branch
+ * </pre>
+ */
+
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

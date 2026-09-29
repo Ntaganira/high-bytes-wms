@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms
+ * - File       : HighBytesWmsApplication.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Spring Boot entry point for the HIGH BYTES warehouse management system
+ * </pre>
+ */
+
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;

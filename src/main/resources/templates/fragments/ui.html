@@ -17,7 +17,7 @@
       class="status-badge"
       th:classappend="'status-' + ${#strings.toLowerCase(status)}"
       th:with="icon=${
-        status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' ? 'bi-check-circle-fill' :
+        status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' or status == 'ACTIVE' ? 'bi-check-circle-fill' :
         status == 'HELD'      or status == 'PENDING'  ? 'bi-clock-fill' :
         status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' ? 'bi-exclamation-octagon-fill' :
         status == 'TRANSIT'   or status == 'PROGRESS' ? 'bi-arrow-repeat' :

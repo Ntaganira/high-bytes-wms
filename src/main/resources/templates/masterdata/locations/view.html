@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${location.code()}">Location</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow" th:text="'MASTER DATA · LOCATION · ' + ${#strings.toUpperCase(location.branchName())}">
+        MASTER DATA · LOCATION</p>
+      <h1 class="page-title mono" th:text="${location.code()}">KGL-MAIN</h1>
+      <p class="page-sub" th:text="${location.name()}">Gahanga main store</p>
+    </div>
+    <a th:href="@{'/locations/' + ${location.id()} + '/edit'}" class="btn btn-outline-secondary"
+       sec:authorize="hasAuthority('location.manage')">
+      <i class="bi bi-pencil"></i> Edit
+    </a>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-lg-5">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-geo-alt" aria-hidden="true"></i>
+            <h2 class="card-title">Details</h2>
+          </div>
+          <span th:if="${location.active()}" th:replace="~{fragments/ui :: chip('ACTIVE')}"></span>
+          <span th:unless="${location.active()}" th:replace="~{fragments/ui :: chip('LOCKED')}"></span>
+        </div>
+
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-body-secondary fw-normal">Branch</dt>
+          <dd class="col-7" th:text="${location.branchName()}">Gahanga</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Type</dt>
+          <dd class="col-7" th:text="${location.locationType().label()}">Warehouse</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Bonded</dt>
+          <dd class="col-7">
+            <span th:if="${location.bonded()}" class="status-badge status-bonded">
+              <i class="bi bi-shield-lock-fill"></i> BONDED
+            </span>
+            <span th:unless="${location.bonded()}" class="text-body-secondary">No</span>
+          </dd>
+          <dt class="col-5 text-body-secondary fw-normal">Holds saleable stock</dt>
+          <dd class="col-7" th:text="${location.sellable()} ? 'Yes' : 'No'">Yes</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Distinct items</dt>
+          <dd class="col-7 mono" th:text="${location.distinctItems()}">12</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-lg-7">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-grid-3x3" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Bins</h2>
+              <p class="card-sub">Where inside this location a thing sits</p>
+            </div>
+          </div>
+        </div>
+
+        <form class="row g-2 align-items-end mb-3" method="post"
+              th:action="@{'/locations/' + ${location.id()} + '/bins'}"
+              sec:authorize="hasAuthority('location.manage')">
+          <div class="col-5 col-md-4">
+            <label for="binCode" class="form-label small fw-semibold" style="color: var(--color-heading)">Bin code</label>
+            <input id="binCode" name="binCode" class="form-control mono" required placeholder="A1-02" autocomplete="off">
+          </div>
+          <div class="col-4 col-md-5">
+            <label for="zone" class="form-label small fw-semibold" style="color: var(--color-heading)">Zone</label>
+            <input id="zone" name="zone" class="form-control" placeholder="Rack A">
+          </div>
+          <div class="col-3">
+            <button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i> Add</button>
+          </div>
+        </form>
+
+        <div class="table-responsive">
+          <table class="table hb-table mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Bin</th><th scope="col">Zone</th>
+                <th scope="col" class="num">Items</th><th scope="col">Status</th>
+                <th scope="col" sec:authorize="hasAuthority('location.manage')"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="b : ${bins}">
+                <td class="mono" th:text="${b.binCode()}">A1-02</td>
+                <td class="text-body-secondary" th:text="${b.zone()} ?: '—'">Rack A</td>
+                <td class="num mono" th:text="${b.distinctItems()}">3</td>
+                <td>
+                  <span th:if="${b.active()}" th:replace="~{fragments/ui :: chip('ACTIVE')}"></span>
+                  <span th:unless="${b.active()}" th:replace="~{fragments/ui :: chip('LOCKED')}"></span>
+                </td>
+                <td sec:authorize="hasAuthority('location.manage')">
+                  <form method="post" class="m-0"
+                        th:action="@{'/locations/' + ${location.id()} + '/bins/' + ${b.id()} + '/toggle'}">
+                    <input type="hidden" name="active" th:value="${!b.active()}">
+                    <button type="submit" class="btn btn-sm btn-link p-0"
+                            th:text="${b.active()} ? 'Deactivate' : 'Reactivate'"
+                            th:disabled="${b.active() and b.holdsStock()}"
+                            th:title="${b.active() and b.holdsStock()} ? 'This bin still holds stock' : null">
+                      Deactivate
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              <tr th:if="${#lists.isEmpty(bins)}">
+                <td colspan="5">
+                  <div th:replace="~{fragments/ui :: emptyState('bi-grid-3x3', 'No bins yet', 'Stock can sit at the location itself, or in a bin for precision.')}"></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <h2 class="card-title">Change history</h2>
+          </div>
+        </div>
+        <div th:if="${#lists.isEmpty(history)}"
+             th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Edits to this location will be listed here.')}"></div>
+        <div th:each="entry : ${history}" th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

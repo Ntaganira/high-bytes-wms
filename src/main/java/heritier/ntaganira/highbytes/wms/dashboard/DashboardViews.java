@@ -1,5 +1,16 @@
 package heritier.ntaganira.highbytes.wms.dashboard;
 
+/**
+ * <pre>
+ * - Project    : HIGH BYTES WMS
+ * - Package    : heritier.ntaganira.highbytes.wms.dashboard
+ * - File       : DashboardViews.java
+ * - Date       : 2026-09-29
+ * - Author     : NTAGANIRA Heritier
+ * - Desc       : Read models for everything the dashboard renders
+ * </pre>
+ */
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
