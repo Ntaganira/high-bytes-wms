@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${plannedScreen != null} ? ${plannedScreen.title()} : 'Error ' + ${status}">Error</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <!-- Every error a signed-in user can reach. Each status says what happened
+       and what to do next, not just the code. Chosen by ErrorPages. -->
+  <section class="hb-card hb-card-body" style="max-width: 100%" th:switch="${status}">
+
+    <th:block th:case="404">
+      <th:block th:if="${plannedScreen != null}">
+        <p class="eyebrow">NOT BUILT YET</p>
+        <h1 class="page-title">
+          <i class="bi" th:classappend="${plannedScreen.icon()}" aria-hidden="true"></i>
+          <span th:text="${plannedScreen.title()}">Goods Received</span>
+        </h1>
+        <p>This screen is part of Phase 1 and the link to it is already in place,
+           but the screen itself has not been built yet.</p>
+      </th:block>
+      <th:block th:unless="${plannedScreen != null}">
+        <p class="eyebrow">ERROR 404</p>
+        <h1 class="page-title">Page not found</h1>
+        <p>Nothing lives at this address. It may have been typed wrongly, or the
+           record it points to does not exist.</p>
+      </th:block>
+    </th:block>
+
+    <th:block th:case="403">
+      <!-- A stale or missing form token is not a missing right: say so, or
+           someone who holds the right goes asking for it. -->
+      <th:block th:if="${formExpired}">
+        <p class="eyebrow">FORM EXPIRED</p>
+        <h1 class="page-title">This form has expired</h1>
+        <p>For your security, a form stops working when your session changes,
+           for example after you signed in again in another tab. Nothing was saved.
+           Go back, reload the page and try again.</p>
+      </th:block>
+      <!-- A record at another branch is named by its own branch: the user may
+           hold the right where they are working, just not where it is. -->
+      <th:block th:unless="${formExpired}"
+                th:with="where=${deniedBranch != null ? deniedBranch : currentBranch},
+                         adminPage=${path != null and #strings.startsWith(path, '/admin/')}">
+        <p class="eyebrow">ERROR 403</p>
+        <h1 class="page-title">You don't have access to this page</h1>
+        <p>Access follows your roles, and none of them grants this page
+           <span th:if="${where != null}" th:text="'at ' + ${where.name}">at Gahanga</span>.
+           <span sec:authorize="!hasAuthority('admin.users')">If you think one
+           should, ask the system administrator.</span></p>
+        <p th:if="${deniedBranch != null}">A role granted at one branch gives its
+           rights there and nowhere else.</p>
+        <th:block sec:authorize="hasAuthority('admin.users')">
+          <p th:unless="${adminPage}">The administrator account manages access only.
+             Whoever grants rights must not hold operational ones, so screens that
+             record or approve stock are closed to it by design.</p>
+          <p th:if="${adminPage}">Administration is divided too. Another administrator
+             who holds this right can grant it to you: nobody grants themselves access.</p>
+        </th:block>
+      </th:block>
+    </th:block>
+
+    <th:block th:case="400">
+      <p class="eyebrow">ERROR 400</p>
+      <h1 class="page-title">That address isn't valid</h1>
+      <p>Part of it, usually a record id, is malformed. Use the links on the page
+         rather than editing the address.</p>
+    </th:block>
+
+    <th:block th:case="405">
+      <p class="eyebrow">ERROR 405</p>
+      <h1 class="page-title">That action isn't available here</h1>
+      <p>The page was asked to do something it does not support. Use the buttons
+         on the page rather than the address bar.</p>
+    </th:block>
+
+    <th:block th:case="*">
+      <p class="eyebrow" th:text="'ERROR ' + ${status}">ERROR 500</p>
+      <h1 class="page-title">Something went wrong</h1>
+      <p th:if="${status >= 500}">The error has been logged. If it keeps happening,
+         give the system administrator the reference below.</p>
+      <p th:unless="${status >= 500}">The request could not be completed as sent.
+         Go back and use the buttons on the page rather than the address bar.</p>
+    </th:block>
+
+    <p class="mono small text-body-secondary mb-4"
+       th:text="${status} + ' · ' + ${path} + ' · ' + ${#dates.format(timestamp, 'yyyy-MM-dd HH:mm:ss')}">500 · /items · 2026-09-29 20:31:05</p>
+
+    <a th:href="@{/}" class="btn btn-primary-action">
+      <i class="bi bi-house-door"></i> Back to dashboard
+    </a>
+  </section>
+
+</div>
+</body>
+</html>

@@ -32,7 +32,8 @@ public class ItemForm {
 
     @NotBlank(message = "An item code is required")
     @Size(max = 40, message = "An item code is at most 40 characters")
-    @Pattern(regexp = "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+    // The pattern accepts an empty value so a blank code reports only that it is required.
+    @Pattern(regexp = "^$|^[A-Za-z0-9][A-Za-z0-9._/-]*$",
              message = "Use letters, digits and . _ / - only, starting with a letter or digit")
     private String itemCode;
 

@@ -58,15 +58,12 @@
             <td class="text-body-secondary" th:text="${l.branchName()}">Gahanga Main Warehouse</td>
             <td>
               <span th:text="${l.locationType().label()}">Warehouse</span>
-              <span class="status-badge status-bonded ms-1" th:if="${l.bonded()}">
-                <i class="bi bi-shield-lock-fill"></i> BONDED
-              </span>
+              <span class="ms-1" th:if="${l.bonded()}"><span th:replace="~{fragments/ui :: chip('BONDED')}"></span></span>
             </td>
             <td class="num mono" th:text="${l.binCount()}">4</td>
             <td class="num mono" th:text="${l.distinctItems()}">12</td>
             <td>
-              <span th:if="${l.active()}" th:replace="~{fragments/ui :: chip('ACTIVE')}"></span>
-              <span th:unless="${l.active()}" th:replace="~{fragments/ui :: chip('LOCKED')}"></span>
+              <span th:replace="~{fragments/ui :: chip(${l.active()} ? 'ACTIVE' : 'INACTIVE')}"></span>
             </td>
           </tr>
           <tr th:if="${#lists.isEmpty(locations)}">

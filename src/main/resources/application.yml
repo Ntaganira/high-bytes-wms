@@ -31,6 +31,11 @@ spring:
 
   thymeleaf:
     cache: true                  # overridden in the dev profile
+    servlet:
+      # Render the whole page before sending any of it. A template that fails
+      # halfway then shows a clean error page, instead of half a page with
+      # the error pasted into it.
+      produce-partial-output-while-processing: false
 
   quartz:
     job-store-type: jdbc         # jobs must survive a restart
@@ -52,7 +57,10 @@ spring:
 
   mvc:
     problemdetails:
-      enabled: true
+      # Off: with it on, a browser hitting a bad address or a malformed id
+      # got raw problem+json. Errors now reach the error page (ErrorPages),
+      # and machine clients still get Spring Boot's JSON error body.
+      enabled: false
 
   web:
     resources:
@@ -66,6 +74,9 @@ server:
   servlet:
     session:
       timeout: 45m
+      # Never put the session id in a URL: the firewall refuses such links,
+      # and an id in a URL leaks through history, logs and referrers.
+      tracking-modes: cookie
       cookie:
         http-only: true
         same-site: lax
@@ -73,6 +84,12 @@ server:
   error:
     whitelabel:
       enabled: false
+    # Error bodies say what failed, never how: no exception text, no stack
+    # trace, whatever a dependency (devtools, say) would otherwise default to.
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+    include-exception: false
   forward-headers-strategy: framework
 
 management:

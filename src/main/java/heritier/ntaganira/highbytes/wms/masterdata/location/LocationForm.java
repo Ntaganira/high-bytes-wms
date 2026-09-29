@@ -27,7 +27,8 @@ public class LocationForm {
 
     @NotBlank(message = "A code is required")
     @Size(max = 32, message = "A code is at most 32 characters")
-    @Pattern(regexp = "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    // The pattern accepts an empty value so a blank code reports only that it is required.
+    @Pattern(regexp = "^$|^[A-Za-z0-9][A-Za-z0-9._-]*$",
              message = "Use letters, digits and . _ - only")
     private String code;
 

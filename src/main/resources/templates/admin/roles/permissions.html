@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="'Permissions · ' + ${role.name()}">Permissions</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">ADMINISTRATION · ROLE · PERMISSIONS</p>
+    <h1 class="page-title" th:text="${role.name()}">Finance Department</h1>
+    <p class="page-sub">
+      Tick what the role permits. Changes reach its
+      <span th:text="${holderCount}">3</span> holder(s) on their next page.
+    </p>
+  </div>
+
+  <div class="alert alert-danger" role="alert" th:if="${refusal}">
+    <strong>Not saved.</strong> <span th:text="${refusal}">Reason</span>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${heldByMe}">
+    <i class="bi bi-person-lock" aria-hidden="true"></i>
+    <div>
+      <strong>You hold this role</strong>
+      <span>Another administrator must change what it permits: nobody administers their own access.
+        Saving will be refused.</span>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${role.policyDefined()}">
+    <i class="bi bi-shield-lock" aria-hidden="true"></i>
+    <div>
+      <strong>Defined by the policy</strong>
+      <span>The segregation rules or approval chains name this role and assume what it carries. Its
+        permissions change only by a reviewed migration, so they are shown here but cannot be saved.</span>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status">
+    <i class="bi bi-sign-stop" aria-hidden="true"></i>
+    <div>
+      <strong>What one role, and one person, may not combine</strong>
+      <span>A role with any
+        <span th:replace="~{fragments/ui :: chip('ADMINISTER')}"></span>
+        permission carries nothing operational: no
+        <span th:replace="~{fragments/ui :: chip('TRANSACT')}"></span>
+        or <span th:replace="~{fragments/ui :: chip('CONFIGURE')}"></span> permission, and no approval step.
+        A role may not carry the rights of both sides of a segregation rule either: rights copied from the
+        Internal Controller count as the Internal Controller's. No change may leave a holder with either
+        combination across their roles.</span>
+    </div>
+  </div>
+
+  <form th:action="@{'/admin/roles/' + ${role.id()} + '/permissions'}" method="post">
+    <div class="row g-3">
+      <div class="col-12 col-lg-6" th:each="g : ${groups}">
+        <section class="hb-card hb-card-body">
+          <div class="card-head mb-2">
+            <h2 class="card-title" th:text="${g.label()}">Dispatch</h2>
+          </div>
+          <div class="perm-row" th:each="p : ${g.permissions()}">
+            <input class="form-check-input mt-1" type="checkbox" name="codes"
+                   th:id="'perm-' + ${p.code()}" th:value="${p.code()}"
+                   th:checked="${selected.contains(p.code())}"
+                   th:disabled="${role.policyDefined()}">
+            <label class="flex-grow-1" th:for="'perm-' + ${p.code()}">
+              <span class="perm-code d-block" th:text="${p.code()}">dispatch.approve</span>
+              <span class="perm-desc d-block" th:text="${p.description()}">Approve a delivery authorization</span>
+            </label>
+            <span th:replace="~{fragments/ui :: chip(${p.duty()})}"></span>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action" th:unless="${role.policyDefined()}">
+        <i class="bi bi-check-lg"></i> Save permissions
+      </button>
+      <a th:href="@{'/admin/roles/' + ${role.id()}}" class="btn btn-outline-secondary"
+         th:text="${role.policyDefined()} ? 'Back to the role' : 'Cancel'">Cancel</a>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

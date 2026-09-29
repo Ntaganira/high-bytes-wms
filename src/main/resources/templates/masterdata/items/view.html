@@ -42,8 +42,7 @@
             <i class="bi bi-rulers" aria-hidden="true"></i>
             <h2 class="card-title">Specification</h2>
           </div>
-          <span th:if="${item.active()}" th:replace="~{fragments/ui :: chip('ACTIVE')}"></span>
-          <span th:unless="${item.active()}" th:replace="~{fragments/ui :: chip('LOCKED')}"></span>
+          <span th:replace="~{fragments/ui :: chip(${item.active()} ? 'ACTIVE' : 'INACTIVE')}"></span>
         </div>
 
         <dl class="row mb-0 small">
@@ -124,10 +123,13 @@
           </div>
         </div>
 
-        <div th:if="${#lists.isEmpty(history)}"
-             th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Edits to this item will be listed here.')}"></div>
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Edits to this item will be listed here.')}"></div>
+        </th:block>
 
-        <div th:each="entry : ${history}" th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
       </section>
     </div>
 

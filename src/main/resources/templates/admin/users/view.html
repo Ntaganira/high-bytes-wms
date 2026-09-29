@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${user.fullName()}">User</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">ADMINISTRATION · USER</p>
+      <h1 class="page-title" th:text="${user.fullName()}">Jeanne Uwase</h1>
+      <p class="page-sub d-flex align-items-center gap-2">
+        <span class="mono" th:text="${user.username()}">juwase</span>
+        <span th:replace="~{fragments/ui :: chip(${user.status()})}"></span>
+      </p>
+    </div>
+
+    <!-- Nobody administers their own account, so none of this is offered on it. -->
+    <div class="d-flex flex-wrap align-items-start gap-2" th:unless="${self}">
+      <a th:href="@{'/admin/users/' + ${user.id()} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit
+      </a>
+
+      <form th:if="${user.locked()}" th:action="@{'/admin/users/' + ${user.id()} + '/unlock'}" method="post" class="m-0">
+        <button type="submit" class="btn btn-outline-secondary"><i class="bi bi-unlock"></i> Unlock</button>
+      </form>
+
+      <details class="inline-action" th:if="${user.active()}">
+        <summary class="btn btn-outline-secondary"><i class="bi bi-key"></i> Reset password</summary>
+        <form th:action="@{'/admin/users/' + ${user.id()} + '/reset-password'}" method="post"
+              class="hb-card hb-card-body small" style="max-width: 22rem">
+          <p class="mb-2">A temporary password is issued and shown to you once. Every open session of
+            this account ends, and the user must choose a new password at next sign-in.</p>
+          <button type="submit" class="btn btn-sm btn-primary">Issue a temporary password</button>
+        </form>
+      </details>
+
+      <details class="inline-action" th:if="${user.active()}">
+        <summary class="btn btn-outline-danger"><i class="bi bi-slash-circle"></i> Deactivate</summary>
+        <form th:action="@{'/admin/users/' + ${user.id()} + '/deactivate'}" method="post"
+              class="hb-card hb-card-body small" style="max-width: 22rem">
+          <label for="deactivateReason" class="form-label fw-semibold" style="color: var(--color-heading)">Reason</label>
+          <input id="deactivateReason" name="reason" class="form-control form-control-sm mb-2" required maxlength="240"
+                 placeholder="Left the company on 30 September">
+          <p class="mb-2 text-body-secondary">Open sessions end on their next page. The account's signatures
+            and roles stay on record.</p>
+          <button type="submit" class="btn btn-sm btn-danger">Deactivate account</button>
+        </form>
+      </details>
+
+      <form th:unless="${user.active()}" th:action="@{'/admin/users/' + ${user.id()} + '/reactivate'}" method="post" class="m-0">
+        <button type="submit" class="btn btn-outline-success"><i class="bi bi-arrow-counterclockwise"></i> Reactivate</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Shown once, straight after it was issued. It is not stored anywhere readable. -->
+  <div class="secret-box mb-3" th:if="${temporaryPassword}" role="status">
+    <div class="fw-semibold mb-2" style="color: var(--color-heading)">
+      <i class="bi bi-key-fill" aria-hidden="true"></i>
+      Temporary password for <span class="mono" th:text="${user.username()}">juwase</span>
+    </div>
+    <span class="secret-value" th:text="${temporaryPassword}">Kq7M-n3pR-t8wZ</span>
+    <div class="small mt-2">Give it to the user in person. This page shows it only now; the user must
+      replace it at first sign-in.</div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${self}">
+    <i class="bi bi-person-lock" aria-hidden="true"></i>
+    <div>
+      <strong>This is your own account</strong>
+      <span>Another administrator must change it: nobody administers their own access. Change your
+        password under <a th:href="@{/profile/password}">My profile</a>.</span>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:unless="${user.active()}">
+    <i class="bi bi-slash-circle" aria-hidden="true"></i>
+    <div>
+      <strong>Deactivated
+        <span th:if="${user.deactivatedAt() != null}"
+              th:text="'on ' + ${#temporals.format(user.deactivatedAt(), 'dd MMM yyyy')}">on 30 Sep 2026</span></strong>
+      <span th:text="${user.deactivatedReason()} ?: 'No reason recorded.'">Left the company.</span>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${user.leaveOverdue()}">
+    <i class="bi bi-calendar-x" aria-hidden="true"></i>
+    <div>
+      <strong>No leave recorded in the last twelve months</strong>
+      <span>Board paper §5.1 makes ten consecutive working days' leave a control. This is reportable
+        until a leave period is recorded on the account.</span>
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-person-badge" aria-hidden="true"></i>
+            <h2 class="card-title">Account</h2>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-body-secondary fw-normal">Email</dt>
+          <dd class="col-7" th:text="${user.email()} ?: '—'">juwase@highbytes.rw</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Phone</dt>
+          <dd class="col-7 mono" th:text="${user.phone()} ?: '—'">+250 788 000 000</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Home branch</dt>
+          <dd class="col-7" th:text="${user.homeBranchName()} ?: '—'">Gahanga</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Created</dt>
+          <dd class="col-7 mono" th:text="${#temporals.format(user.createdAt(), 'dd MMM yyyy')}">29 Sep 2026</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Last sign-in</dt>
+          <dd class="col-7 mono"
+              th:text="${user.lastLoginAt() != null} ? ${#temporals.format(user.lastLoginAt(), 'dd MMM yyyy HH:mm')} : 'Never'">Never</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Password</dt>
+          <dd class="col-7">
+            <span th:if="${user.mustChangePassword()}">Temporary, to be changed at next sign-in</span>
+            <span th:unless="${user.mustChangePassword()}">Chosen by the user</span>
+            <span class="d-block text-body-secondary mono" th:if="${user.passwordChangedAt() != null}"
+                  th:text="'set ' + ${#temporals.format(user.passwordChangedAt(), 'dd MMM yyyy HH:mm')}">set 29 Sep 2026</span>
+          </dd>
+          <dt class="col-5 text-body-secondary fw-normal">Failed sign-ins</dt>
+          <dd class="col-7">
+            <span class="mono" th:text="${user.failedLoginCount()}">0</span>
+            <span class="d-block text-danger" th:if="${user.locked()}"
+                  th:text="'Locked until ' + ${#temporals.format(user.lockedUntil(), 'dd MMM HH:mm')}">Locked until 21:30</span>
+          </dd>
+          <dt class="col-5 text-body-secondary fw-normal">Last leave</dt>
+          <dd class="col-7 mono"
+              th:text="${user.lastLeaveStart() != null} ? ${#temporals.format(user.lastLeaveStart(), 'dd MMM yyyy')} + ' – ' + ${#temporals.format(user.lastLeaveEnd(), 'dd MMM yyyy')} : 'None recorded'">None recorded</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-8">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-shield-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Roles</h2>
+              <p class="card-sub">Every assignment ever made. Revoked, never deleted.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table hb-table mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Role</th>
+                <th scope="col">Where</th>
+                <th scope="col">Terms</th>
+                <th scope="col">State</th>
+                <th scope="col" th:unless="${self}"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="a : ${assignments}" th:classappend="${!a.revocable()} ? 'opacity-75'">
+                <td>
+                  <span th:text="${a.roleName()}">Finance Department</span>
+                  <span class="d-block small text-body-secondary mono" th:text="${a.roleCode()}">FINANCE</span>
+                  <span class="d-block small text-danger" th:unless="${a.roleActive()}">Role inactive: grants nothing</span>
+                </td>
+                <td th:text="${a.scope()}">All branches</td>
+                <td class="text-wrap small" style="min-width: 12rem">
+                  <span th:text="${a.terms()}">From 29 Sep 2026</span>
+                  <span class="d-block text-body-secondary"
+                        th:text="'Granted by ' + (${a.assignedByName()} ?: 'installation') + ', ' + ${#temporals.format(a.createdAt(), 'dd MMM yyyy')}">Granted by System Administrator</span>
+                  <span class="d-block text-body-secondary" th:if="${a.revokedAt() != null}"
+                        th:text="'Revoked by ' + (${a.revokedByName()} ?: 'installation') + ', ' + ${#temporals.format(a.revokedAt(), 'dd MMM yyyy')} + ': ' + ${a.revokeReason()}">Revoked</span>
+                </td>
+                <td><span th:replace="~{fragments/ui :: chip(${a.state()})}"></span></td>
+                <td th:unless="${self}">
+                  <details class="inline-action" th:if="${a.revocable()}">
+                    <summary class="btn btn-sm btn-link p-0">Revoke</summary>
+                    <form th:action="@{'/admin/users/' + ${user.id()} + '/roles/' + ${a.id()} + '/revoke'}" method="post"
+                          class="d-flex flex-column gap-2" style="min-width: 14rem">
+                      <input name="reason" class="form-control form-control-sm" required maxlength="240"
+                             placeholder="Reason, kept on record" aria-label="Reason for revoking">
+                      <button type="submit" class="btn btn-sm btn-outline-danger">Revoke role</button>
+                    </form>
+                  </details>
+                </td>
+              </tr>
+              <tr th:if="${#lists.isEmpty(assignments)}">
+                <td th:colspan="${self} ? 4 : 5">
+                  <div th:replace="~{fragments/ui :: emptyState('bi-shield', 'No role yet', 'The account can sign in but do nothing until a role is granted.')}"></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Why a grant was refused. Outside the form, so it shows even where the
+             form is not offered: on your own account, or a deactivated one. -->
+        <div th:if="${#fields.hasErrors('${grant}')}" class="alert alert-danger mt-3" role="alert">
+          <p th:each="e : ${#fields.errors('${grant}')}" th:text="${e}" class="mb-0"></p>
+        </div>
+
+        <!-- Granting a role. Opens by itself when a grant was just refused. -->
+        <details class="mt-3" th:unless="${self or !user.active()}" th:open="${grantOpen}">
+          <summary class="btn btn-primary-action"><i class="bi bi-plus-lg"></i> Grant a role</summary>
+
+          <form th:action="@{'/admin/users/' + ${user.id()} + '/roles'}" th:object="${grant}" method="post"
+                class="mt-3" novalidate>
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label for="roleId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                  Role <span class="text-danger">*</span>
+                </label>
+                <select id="roleId" th:field="*{roleId}" class="form-select"
+                        th:classappend="${#fields.hasErrors('roleId')} ? 'is-invalid'">
+                  <option value="">— choose —</option>
+                  <option th:each="r : ${roles}" th:value="${r.id()}" th:text="${r.label()}">Finance Department</option>
+                </select>
+                <div class="invalid-feedback" th:if="${#fields.hasErrors('roleId')}" th:errors="*{roleId}">error</div>
+              </div>
+              <div class="col-12 col-md-6">
+                <label for="branchId" class="form-label small fw-semibold" style="color: var(--color-heading)">Where</label>
+                <select id="branchId" th:field="*{branchId}" class="form-select">
+                  <option value="">All branches</option>
+                  <option th:each="b : ${branches}" th:value="${b.id()}" th:text="${b.displayLabel()} + ' only'">Gahanga only</option>
+                </select>
+                <div class="form-text">A role at one branch gives its rights there and nowhere else.</div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label for="validFrom" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                  From <span class="text-danger">*</span>
+                </label>
+                <input id="validFrom" th:field="*{validFrom}" type="date" class="form-control mono"
+                       th:attr="min=${#temporals.format(#temporals.createToday(), 'yyyy-MM-dd')}"
+                       th:classappend="${#fields.hasErrors('validFrom')} ? 'is-invalid'">
+                <div class="invalid-feedback" th:if="${#fields.hasErrors('validFrom')}" th:errors="*{validFrom}">error</div>
+              </div>
+              <div class="col-6 col-md-3">
+                <label for="validTo" class="form-label small fw-semibold" style="color: var(--color-heading)">Until</label>
+                <input id="validTo" th:field="*{validTo}" type="date" class="form-control mono"
+                       th:classappend="${#fields.hasErrors('validTo')} ? 'is-invalid'">
+                <div class="form-text">Empty: until revoked.</div>
+              </div>
+              <div class="col-12 col-md-6">
+                <label for="reason" class="form-label small fw-semibold" style="color: var(--color-heading)">Why</label>
+                <input id="reason" th:field="*{reason}" class="form-control" maxlength="400"
+                       placeholder="Appointed Finance Officer, letter of 28 Sep">
+                <div class="form-text">Kept in the audit trail with the grant.</div>
+              </div>
+              <div class="col-12 col-md-6">
+                <div class="form-check mt-md-4">
+                  <input class="form-check-input" type="checkbox" id="delegation" th:field="*{delegation}">
+                  <label class="form-check-label" for="delegation">
+                    Cover for a colleague's leave
+                    <span class="text-body-secondary small d-block">Needs an end date, and the colleague must hold the role then.</span>
+                  </label>
+                </div>
+              </div>
+              <div class="col-12 col-md-6">
+                <label for="delegatedFor" class="form-label small fw-semibold" style="color: var(--color-heading)">Covering for</label>
+                <select id="delegatedFor" th:field="*{delegatedFor}" class="form-select">
+                  <option value="">— only for leave cover —</option>
+                  <option th:each="c : ${colleagues}" th:value="${c.id()}" th:text="${c.fullName()} + ' (' + ${c.username()} + ')'">Jean Bosco</option>
+                </select>
+              </div>
+            </div>
+
+            <p class="small text-body-secondary mt-3 mb-2">A grant that breaks a segregation rule, however the
+              rights are packaged into roles, or gives an administrator any operational right, is refused with
+              the rule's reason, and the attempt is recorded. It takes effect on the user's next page from its
+              start date.</p>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Grant role</button>
+          </form>
+        </details>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">What this account may do today</h2>
+              <p class="card-sub">Every permission its roles in force grant, and where</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive" th:unless="${#lists.isEmpty(held)}">
+          <table class="table hb-table mb-0">
+            <thead>
+              <tr><th scope="col">Permission</th><th scope="col">What it allows</th><th scope="col">Duty</th><th scope="col">Where</th></tr>
+            </thead>
+            <tbody>
+              <tr th:each="p : ${held}">
+                <td class="mono" th:text="${p.code()}">dispatch.approve</td>
+                <td class="text-wrap" th:text="${p.description()}">Approve a delivery authorization</td>
+                <td><span th:replace="~{fragments/ui :: chip(${p.duty()})}"></span></td>
+                <td th:text="${p.scope()}">All branches</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <th:block th:if="${#lists.isEmpty(held)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-list-check', 'Nothing yet', 'No role in force grants this account any permission today.')}"></div>
+        </th:block>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-door-open" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Recent sign-ins</h2>
+              <p class="card-sub">The last ten attempts, successful or not</p>
+            </div>
+          </div>
+        </div>
+        <div th:replace="~{fragments/ui :: signInList(${signIns})}"></div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-7">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Change history</h2>
+              <p class="card-sub">Every change to this account and its roles, newest first</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Changes to this account will be listed here.')}"></div>
+        </th:block>
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

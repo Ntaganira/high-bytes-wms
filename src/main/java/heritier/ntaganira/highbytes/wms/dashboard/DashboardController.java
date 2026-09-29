@@ -14,8 +14,8 @@ package heritier.ntaganira.highbytes.wms.dashboard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import heritier.ntaganira.highbytes.wms.branch.BranchView;
-import heritier.ntaganira.highbytes.wms.common.web.GlobalModelAdvice;
 import heritier.ntaganira.highbytes.wms.security.AppUserDetails;
+import heritier.ntaganira.highbytes.wms.security.SessionAccess;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.stereotype.Controller;
@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -74,10 +75,23 @@ public class DashboardController {
         return "dashboard";
     }
 
-    /** Switching branch changes what every screen shows, so it lives in the session. */
+    /**
+     * Switching branch changes what every screen shows and which rights
+     * apply, so it lives in the session and the user's permissions are
+     * reloaded for it on the next request. Only branches where the user
+     * holds a role are offered, and only those are accepted.
+     */
     @PostMapping("/branch/switch")
-    public String switchBranch(@RequestParam UUID branchId, HttpSession session) {
-        session.setAttribute(GlobalModelAdvice.BRANCH_SESSION_KEY, branchId);
+    public String switchBranch(@RequestParam UUID branchId,
+                               @AuthenticationPrincipal AppUserDetails user,
+                               HttpSession session,
+                               RedirectAttributes redirect) {
+        if (!user.accessibleBranchIds().contains(branchId)) {
+            redirect.addFlashAttribute("flashError",
+                    "You hold no role at that branch, so you cannot work there.");
+            return "redirect:/";
+        }
+        session.setAttribute(SessionAccess.BRANCH_SESSION_KEY, branchId);
         return "redirect:/";
     }
 }

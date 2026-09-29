@@ -15,11 +15,14 @@ import heritier.ntaganira.highbytes.wms.branch.BranchView;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditAction;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditService;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditSnapshot;
+import heritier.ntaganira.highbytes.wms.security.CurrentUser;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 import java.math.BigDecimal;
 import java.sql.Types;
@@ -33,6 +36,10 @@ import java.util.UUID;
  * <p>A location that holds stock cannot be deleted or have its branch moved:
  * the ledger points at it, and a movement whose location disappeared cannot
  * be read back.
+ *
+ * <p>Locations belong to a branch, and so does the right to manage them: a
+ * {@code location.manage} granted at Gahanga does not reach Rubavu's
+ * locations, whichever branch the user is looking at.
  */
 @Service
 @Transactional(readOnly = true)
@@ -55,6 +62,9 @@ public class LocationService {
 
     private final JdbcClient jdbc;
     private final AuditService audit;
+
+    /** storage_bin.zone (V2). */
+    static final int ZONE_MAX = 40;
 
     public LocationService(JdbcClient jdbc, AuditService audit) {
         this.jdbc = jdbc;
@@ -112,6 +122,14 @@ public class LocationService {
                 .single();
     }
 
+    public boolean exists(UUID id) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM location WHERE id = :id)")
+                .param("id", id, Types.OTHER)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /** The location as its form holds it; a 404 when no location has that id. */
     public LocationForm formFor(UUID id) {
         return jdbc.sql("""
                 SELECT id, branch_id, code, name, location_type,
@@ -131,7 +149,8 @@ public class LocationService {
                     f.setActive(rs.getBoolean("is_active"));
                     return f;
                 })
-                .single();
+                .optional()
+                .orElseThrow(() -> new LocationNotFoundException(id));
     }
 
     // ---- writes ----------------------------------------------------------
@@ -139,6 +158,7 @@ public class LocationService {
     @Transactional
     @PreAuthorize("hasAuthority('location.manage')")
     public UUID create(LocationForm form, BranchView branch) {
+        CurrentUser.requireAt("location.manage", form.getBranchId());
         UUID id = UUID.randomUUID();
         try {
             jdbc.sql("""
@@ -168,6 +188,8 @@ public class LocationService {
     @PreAuthorize("hasAuthority('location.manage')")
     public void update(UUID id, LocationForm form, BranchView branch) {
         LocationForm before = formFor(id);
+        CurrentUser.requireAt("location.manage", before.getBranchId());
+        CurrentUser.requireAt("location.manage", form.getBranchId());
 
         // Moving a location that holds stock would move that stock between
         // branches without a transfer document. Refused.
@@ -214,6 +236,18 @@ public class LocationService {
     @Transactional
     @PreAuthorize("hasAuthority('location.manage')")
     public UUID addBin(UUID locationId, String binCode, String zone, BranchView branch) {
+        LocationForm location = formFor(locationId);
+        CurrentUser.requireAt("location.manage", location.getBranchId());
+
+        String code = binCode == null ? "" : binCode.trim().toUpperCase();
+        if (!code.matches("^[A-Z0-9][A-Z0-9._-]{0,23}$")) {
+            throw new InvalidBinCodeException(binCode);
+        }
+        String area = (zone == null || zone.isBlank()) ? null : zone.trim();
+        if (area != null && area.length() > ZONE_MAX) {
+            throw new InvalidBinZoneException();
+        }
+
         UUID id = UUID.randomUUID();
         try {
             jdbc.sql("""
@@ -222,30 +256,68 @@ public class LocationService {
                     """)
                     .param("id", id, Types.OTHER)
                     .param("locationId", locationId, Types.OTHER)
-                    .param("code", binCode.trim().toUpperCase())
-                    .param("zone", (zone == null || zone.isBlank()) ? null : zone.trim())
+                    .param("code", code)
+                    .param("zone", area)
                     .update();
         } catch (DuplicateKeyException e) {
-            throw new LocationCodeTakenException(binCode);
+            throw new BinCodeTakenException(code, location.getCode());
         }
 
-        audit.record("storage_bin", id, "Bin · " + binCode, AuditAction.CREATE,
-                AuditSnapshot.of().value("Bin code", binCode).value("Zone", zone),
+        // The code as stored, and where: the audit names what a reviewer will find.
+        audit.record("storage_bin", id, "Bin · " + code + " at " + location.getCode(), AuditAction.CREATE,
+                AuditSnapshot.of().value("Bin code", code).value("Zone", area),
                 branch, null);
         return id;
     }
 
     @Transactional
     @PreAuthorize("hasAuthority('location.manage')")
-    public void setBinActive(UUID binId, boolean active, BranchView branch) {
+    public void setBinActive(UUID locationId, UUID binId, boolean active, BranchView branch) {
+        LocationForm location = formFor(locationId);
+        CurrentUser.requireAt("location.manage", location.getBranchId());
+
+        // The bin must belong to the location in the address, or a toggle sent
+        // through one location's page could reach any bin in the company.
+        Bin bin = jdbc.sql("""
+                SELECT bin_code, is_active FROM storage_bin
+                 WHERE id = :binId AND location_id = :locationId
+                   FOR UPDATE
+                """)
+                .param("binId", binId, Types.OTHER)
+                .param("locationId", locationId, Types.OTHER)
+                .query((rs, n) -> new Bin(rs.getString("bin_code"), rs.getBoolean("is_active")))
+                .optional()
+                .orElseThrow(() -> new BinNotFoundException(locationId, binId));
+
+        // Nothing changes, so there is nothing to record.
+        if (bin.active() == active) return;
+
+        // The page disables the button for a bin holding stock; this is the
+        // check, because a disabled button stops nobody holding the URL.
+        if (!active && binHoldsStock(binId)) {
+            throw new BinHoldsStockException(bin.code());
+        }
+
         jdbc.sql("UPDATE storage_bin SET is_active = :active WHERE id = :id")
                 .param("id", binId, Types.OTHER)
                 .param("active", active)
                 .update();
 
-        audit.record("storage_bin", binId, "Bin",
+        audit.record("storage_bin", binId, "Bin · " + bin.code() + " at " + location.getCode(),
                 active ? AuditAction.UPDATE : AuditAction.DEACTIVATE,
-                AuditSnapshot.of().field("Active", !active, active), branch, null);
+                AuditSnapshot.of().field("Active", bin.active(), active), branch, null);
+    }
+
+    private record Bin(String code, boolean active) {}
+
+    private boolean binHoldsStock(UUID binId) {
+        return jdbc.sql("""
+                SELECT EXISTS (SELECT 1 FROM stock_balance
+                                WHERE storage_bin_id = :id AND qty_on_hand <> 0)
+                """)
+                .param("id", binId, Types.OTHER)
+                .query(Boolean.class)
+                .single();
     }
 
     // ---- helpers ---------------------------------------------------------
@@ -254,10 +326,19 @@ public class LocationService {
         return AuditSnapshot.of()
                 .field("Code",     before == null ? null : before.getCode(),         after.getCode())
                 .field("Name",     before == null ? null : before.getName(),         after.getName())
+                .field("Branch",   before == null ? null : branchName(before.getBranchId()),
+                                   branchName(after.getBranchId()))
                 .field("Type",     before == null ? null : before.getLocationType(), after.getLocationType())
                 .field("Bonded",   before == null ? null : before.isBonded(),        after.isBonded())
                 .field("Sellable", before == null ? null : before.isSellable(),      after.isSellable())
                 .field("Active",   before == null ? null : before.isActive(),        after.isActive());
+    }
+
+    /** Audited by name: the record reads as the reviewer would have seen it. */
+    private String branchName(UUID id) {
+        if (id == null) return null;
+        return jdbc.sql("SELECT name FROM branch WHERE id = :id")
+                .param("id", id, Types.OTHER).query(String.class).optional().orElse(null);
     }
 
     private LocationRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
@@ -281,9 +362,49 @@ public class LocationService {
         public boolean holdsStock() { return distinctItems > 0; }
     }
 
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public static class LocationNotFoundException extends RuntimeException {
+        public LocationNotFoundException(UUID id) {
+            super("No location with id " + id);
+        }
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public static class BinNotFoundException extends RuntimeException {
+        public BinNotFoundException(UUID locationId, UUID binId) {
+            super("No bin " + binId + " at location " + locationId);
+        }
+    }
+
     public static class LocationCodeTakenException extends RuntimeException {
         public LocationCodeTakenException(String code) {
             super("Code " + code + " is already used at this branch.");
+        }
+    }
+
+    public static class BinCodeTakenException extends RuntimeException {
+        public BinCodeTakenException(String code, String locationCode) {
+            super("Bin " + code + " already exists at " + locationCode + ".");
+        }
+    }
+
+    public static class InvalidBinZoneException extends RuntimeException {
+        public InvalidBinZoneException() {
+            super("A zone is at most " + ZONE_MAX + " characters.");
+        }
+    }
+
+    public static class InvalidBinCodeException extends RuntimeException {
+        public InvalidBinCodeException(String code) {
+            super(code == null || code.isBlank()
+                    ? "Enter a bin code."
+                    : "A bin code is up to 24 letters, digits and . _ - characters, starting with a letter or digit.");
+        }
+    }
+
+    public static class BinHoldsStockException extends RuntimeException {
+        public BinHoldsStockException(String code) {
+            super("Bin " + code + " holds stock, so it cannot be deactivated. Move the stock out first.");
         }
     }
 

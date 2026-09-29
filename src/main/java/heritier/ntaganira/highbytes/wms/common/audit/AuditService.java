@@ -21,8 +21,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -72,10 +77,13 @@ public class AuditService {
 
     private final JdbcClient jdbc;
     private final ObjectMapper json;
+    private final TransactionTemplate separately;
 
-    public AuditService(JdbcClient jdbc, ObjectMapper json) {
+    public AuditService(JdbcClient jdbc, ObjectMapper json, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.json = json;
+        this.separately = new TransactionTemplate(transactions);
+        this.separately.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -85,7 +93,8 @@ public class AuditService {
      * the attempt being rolled back, which is the whole point of having one.
      * A failure here is logged and swallowed — losing an audit row is bad,
      * but failing the user's work because the audit write failed is worse,
-     * and the application log keeps the evidence either way.
+     * and the application log keeps the evidence either way. Text longer than
+     * its column is cut to fit, so no value a user types can cause that loss.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(String entityName,
@@ -96,32 +105,127 @@ public class AuditService {
                        BranchView branch,
                        String reason) {
         try {
-            var user = currentUser();
-            var request = currentRequest();
-
-            jdbc.sql(INSERT)
-                .param("entityName", entityName)
-                .param("entityId", entityId, Types.OTHER)
-                .param("entityLabel", entityLabel)
-                .param("documentId", null, Types.OTHER)
-                .param("action", action.name())
-                .param("beforeState", snapshot == null || snapshot.before().isEmpty()
-                        ? null : write(snapshot.before()))
-                .param("afterState", snapshot == null ? null : write(snapshot.after()))
-                .param("actorUserId", user == null ? null : user.id(), Types.OTHER)
-                .param("actorName", user == null ? "System" : user.fullName())
-                .param("actorUsername", user == null ? "system" : user.username())
-                .param("actorRole", user == null ? "Installation" : user.primaryRoleName())
-                .param("branchId", branch == null ? null : branch.id(), Types.OTHER)
-                .param("branchName", branch == null ? null : branch.name())
-                .param("clientAddress", request == null ? null : clientAddress(request))
-                .param("userAgent", request == null ? null : truncate(request.getHeader("User-Agent"), 300))
-                .param("reason", reason)
-                .update();
-
+            insert(entityName, entityId, entityLabel, action, snapshot, branch, reason);
         } catch (Exception e) {
             log.error("Audit write failed for {} {} action {} — the change itself was not rolled back",
                     entityName, entityId, action, e);
+        }
+    }
+
+    /**
+     * Log a change to who may do what, as part of the change itself.
+     *
+     * <p>Runs in the caller's transaction and lets a failure through, so the
+     * change and its record commit together or not at all. For access the
+     * audit trail is the only account of who granted, revoked, reset or
+     * deactivated: an access change that cannot be recorded does not happen.
+     * A refused attempt is logged with {@link #record}, which survives the
+     * refusal's rollback.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordAccessChange(String entityName,
+                                   UUID entityId,
+                                   String entityLabel,
+                                   AuditAction action,
+                                   AuditSnapshot snapshot,
+                                   BranchView branch,
+                                   String reason) {
+        insert(entityName, entityId, entityLabel, action, snapshot, branch, reason);
+    }
+
+    /**
+     * Log a refused access change. The refusal rolls its transaction back,
+     * so the record is written once that is done, in a transaction of its
+     * own: the attempt stays on file, and nothing holds the access lock while
+     * the record waits for a connection. Outside a transaction it is written
+     * at once. A failure is logged and swallowed, as for {@link #record}.
+     */
+    public void recordRefusal(String entityName, UUID entityId, String entityLabel,
+                              AuditSnapshot snapshot, BranchView branch, String reason) {
+        Runnable write = () -> {
+            try {
+                separately.executeWithoutResult(status ->
+                        insert(entityName, entityId, entityLabel, AuditAction.REJECT, snapshot, branch, reason));
+            } catch (Exception e) {
+                log.error("Audit write failed for a refused change to {} {}", entityName, entityId, e);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    write.run();
+                }
+            });
+        } else {
+            write.run();
+        }
+    }
+
+    private void insert(String entityName, UUID entityId, String entityLabel, AuditAction action,
+                        AuditSnapshot snapshot, BranchView branch, String reason) {
+        var user = currentUser();
+        var request = currentRequest();
+
+        // Every text value cut to its column (V1 audit_log).
+        jdbc.sql(INSERT)
+            .param("entityName", entityName)
+            .param("entityId", entityId, Types.OTHER)
+            .param("entityLabel", truncate(entityLabel, 200))
+            .param("documentId", null, Types.OTHER)
+            .param("action", action.name())
+            .param("beforeState", snapshot == null || snapshot.before().isEmpty()
+                    ? null : write(snapshot.before()))
+            .param("afterState", snapshot == null ? null : write(snapshot.after()))
+            .param("actorUserId", user == null ? null : user.id(), Types.OTHER)
+            .param("actorName", truncate(user == null ? "System" : user.fullName(), 160))
+            .param("actorUsername", truncate(user == null ? "system" : user.username(), 60))
+            .param("actorRole", truncate(user == null ? "Installation" : user.rolesHeldHere(), 120))
+            .param("branchId", branch == null ? null : branch.id(), Types.OTHER)
+            .param("branchName", branch == null ? null : truncate(branch.name(), 120))
+            .param("clientAddress", request == null ? null : clientAddress(request))
+            .param("userAgent", request == null ? null : truncate(request.getHeader("User-Agent"), 300))
+            .param("reason", truncate(reason, 400))
+            .update();
+    }
+
+    /**
+     * Log a sign-in, a failed sign-in or a sign-out.
+     *
+     * <p>A failed attempt happens before anyone is signed in, so the actor
+     * is named here rather than read from the session: the account tried,
+     * when there is one, and always the username typed. These rows sit
+     * under their own entity name, {@code sign_in}, so a user's change
+     * history is not buried under their sign-ins.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordSignIn(UUID userId, String username, String fullName,
+                             AuditAction action, String reason) {
+        try {
+            var request = currentRequest();
+            String typed = truncate(username, 60);
+
+            jdbc.sql(INSERT)
+                .param("entityName", "sign_in")
+                .param("entityId", userId, Types.OTHER)
+                .param("entityLabel", "Sign-in · " + typed)
+                .param("documentId", null, Types.OTHER)
+                .param("action", action.name())
+                .param("beforeState", null)
+                .param("afterState", null)
+                .param("actorUserId", userId, Types.OTHER)
+                .param("actorName", fullName == null ? "Unknown account" : truncate(fullName, 160))
+                .param("actorUsername", typed)
+                .param("actorRole", null)
+                .param("branchId", null, Types.OTHER)
+                .param("branchName", null)
+                .param("clientAddress", request == null ? null : clientAddress(request))
+                .param("userAgent", request == null ? null : truncate(request.getHeader("User-Agent"), 300))
+                .param("reason", truncate(reason, 400))
+                .update();
+
+        } catch (Exception e) {
+            log.error("Audit write failed for sign-in event {} by {}", action, username, e);
         }
     }
 

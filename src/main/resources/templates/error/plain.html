@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="'Error ' + ${status} + ' · HIGH BYTES WMS'">Error · HIGH BYTES WMS</title>
+  <link rel="icon" type="image/svg+xml" th:href="@{/favicon.svg}">
+  <link rel="stylesheet" th:href="@{/webjars/bootstrap/css/bootstrap.min.css}">
+  <link rel="stylesheet" th:href="@{/webjars/bootstrap-icons/font/bootstrap-icons.min.css}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap">
+  <link rel="stylesheet" th:href="@{/css/tokens.css}">
+  <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+
+<!-- Errors for anyone not signed in, chosen by ErrorPages. The usual one is a
+     403 from a sign-in form left open until its token expired. -->
+<div class="login-shell">
+  <div class="login-card">
+
+    <div class="login-brand">
+      <div class="brand-logo" aria-hidden="true">HB</div>
+      <div>
+        <div style="color: var(--color-heading); font-weight: 800; letter-spacing: .3px">HIGH BYTES</div>
+        <div style="color: var(--color-success); font-size: .66rem; font-weight: 700; letter-spacing: .8px">WAREHOUSE CONTROL</div>
+      </div>
+    </div>
+
+    <th:block th:switch="${status}">
+      <th:block th:case="403">
+        <h1 class="login-title">This page has expired</h1>
+        <p class="login-sub">For your security, a form stops working after a while.
+           Go back to the sign-in page and try again.</p>
+      </th:block>
+      <th:block th:case="404">
+        <h1 class="login-title">Page not found</h1>
+        <p class="login-sub">Nothing lives at this address.</p>
+      </th:block>
+      <th:block th:case="*">
+        <!-- Only a server error is logged; a refused address is not. -->
+        <th:block th:if="${status >= 500}">
+          <h1 class="login-title">Something went wrong</h1>
+          <p class="login-sub">The error has been logged. Go back to the sign-in page
+             and try again.</p>
+        </th:block>
+        <th:block th:unless="${status >= 500}">
+          <h1 class="login-title">That address isn't valid</h1>
+          <p class="login-sub">It may have been typed wrongly or copied only in part.
+             Go back to the sign-in page and start from there.</p>
+        </th:block>
+      </th:block>
+    </th:block>
+
+    <p class="mono small text-body-secondary"
+       th:text="${status} + ' · ' + ${#dates.format(timestamp, 'yyyy-MM-dd HH:mm:ss')}">403 · 2026-09-29 20:31:05</p>
+
+    <a th:href="@{/login}" class="btn btn-primary-action w-100 justify-content-center">
+      <i class="bi bi-box-arrow-in-right"></i> Go to sign in
+    </a>
+
+  </div>
+</div>
+
+</body>
+</html>
