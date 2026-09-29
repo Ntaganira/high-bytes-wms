@@ -1,0 +1,142 @@
+/* =====================================================================
+   HIGH BYTES WMS — design tokens
+   The single source of truth for colour, type, spacing and shape.
+   Generated from the design system; do not hand-edit component styles
+   with literal hex values, change a token here instead.
+   ===================================================================== */
+:root {
+  /* ---- Primary ---------------------------------------------------- */
+  --color-primary: #0878D1;
+  --color-primary-dark: #0668B5;
+  --color-primary-hover: #0668B5;
+  --color-sidebar: #002555;
+  --color-sidebar-dark: #001B3F;
+  --color-active-menu: #004DA6;
+  --color-heading: #0D2F65;
+  --color-text: #31577A;
+  --color-muted: #5A7086;          /* 5.1:1 on card, 4.8:1 on page */
+
+  /* ---- Page & surface --------------------------------------------- */
+  --color-background: #F4F8FC;
+  --color-card: #FFFFFF;
+  --color-border: #DCE8F2;         /* decorative edges only */
+  --color-divider: #E8F0F6;
+  --color-control-border: #7590A8; /* inputs and controls: clears 3:1 */
+
+  /* ---- Status ------------------------------------------------------
+     Text steps and fill steps are separate. A colour bright enough to
+     read as an 8px dot is rarely dark enough for 12px bold text.      */
+  --color-success: #0E8553;
+  --color-success-fill: #18A66A;
+  --color-success-light: #DDF6EA;
+  --color-warning: #B8690F;
+  --color-warning-fill: #F28C28;
+  --color-warning-light: #FFF0DE;
+  --color-danger: #D32535;
+  --color-danger-light: #FFE1E4;
+  --color-info: #1769B0;           /* a state, never an action */
+  --color-info-light: #E4F2FF;
+
+  /* ---- Accents ------------------------------------------------------ */
+  --color-blue: #0878D1;
+  --color-green: #0E8553;
+  --color-purple: #6257E8;         /* bonded and customs-controlled */
+  --color-orange: #B8690F;
+
+  /* ---- Brand --------------------------------------------------------
+     The logo green. Reserved for the wordmark subtitle and the active
+     navigation edge. Never text, never a chart mark: 2.2:1 on white.  */
+  --color-brand-accent: #8CC63E;
+  --color-active-accent: #8CC63E;
+
+  /* ---- KPI icon backgrounds ----------------------------------------- */
+  --kpi-bg-items: #E3F1FF;
+  --kpi-bg-received: #DDF7EC;
+  --kpi-bg-delivery: #EAE8FF;
+  --kpi-bg-issues: #FFF0DE;
+
+  /* ---- Quick action backgrounds ------------------------------------- */
+  --qa-bg-blue: #EDF6FF;
+  --qa-bg-green: #ECF9F4;
+  --qa-bg-purple: #F1F0FF;
+  --qa-bg-orange: #FFF5E9;
+  --qa-bg-neutral: #F3F7FA;
+
+  /* ---- Chart --------------------------------------------------------
+     Validated for contrast and colour-vision separation against each
+     other. Only these two may carry a series.                         */
+  --chart-received: #0878D1;
+  --chart-delivery: #12916C;
+
+  /* ---- Badges -------------------------------------------------------- */
+  --badge-completed-bg: #DDF6EA;
+  --badge-completed-text: #0F6E47;
+  --badge-progress-bg: #DDEEFF;
+  --badge-progress-text: #1769B0;
+  --badge-held-bg: #FFF0DE;
+  --badge-held-text: #8A5A12;
+  --badge-low-bg: #FFDDE1;
+  --badge-low-text: #B32330;
+  --badge-bonded-bg: #E8E7FE;
+  --badge-bonded-text: #4C3BA8;
+  --badge-locked-bg: #EDF2F7;
+  --badge-locked-text: #4A5A6B;
+
+  /* ---- Interaction --------------------------------------------------- */
+  --color-sidebar-hover: #064D78;
+  --color-focus: #0878D1;
+  --color-sidebar-label: #7FA6C9;
+  --color-sidebar-link: #D6E6F4;
+
+  /* ---- Layout -------------------------------------------------------- */
+  --sidebar-width: 275px;
+  --topbar-height: 72px;
+  --radius-card: 10px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+  --shadow-card: 0 2px 10px rgba(7, 59, 105, 0.06);
+  --shadow-active-nav: 0 4px 12px rgba(8, 120, 209, 0.35);
+  --font-base: "Inter", "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+/* =====================================================================
+   Bootstrap bridge — Bootstrap reads our tokens, never its own defaults.
+   ===================================================================== */
+:root,
+[data-bs-theme="light"] {
+  --bs-body-bg: var(--color-background);
+  --bs-body-color: var(--color-text);
+  --bs-emphasis-color: var(--color-heading);
+  --bs-secondary-color: var(--color-muted);
+  --bs-heading-color: var(--color-heading);
+  --bs-secondary-bg: var(--color-background);
+  --bs-tertiary-bg: var(--color-background);
+
+  --bs-border-color: var(--color-border);
+  --bs-border-color-translucent: var(--color-border);
+
+  --bs-primary: var(--color-primary);
+  --bs-success: var(--color-success);
+  --bs-warning: var(--color-warning);
+  --bs-danger: var(--color-danger);
+  --bs-info: var(--color-info);
+
+  --bs-link-color: var(--color-primary);
+  --bs-link-hover-color: var(--color-primary-dark);
+
+  --bs-border-radius: var(--radius-card);
+  --bs-border-radius-sm: var(--radius-sm);
+  --bs-border-radius-lg: var(--radius-card);
+  --bs-border-radius-pill: var(--radius-pill);
+
+  --bs-font-sans-serif: var(--font-base);
+  --bs-font-monospace: var(--font-mono);
+  --bs-body-font-size: 0.875rem;
+
+  --bs-focus-ring-color: rgba(8, 120, 209, 0.25);
+  --bs-focus-ring-width: 2px;
+
+  --bs-table-bg: var(--color-card);
+  --bs-table-hover-bg: var(--color-background);
+}

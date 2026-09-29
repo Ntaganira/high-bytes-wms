@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!--
+  One fragment per recurring UI element. If chip markup gets hand-written
+  in twelve templates the palette rules die quietly, so a status is never
+  styled inline anywhere: it comes through here.
+-->
+
+<!-- ===================================================================
+     Status chip. Maps a status to its class; always carries the word,
+     because colour is never the only signal.
+     Usage: <span th:replace="~{fragments/ui :: chip('HELD')}"></span>
+     =================================================================== -->
+<span th:fragment="chip(status)"
+      class="status-badge"
+      th:classappend="'status-' + ${#strings.toLowerCase(status)}"
+      th:with="icon=${
+        status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' ? 'bi-check-circle-fill' :
+        status == 'HELD'      or status == 'PENDING'  ? 'bi-clock-fill' :
+        status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' ? 'bi-exclamation-octagon-fill' :
+        status == 'TRANSIT'   or status == 'PROGRESS' ? 'bi-arrow-repeat' :
+        status == 'BONDED'    ? 'bi-shield-lock-fill' :
+        status == 'CANCELLED' ? 'bi-x-circle-fill' :
+        status == 'LOCKED'    ? 'bi-lock-fill' : 'bi-circle-fill'}">
+  <i class="bi" th:classappend="${icon}" aria-hidden="true"></i>
+  <span th:text="${status}">STATUS</span>
+</span>
+
+
+<!-- ===================================================================
+     Document header. Every controlled document opens with this, so a
+     user always knows which record, which state, which branch.
+     =================================================================== -->
+<div th:fragment="documentHeader(doc)" class="d-flex flex-wrap align-items-center gap-3 mb-3">
+  <div class="d-flex align-items-center gap-3">
+    <span class="serial fs-6 fw-semibold" th:text="${doc.serialNo}">GRN-KGL-2026-0412</span>
+    <span th:replace="~{fragments/ui :: chip(${doc.status})}"></span>
+    <span th:replace="~{fragments/ui :: chip('BONDED')}" th:if="${doc.bonded}"></span>
+  </div>
+  <div class="text-body-secondary small ms-auto">
+    <span th:text="${doc.branchName}">Gahanga, Kigali</span>
+    <span class="mx-1">·</span>
+    <span th:text="'Raised by ' + ${doc.createdByName}">Raised by …</span>
+    <span class="mx-1">·</span>
+    <span th:text="${#temporals.format(doc.createdAt, 'dd MMM yyyy HH:mm')}">29 Sep 2026 10:24</span>
+  </div>
+</div>
+
+
+<!-- ===================================================================
+     Blocked release. The single most important state in the system.
+     It names the outstanding step and who holds it, never a generic
+     message, and the action stays disabled rather than hidden — hiding
+     it makes users hunt, disabling it with the reason teaches the rule.
+     =================================================================== -->
+<div th:fragment="releaseBlocked(step)" class="release-blocked mb-3" role="alert">
+  <i class="bi bi-shield-exclamation" aria-hidden="true"></i>
+  <div>
+    <strong>Release is blocked</strong>
+    <span>
+      Awaiting <span class="fw-semibold" th:text="${step.roleName}">Internal Controller</span>
+      <th:block th:if="${step.holderName}">
+        — <span th:text="${step.holderName}">name</span>
+      </th:block>
+      <th:block th:if="${step.waitingHours}">
+        · waiting <span th:text="${step.waitingHours}">26</span> hours
+      </th:block>
+    </span>
+    <div class="small mt-1">No stock leaves the premises until every required signature is present.</div>
+  </div>
+</div>
+
+
+<!-- ===================================================================
+     Approval chain. Read top to bottom; the shape should be legible
+     from across a desk.
+     =================================================================== -->
+<ol th:fragment="approvalChain(steps)" class="approval-chain">
+  <li th:each="s : ${steps}" class="approval-step"
+      th:classappend="${s.state}">
+    <span class="approval-node" aria-hidden="true"></span>
+    <div class="approval-role">
+      <span th:text="${s.roleName}">Warehouse Manager</span>
+      <span class="text-body-secondary fw-normal" th:text="' · ' + ${s.actionLabel}"> · VERIFY</span>
+    </div>
+    <div class="approval-meta" th:if="${s.state == 'signed'}">
+      <span th:text="${s.actorName}">Jean Bosco M.</span>
+      <span th:text="' · ' + ${#temporals.format(s.decidedAt, 'dd MMM HH:mm')}"></span>
+    </div>
+    <div class="approval-meta" th:if="${s.state == 'current'}">Awaiting signature</div>
+    <div class="approval-meta" th:if="${s.state == 'pending'}">Not yet reached</div>
+    <div class="approval-meta text-danger" th:if="${s.state == 'rejected'}"
+         th:text="${s.comment}">Reason</div>
+  </li>
+</ol>
+
+
+<!-- ===================================================================
+     Audit diff. Red for the old value, green for the new — the one place
+     those colours mean "before" and "after" rather than "bad" and "good".
+     That reading is only safe because the two cells always sit side by
+     side, in that order, with an arrow between them.
+     =================================================================== -->
+<div th:fragment="auditEntry(entry)" class="mb-4">
+  <div class="fw-semibold" style="color: var(--color-heading)">
+    <span th:text="${entry.entityLabel}">User account · HNIYONSENGA</span>
+    <span class="fw-normal text-body-secondary"
+          th:text="' — ' + ${#strings.toLowerCase(entry.action)} + ' ' + ${#temporals.format(entry.occurredAt, 'dd MMMM yyyy HH:mm')} + ' CAT'"></span>
+  </div>
+
+  <table class="audit-diff mt-2">
+    <thead>
+      <tr><th scope="col">Field</th><th scope="col">Before</th><th scope="col"></th><th scope="col">After</th></tr>
+    </thead>
+    <tbody>
+      <!-- Only fields that actually changed. Unchanged ones are not listed. -->
+      <tr th:each="c : ${entry.changes}">
+        <td class="text-body-secondary" th:text="${c.fieldLabel}">Role</td>
+        <td><span class="audit-before" th:text="${c.before} ?: '—'">Admin</span></td>
+        <td class="audit-arrow" aria-label="changed to">&rarr;</td>
+        <td><span class="audit-after" th:text="${c.after} ?: '—'">Administrator</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="audit-actor">
+    Changed by <strong th:text="${entry.actorName}">Jean Bosco M.</strong>
+    (<span th:text="${entry.actorUsername}">jbosco</span>,
+     <span th:text="${entry.actorRole}">System Administrator</span>,
+     <span th:text="${entry.branchName}">Kigali</span>)
+    <th:block th:if="${entry.clientAddress}">
+      from <span th:text="${entry.clientAddress}">10.4.2.18</span>
+    </th:block>
+  </div>
+</div>
+
+
+<!-- ===================================================================
+     Empty state. Says what would appear here, not just "no data".
+     =================================================================== -->
+<div th:fragment="emptyState(icon, title, message)" class="text-center py-5">
+  <i class="bi" th:classappend="${icon}" style="font-size: 2.2rem; color: var(--color-muted)" aria-hidden="true"></i>
+  <div class="fw-semibold mt-2" style="color: var(--color-heading)" th:text="${title}">Nothing here</div>
+  <div class="text-body-secondary small" th:text="${message}">Message</div>
+</div>
+
+</body>
+</html>

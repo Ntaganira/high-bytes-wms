@@ -1,0 +1,434 @@
+/* =====================================================================
+   HIGH BYTES WMS — component styles
+   Every colour here is a token. No literal hex values below this line.
+   ===================================================================== */
+
+/* ---- Base ----------------------------------------------------------- */
+body {
+  font-family: var(--font-base);
+  background: var(--color-background);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--color-primary); text-decoration: none; }
+a:hover { color: var(--color-primary-dark); }
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.form-control:focus, .form-select:focus, .btn:focus-visible {
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 .2rem rgba(8, 120, 209, .25);
+}
+
+/* Controls must be perceivable; card edges need not be. */
+.form-control, .form-select, .form-check-input,
+.topbar-control, .icon-btn, .period-group {
+  border-color: var(--color-control-border);
+}
+
+/* Anything verified character by character is monospaced. */
+.mono, .doc-link, .serial, .num, .kpi-value, .stock-pill {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+th.num, td.num { text-align: right; }
+
+/* ---- Sidebar -------------------------------------------------------- */
+.app-sidebar {
+  width: var(--sidebar-width);
+  background: linear-gradient(180deg, var(--color-sidebar) 0%, var(--color-sidebar-dark) 100%);
+  color: var(--color-sidebar-link);
+}
+@media (min-width: 992px) {
+  .app-sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0;
+    z-index: 1030; overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-sidebar-hover) transparent;
+  }
+}
+.app-sidebar.offcanvas-lg { --bs-offcanvas-width: var(--sidebar-width); }
+@media (max-width: 991.98px) {
+  .app-sidebar.offcanvas-lg {
+    background: linear-gradient(180deg, var(--color-sidebar) 0%, var(--color-sidebar-dark) 100%);
+  }
+}
+
+.brand { display: flex; align-items: center; gap: 12px; padding: 18px 20px 16px; }
+.brand-logo {
+  width: 44px; height: 44px; border-radius: var(--radius-card);
+  background: var(--color-card); color: var(--color-sidebar);
+  display: grid; place-items: center;
+  font-weight: 800; font-size: 1.05rem; letter-spacing: -.5px; flex-shrink: 0;
+}
+.brand-name { color: #fff; font-weight: 700; font-size: 1rem; line-height: 1.15; letter-spacing: .3px; }
+.brand-sub { color: var(--color-brand-accent); font-size: .66rem; font-weight: 600; letter-spacing: .8px; white-space: nowrap; }
+
+.side-nav { padding: 4px 10px 24px; }
+.side-label {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; background: none; border: 0;
+  color: var(--color-sidebar-label);
+  font-size: .68rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+  padding: 16px 12px 6px;
+}
+.side-label .bi { font-size: .75rem; transition: transform .2s; }
+.side-label.collapsed .bi { transform: rotate(-90deg); }
+
+.side-link {
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
+  min-height: 36px; padding: 6px 12px; margin: 1px 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-sidebar-link);
+  font-size: .845rem; font-weight: 500; white-space: nowrap;
+  transition: background-color .15s, color .15s;
+}
+.side-link .bi { font-size: 1.1rem; width: 20px; text-align: center; color: #fff; opacity: .9; }
+.side-link:hover { background: var(--color-sidebar-hover); color: #fff; }
+.side-link.active {
+  background: var(--color-active-menu); color: #fff;
+  min-height: 42px; font-weight: 600;
+  box-shadow: var(--shadow-active-nav);
+}
+.side-link.active::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--color-active-accent);
+}
+.side-link.active .bi { opacity: 1; }
+.side-badge {
+  margin-left: auto;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: var(--radius-pill); display: inline-grid; place-items: center;
+  background: var(--color-primary); color: #fff;
+  font-size: .7rem; font-weight: 700;
+}
+/* A count that means something wears its own colour. */
+.side-badge.held    { background: var(--badge-held-bg);     color: var(--badge-held-text); }
+.side-badge.transit { background: var(--badge-progress-bg); color: var(--badge-progress-text); }
+.side-badge.danger  { background: var(--badge-low-bg);      color: var(--badge-low-text); }
+
+/* ---- Main + topbar --------------------------------------------------- */
+.app-main { min-height: 100vh; }
+@media (min-width: 992px) { .app-main { margin-left: var(--sidebar-width); } }
+
+.topbar {
+  position: sticky; top: 0; z-index: 1020;
+  min-height: var(--topbar-height);
+  background: var(--color-card);
+  border-bottom: 1px solid var(--color-divider);
+  padding: 12px 24px;
+}
+.topbar-control {
+  height: 40px;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-card);
+  color: var(--color-heading);
+  font-weight: 600; font-size: .875rem;
+}
+.location-btn { display: inline-flex; align-items: center; gap: 10px; padding: 0 14px; min-width: 200px; }
+.location-btn .bi-geo-alt { color: var(--color-primary); font-size: 1.05rem; }
+.location-btn .bi-chevron-down { margin-left: auto; font-size: .75rem; color: var(--color-muted); }
+.location-btn:hover { border-color: var(--color-focus); }
+/* A bonded branch is never silently the same as a free-circulation one. */
+.location-btn .bonded-flag {
+  font-size: .62rem; font-weight: 700; letter-spacing: .4px;
+  padding: 2px 6px; border-radius: var(--radius-pill);
+  background: var(--badge-bonded-bg); color: var(--badge-bonded-text);
+}
+
+.search-box { position: relative; flex: 1 1 320px; max-width: 470px; }
+.search-box .bi-search {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  color: var(--color-muted); pointer-events: none;
+}
+.search-box .form-control {
+  height: 40px; padding-left: 40px;
+  border-radius: var(--radius-sm);
+  color: var(--color-heading); font-size: .875rem;
+}
+.search-box .form-control::placeholder { color: var(--color-muted); }
+
+/* The day pill answers "why was my posting refused" without asking. */
+.day-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 14px; border-radius: var(--radius-pill);
+  font-weight: 700; font-size: .75rem; letter-spacing: .3px; white-space: nowrap;
+}
+.day-pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+.day-pill.open   { background: var(--color-success-light); color: var(--badge-completed-text); }
+.day-pill.open .dot   { background: var(--color-success-fill); box-shadow: 0 0 0 3px rgba(24,166,106,.18); }
+.day-pill.locked { background: var(--badge-locked-bg); color: var(--badge-locked-text); }
+.day-pill.locked .dot { background: var(--badge-locked-text); }
+
+.icon-btn {
+  position: relative; width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border: 1px solid var(--color-control-border); border-radius: var(--radius-sm);
+  background: var(--color-card); color: var(--color-heading); font-size: 1.1rem;
+}
+.icon-btn:hover { background: var(--color-info-light); }
+.notif-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-pill);
+  background: var(--color-danger); color: #fff; border: 2px solid var(--color-card);
+  font-size: .62rem; font-weight: 700; display: grid; place-items: center;
+}
+
+.user-btn { display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 2px 4px; text-align: left; }
+.user-avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--color-heading); color: #fff;
+  display: grid; place-items: center; font-size: .82rem; font-weight: 700; flex-shrink: 0;
+}
+.user-name { color: var(--color-heading); font-weight: 700; font-size: .875rem; line-height: 1.2; }
+.user-role { color: var(--color-muted); font-size: .75rem; }
+.user-btn .bi-chevron-down { color: var(--color-muted); font-size: .75rem; }
+
+.dropdown-menu { border-color: var(--color-border); box-shadow: var(--shadow-card); border-radius: var(--radius-sm); font-size: .875rem; }
+.dropdown-item { color: var(--color-text); }
+.dropdown-item:hover, .dropdown-item:focus { background: var(--color-info-light); color: var(--color-heading); }
+.dropdown-item .bi { width: 20px; color: var(--color-primary); }
+
+.content { padding: 26px 28px 32px; }
+
+/* ---- Page header ------------------------------------------------------ */
+.eyebrow { color: var(--color-text); font-weight: 600; font-size: .78rem; letter-spacing: .6px; margin-bottom: 2px; }
+.page-title { color: var(--color-heading); font-weight: 800; font-size: 1.95rem; letter-spacing: -.4px; margin-bottom: 4px; }
+.page-sub { color: var(--color-text); font-size: .925rem; margin: 0; }
+
+.btn-primary-action {
+  display: inline-flex; align-items: center; gap: 10px;
+  height: 44px; padding: 0 18px;
+  background: var(--color-heading); border: 0; border-radius: var(--radius-sm);
+  color: #fff; font-weight: 600; font-size: .9rem;
+  box-shadow: 0 4px 12px rgba(7, 59, 105, .2);
+}
+.btn-primary-action:hover, .btn-primary-action:focus, .btn-primary-action.show {
+  background: var(--color-primary-hover); color: #fff;
+}
+.btn-primary-action.dropdown-toggle::after { display: none; }
+
+/* ---- Cards ------------------------------------------------------------ */
+.hb-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  height: 100%;
+}
+.hb-card-body { padding: 20px; }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.card-title-row { display: flex; align-items: center; gap: 12px; }
+.card-title-row > .bi { font-size: 1.35rem; color: var(--color-primary); }
+.card-title { color: var(--color-heading); font-weight: 700; font-size: 1rem; margin: 0; }
+.card-sub { color: var(--color-muted); font-size: .8rem; margin: 2px 0 0; }
+.view-all { font-weight: 500; font-size: .83rem; white-space: nowrap; }
+
+/* ---- KPI -------------------------------------------------------------- */
+.kpi { display: flex; gap: 18px; align-items: flex-start; padding: 22px 20px 20px; }
+.kpi-icon { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: 1.55rem; }
+.kpi-icon.items    { background: var(--kpi-bg-items);    color: var(--color-blue); }
+.kpi-icon.received { background: var(--kpi-bg-received); color: var(--color-success); }
+.kpi-icon.delivery { background: var(--kpi-bg-delivery); color: var(--color-purple); }
+.kpi-icon.issues   { background: var(--kpi-bg-issues);   color: var(--color-warning); }
+.kpi-label { color: var(--color-heading); font-weight: 600; font-size: .92rem; margin-bottom: 4px; }
+.kpi-value { color: var(--color-heading); font-weight: 800; font-size: 1.95rem; line-height: 1.1; letter-spacing: -.5px; margin-bottom: 10px; }
+.kpi-unit  { font-size: .95rem; font-weight: 600; color: var(--color-muted); font-family: var(--font-base); }
+.kpi-trend { font-size: .78rem; color: var(--color-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.kpi-trend .up  { color: var(--color-success); font-weight: 700; }
+.kpi-trend .bad { color: var(--color-danger);  font-weight: 700; }
+.kpi-trend .warn{ color: var(--color-warning); font-weight: 700; }
+.kpi-trend .gap { margin-left: 10px; }
+
+/* ---- Period selector --------------------------------------------------- */
+.period-group { border: 1px solid var(--color-control-border); border-radius: var(--radius-sm); padding: 3px; display: inline-flex; background: var(--color-card); }
+.period-group .btn { border: 0; border-radius: 6px; padding: 5px 14px; font-size: .8rem; font-weight: 500; color: var(--color-muted); }
+.period-group .btn:hover { color: var(--color-heading); background: var(--color-info-light); }
+.period-group .btn.active { background: var(--color-primary); color: #fff; font-weight: 600; }
+
+/* ---- Bar chart --------------------------------------------------------- */
+.bar-chart { display: grid; grid-template-columns: 34px 1fr; height: 212px; margin-top: 4px; }
+.chart-y { position: relative; }
+.chart-y span { position: absolute; right: 8px; transform: translateY(50%); font-size: .75rem; color: var(--color-text); }
+.chart-plot { position: relative; border-left: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.chart-grid { position: absolute; left: 0; right: 0; border-top: 1px solid var(--color-divider); }
+.chart-cols { position: absolute; inset: 0; display: flex; justify-content: space-around; align-items: flex-end; padding: 0 1%; }
+.chart-col { flex: 1; display: flex; justify-content: center; align-items: flex-end; gap: 4px; height: 100%; }
+.bar { width: min(26px, 34%); border-radius: 4px 4px 0 0; height: 0; transition: height .6s cubic-bezier(.2,.7,.2,1); cursor: default; }
+.bar.received { background: var(--chart-received); }
+.bar.delivery { background: var(--chart-delivery); }
+.bar:hover { filter: brightness(1.08); }
+.chart-x { display: grid; grid-template-columns: 34px 1fr; margin-top: 8px; }
+.chart-x-labels { display: flex; justify-content: space-around; padding: 0 1%; }
+.chart-x-labels span { flex: 1; text-align: center; font-size: .75rem; color: var(--color-text); }
+.chart-legend { display: flex; justify-content: center; gap: 28px; margin-top: 16px; font-size: .82rem; color: var(--color-text); }
+.chart-legend .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; }
+.chart-tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--color-heading); color: #fff;
+  font-size: .72rem; padding: 5px 8px; border-radius: 6px; white-space: nowrap;
+  transform: translate(-50%, -110%); opacity: 0; transition: opacity .12s;
+}
+.chart-tip.show { opacity: 1; }
+
+/* ---- Quick actions ------------------------------------------------------ */
+.qa-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.qa-item {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 54px; padding: 10px 12px; min-width: 0; line-height: 1.25;
+  border-radius: var(--radius-sm); border: 1px solid transparent;
+  color: var(--color-heading); font-weight: 500; font-size: .84rem;
+  transition: transform .15s, box-shadow .15s, border-color .15s;
+}
+.qa-item:hover { color: var(--color-heading); transform: translateY(-1px); box-shadow: var(--shadow-card); border-color: var(--color-border); }
+.qa-item .qa-icon { font-size: 1.4rem; width: 26px; text-align: center; }
+.qa-item .bi-chevron-right { margin-left: auto; font-size: .8rem; }
+.qa-blue    { background: var(--qa-bg-blue); }    .qa-blue .bi    { color: var(--color-blue); }
+.qa-green   { background: var(--qa-bg-green); }   .qa-green .bi   { color: var(--color-success); }
+.qa-purple  { background: var(--qa-bg-purple); }  .qa-purple .bi  { color: var(--color-purple); }
+.qa-orange  { background: var(--qa-bg-orange); }  .qa-orange .bi  { color: var(--color-warning); }
+.qa-neutral { background: var(--qa-bg-neutral); } .qa-neutral .bi { color: var(--color-heading); }
+
+/* ---- Tables and badges --------------------------------------------------- */
+.hb-table { margin: 0; font-size: .82rem; }
+.hb-table thead th {
+  background: var(--color-background); color: var(--color-heading);
+  font-weight: 600; font-size: .78rem;
+  border-bottom: 1px solid var(--color-border); padding: 9px 12px; white-space: nowrap;
+}
+.hb-table tbody td {
+  color: var(--color-heading); padding: 8px 12px; vertical-align: middle;
+  border-bottom: 1px solid var(--color-divider); white-space: nowrap;
+}
+.hb-table tbody tr:last-child td { border-bottom: 0; }
+.hb-table.compact thead th, .hb-table.compact tbody td { padding-left: 8px; padding-right: 8px; }
+.hb-table.compact thead th, .hb-table.compact tbody td:first-child { white-space: normal; }
+.hb-table.compact tbody td:first-child { position: relative; padding-left: 24px; }
+.hb-table.compact .sev-dot { position: absolute; left: 8px; top: 50%; margin-top: -4px; }
+.hb-table tbody tr:hover td { background: var(--color-background); }
+.doc-link { color: var(--color-primary); font-weight: 500; }
+
+/* Status chips. Background is the soft step, text the strong one.
+   Every chip carries a word: colour is never the only signal. */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .3px;
+}
+.status-draft     { background: var(--badge-locked-bg);    color: var(--badge-locked-text); }
+.status-pending   { background: var(--badge-held-bg);      color: var(--badge-held-text); }
+.status-held      { background: var(--badge-held-bg);      color: var(--badge-held-text); }
+.status-approved  { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
+.status-posted    { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
+.status-completed { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
+.status-released  { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
+.status-progress  { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
+.status-transit   { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
+.status-rejected  { background: var(--badge-low-bg);       color: var(--badge-low-text); }
+.status-variance  { background: var(--badge-low-bg);       color: var(--badge-low-text); }
+.status-quarantine{ background: var(--badge-low-bg);       color: var(--badge-low-text); }
+.status-cancelled { background: var(--badge-locked-bg);    color: var(--badge-locked-text); text-decoration: line-through; }
+.status-bonded    { background: var(--badge-bonded-bg);    color: var(--badge-bonded-text); }
+.status-locked    { background: var(--badge-locked-bg);    color: var(--badge-locked-text); }
+
+.stock-pill {
+  display: inline-grid; place-items: center;
+  min-width: 34px; height: 22px; padding: 0 8px; border-radius: 11px;
+  background: var(--badge-low-bg); color: var(--badge-low-text); font-weight: 700; font-size: .76rem;
+}
+.stock-pill.warn { background: var(--badge-held-bg); color: var(--badge-held-text); }
+
+.sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+.sev-low    { background: var(--color-warning-fill); }
+.sev-urgent { background: var(--color-danger); }
+
+/* ---- Blocked release ------------------------------------------------------
+   The most important state in the system. Loud, and it names the officer
+   who owes the signature rather than saying something generic. */
+.release-blocked {
+  border: 1px solid var(--color-warning);
+  border-left-width: 4px;
+  background: var(--color-warning-light);
+  color: var(--badge-held-text);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.release-blocked .bi { font-size: 1.3rem; flex-shrink: 0; }
+.release-blocked strong { display: block; font-size: .95rem; margin-bottom: 2px; }
+
+/* ---- Approval chain --------------------------------------------------- */
+.approval-chain { list-style: none; margin: 0; padding: 0; position: relative; }
+.approval-step { position: relative; padding: 0 0 20px 32px; }
+.approval-step:last-child { padding-bottom: 0; }
+.approval-step::before {
+  content: ""; position: absolute; left: 5px; top: 16px; bottom: -4px;
+  width: 2px; background: var(--color-border);
+}
+.approval-step:last-child::before { display: none; }
+.approval-node {
+  position: absolute; left: 0; top: 3px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--color-border);
+}
+.approval-step.signed  .approval-node { background: var(--color-success-fill); }
+.approval-step.current .approval-node { background: var(--color-warning-fill); box-shadow: 0 0 0 3px var(--color-warning-light); }
+.approval-step.rejected .approval-node { background: var(--color-danger); }
+.approval-role { color: var(--color-heading); font-weight: 600; font-size: .85rem; }
+.approval-meta { color: var(--color-muted); font-size: .76rem; }
+.approval-step.pending .approval-role { color: var(--color-muted); font-weight: 500; }
+
+/* ---- Audit diff ----------------------------------------------------------
+   Red for before, green for after — the one place those colours mean
+   "old" and "new" rather than "bad" and "good". Safe only because the
+   two cells always appear side by side, in that order, with an arrow. */
+.audit-diff { width: 100%; font-size: .82rem; }
+.audit-diff th { color: var(--color-muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; padding: 6px 10px; }
+.audit-diff td { padding: 6px 10px; vertical-align: middle; }
+.audit-before { background: var(--badge-low-bg); color: var(--badge-low-text); border-radius: 6px; padding: 3px 8px; display: inline-block; }
+.audit-after  { background: var(--badge-completed-bg); color: var(--badge-completed-text); border-radius: 6px; padding: 3px 8px; display: inline-block; }
+.audit-arrow  { color: var(--color-muted); }
+.audit-actor  { color: var(--color-muted); font-size: .78rem; margin-top: 8px; }
+.audit-actor strong { color: var(--color-heading); }
+
+/* ---- Login ------------------------------------------------------------- */
+.login-shell {
+  min-height: 100vh; display: grid; place-items: center;
+  background: linear-gradient(180deg, var(--color-sidebar) 0%, var(--color-sidebar-dark) 100%);
+  padding: 24px;
+}
+.login-card {
+  width: 100%; max-width: 400px;
+  background: var(--color-card); border-radius: var(--radius-card);
+  padding: 32px; box-shadow: 0 18px 48px rgba(0, 21, 45, .35);
+}
+.login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.login-title { color: var(--color-heading); font-weight: 800; font-size: 1.3rem; margin: 0 0 4px; }
+.login-sub { color: var(--color-muted); font-size: .85rem; margin: 0 0 22px; }
+
+/* ---- Responsive --------------------------------------------------------- */
+@media (max-width: 1399.98px) { .location-btn { min-width: 0; } }
+@media (max-width: 991.98px) {
+  .topbar { padding: 10px 16px; }
+  .content { padding: 20px 16px 28px; }
+  .page-title { font-size: 1.6rem; }
+}
+@media (max-width: 575.98px) {
+  .qa-grid { grid-template-columns: 1fr; }
+  .kpi-value { font-size: 1.7rem; }
+  .search-box { flex-basis: 100%; max-width: none; order: 5; }
+  .topbar { gap: 10px !important; }
+  .location-btn { max-width: 150px; padding: 0 10px; }
+  .bar { width: min(14px, 34%); }
+  .chart-x-labels span { font-size: .66rem; }
+}
+
+/* Count entry is done on a tablet, one-handed, in an aisle. */
+@media (pointer: coarse) {
+  .btn, .side-link, .qa-item, .icon-btn { min-height: 44px; }
+}

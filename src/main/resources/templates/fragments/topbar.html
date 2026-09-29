@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<body>
+
+<header th:fragment="topbar" class="topbar d-flex flex-wrap align-items-center gap-3">
+
+  <button class="icon-btn d-lg-none" type="button"
+          data-bs-toggle="offcanvas" data-bs-target="#appSidebar"
+          aria-controls="appSidebar" aria-label="Open menu">
+    <i class="bi bi-list"></i>
+  </button>
+
+  <!-- Branch switcher. "Which branch am I looking at" must be answerable
+       without reading. A bonded branch says so, because the release rules
+       differ there. -->
+  <div class="dropdown">
+    <button class="topbar-control location-btn" type="button"
+            data-bs-toggle="dropdown" aria-expanded="false" aria-label="Select branch">
+      <i class="bi bi-geo-alt"></i>
+      <span th:text="${currentBranch?.name} ?: 'Select branch'">Gahanga, Kigali</span>
+      <span class="bonded-flag" th:if="${currentBranch?.bonded}">BONDED</span>
+      <i class="bi bi-chevron-down"></i>
+    </button>
+    <ul class="dropdown-menu">
+      <li th:each="b : ${availableBranches}">
+        <form th:action="@{/branch/switch}" method="post" class="m-0">
+          <input type="hidden" name="branchId" th:value="${b.id}">
+          <button class="dropdown-item d-flex align-items-center gap-2" type="submit">
+            <i class="bi" th:classappend="${b.bonded} ? 'bi-shield-lock' : 'bi-building'"></i>
+            <span th:text="${b.name}">Branch</span>
+            <span class="bonded-flag ms-auto" th:if="${b.bonded}">BONDED</span>
+          </button>
+        </form>
+      </li>
+    </ul>
+  </div>
+
+  <form class="search-box" role="search" th:action="@{/search}" method="get">
+    <label for="globalSearch" class="visually-hidden">Search serial, item code or customer</label>
+    <i class="bi bi-search"></i>
+    <input id="globalSearch" name="q" type="search" class="form-control"
+           placeholder="Search serial, item code or customer..."
+           th:value="${param.q}">
+  </form>
+
+  <div class="d-flex align-items-center gap-3 ms-auto">
+
+    <!-- The close state, always visible. When a posting is refused for
+         being backdated, this is why, and the user can see it already. -->
+    <span class="day-pill d-none d-md-inline-flex"
+          th:classappend="${dayLocked} ? 'locked' : 'open'"
+          role="status">
+      <span class="dot" aria-hidden="true"></span>
+      <span th:text="(${dayLocked} ? 'DAY CLOSED · ' : 'DAY OPEN · ') + ${#temporals.format(businessDate, 'dd MMM')}">
+        DAY OPEN · 29 SEP
+      </span>
+    </span>
+
+    <div class="dropdown">
+      <button class="icon-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+              th:attr="aria-label='|Notifications, ' + (${navCounts?.totalPending} ?: 0) + ' pending|'">
+        <i class="bi bi-bell"></i>
+        <span class="notif-badge" th:if="${navCounts?.totalPending > 0}"
+              th:text="${navCounts.totalPending}">0</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end" style="min-width: 280px;">
+        <li><h6 class="dropdown-header">Awaiting action</h6></li>
+        <li th:if="${navCounts?.releasesHeld > 0}">
+          <a class="dropdown-item" th:href="@{/dispatch(status='HELD')}">
+            <i class="bi bi-clipboard-check"></i>
+            <span th:text="${navCounts.releasesHeld} + ' releases held'">0 releases held</span>
+          </a>
+        </li>
+        <li th:if="${navCounts?.goodsReceivedPending > 0}">
+          <a class="dropdown-item" th:href="@{/receiving(status='PENDING')}">
+            <i class="bi bi-box-seam"></i>
+            <span th:text="${navCounts.goodsReceivedPending} + ' receipts awaiting approval'">0</span>
+          </a>
+        </li>
+        <li th:if="${navCounts?.variancesOpen > 0}">
+          <a class="dropdown-item" th:href="@{/variances}">
+            <i class="bi bi-graph-up-arrow"></i>
+            <span th:text="${navCounts.variancesOpen} + ' unresolved variances'">0</span>
+          </a>
+        </li>
+        <li th:if="${navCounts == null or navCounts.totalPending == 0}">
+          <span class="dropdown-item text-body-secondary">Nothing waiting on you.</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="dropdown">
+      <button class="user-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="User menu">
+        <span class="user-avatar" aria-hidden="true" th:text="${userInitials} ?: 'HB'">HN</span>
+        <span class="d-none d-sm-block">
+          <span class="user-name d-block" sec:authentication="principal.fullName">Heritier Ntaganira</span>
+          <span class="user-role d-block" th:text="${primaryRoleName}">Warehouse Manager</span>
+        </span>
+        <i class="bi bi-chevron-down"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><a class="dropdown-item" th:href="@{/profile}"><i class="bi bi-person"></i>My profile</a></li>
+        <li><a class="dropdown-item" th:href="@{/profile/password}"><i class="bi bi-key"></i>Change password</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <form th:action="@{/logout}" method="post" class="m-0">
+            <button class="dropdown-item" type="submit"><i class="bi bi-box-arrow-right"></i>Sign out</button>
+          </form>
+        </li>
+      </ul>
+    </div>
+  </div>
+</header>
+
+</body>
+</html>
