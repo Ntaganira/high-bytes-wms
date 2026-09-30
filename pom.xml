@@ -62,7 +62,7 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
+      <!-- Compile scope: DbRefusal reads the server's own message from PSQLException -->
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
@@ -191,6 +191,18 @@
               <artifactId>spring-boot-devtools</artifactId>
             </exclude>
           </excludes>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <!-- Testcontainers 1.19's Docker client defaults to API 1.32, which current
+                 Docker Desktop (29.x, minimum API 1.40) refuses with an empty 400. 1.41 is
+                 accepted by every Docker since 20.10. Read by docker-java from the system properties. -->
+            <api.version>1.41</api.version>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
       <plugin>

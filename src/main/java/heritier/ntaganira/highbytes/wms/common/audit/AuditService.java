@@ -134,6 +134,25 @@ public class AuditService {
     }
 
     /**
+     * Log a change to a document or its content as part of the change itself.
+     *
+     * <p>Same semantics as {@link #recordAccessChange}: runs in the caller's
+     * transaction and lets a failure through, so a change and its record
+     * commit together or not at all. A refusal at commit rolls both back; the
+     * refusal is then recorded with {@link #record} or {@link #recordRefusal}.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordInTransaction(String entityName,
+                                    UUID entityId,
+                                    String entityLabel,
+                                    AuditAction action,
+                                    AuditSnapshot snapshot,
+                                    BranchView branch,
+                                    String reason) {
+        insert(entityName, entityId, entityLabel, action, snapshot, branch, reason);
+    }
+
+    /**
      * Log a refused access change. The refusal rolls its transaction back,
      * so the record is written once that is done, in a transaction of its
      * own: the attempt stays on file, and nothing holds the access lock while
