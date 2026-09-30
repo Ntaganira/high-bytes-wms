@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Delivery Authorizations</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · DAO-004</p>
+      <h1 class="page-title">Delivery Authorizations</h1>
+      <p class="page-sub">Permission for goods to leave <span th:text="${currentBranch?.name}">this branch</span>.
+        Nothing is loaded until an authorization is RELEASED, and stock leaves the ledger only when the warehouse posts the delivery note at the gate.</p>
+    </div>
+    <a th:href="@{/dispatch/new}" class="btn btn-primary-action" sec:authorize="hasAuthority('dispatch.create')">
+      <i class="bi bi-plus-lg"></i> New authorization
+    </a>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/dispatch}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3">
+        <label for="status" class="form-label small fw-semibold" style="color: var(--color-heading)">State</label>
+        <select id="status" name="status" class="form-select">
+          <option value="">All states</option>
+          <option th:each="s : ${statuses}" th:value="${s}" th:text="${s}"
+                  th:selected="${status != null and status == s}">PENDING</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-4 d-flex flex-column justify-content-end pb-1">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="awaitingMe" name="awaitingMe"
+                 value="true" th:checked="${awaitingMe}">
+          <label class="form-check-label small" for="awaitingMe">Awaiting my signature</label>
+        </div>
+      </div>
+      <div class="col-12 col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/dispatch}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Serial</th>
+            <th scope="col">Date</th>
+            <th scope="col">Customer</th>
+            <th scope="col">From</th>
+            <th scope="col" class="num">Lines</th>
+            <th scope="col">Raised by</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="n : ${notes}">
+            <td><a class="doc-link" th:href="@{'/dispatch/' + ${n.id()}}" th:text="${n.serialNo()}">DAO-KGL-2026-0001</a></td>
+            <td class="mono" th:text="${#temporals.format(n.documentDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
+            <td th:text="${n.customerName()}">Customer</td>
+            <td class="mono">
+              <span th:text="${n.locationCode()}">KGL-MAIN</span>
+              <span th:if="${n.bonded()}" class="ms-1"><span th:replace="~{fragments/ui :: chip('BONDED')}"></span></span>
+            </td>
+            <td class="num" th:text="${n.lineCount()}">3</td>
+            <td th:text="${n.createdByName()}">Name</td>
+            <td>
+              <span th:replace="~{fragments/ui :: chip(${n.displayState()})}"></span>
+              <span class="d-block small text-body-secondary" th:if="${n.awaitingRole() != null}">
+                awaiting <span th:text="${n.awaitingRole()}">Warehouse Manager</span>
+              </span>
+              <span class="d-block small fw-semibold" th:if="${n.awaitingMe()}" style="color: var(--color-warning)">your signature</span>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(notes)}">
+            <td colspan="7">
+              <div th:replace="~{fragments/ui :: emptyState('bi-clipboard-check', 'No authorizations match', 'Clear the filters, or raise the first authorization.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

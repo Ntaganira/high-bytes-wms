@@ -34,6 +34,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class ChainSwitchTest extends IntegrationTest {
 
     @Autowired ReceivingService receiving;
+    @Autowired heritier.ntaganira.highbytes.wms.inventory.dispatch.DispatchService dispatch;
+    @Autowired heritier.ntaganira.highbytes.wms.inventory.dispatch.DeliveryNoteService notes;
 
     private UUID definition(String basis) {
         return jdbc.sql("""
@@ -83,6 +85,39 @@ class ChainSwitchTest extends IntegrationTest {
             jdbc.sql("UPDATE workflow_definition SET effective_to = DATE '2027-01-01' WHERE id = :id")
                     .param("id", old2026).update();
         }
+    }
+
+    @Test
+    void theRestructuredDeliveryChainReleasesAndDeliversToo() {
+        assumeTrue(jdbc.sql("SELECT kigali_today() < DATE '2027-01-01'").query(Boolean.class).single(),
+                "the 2027 chain is already in force; there is no switch to bring forward");
+        UUID old2026 = definition("DAO", "POLICY_2026");
+        UUID new2027 = definition("DAO", "RESTRUCTURE_2027");
+
+        jdbc.sql("UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = :id").param("id", old2026).update();
+        jdbc.sql("UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = :id").param("id", new2027).update();
+        try {
+            var flow = new heritier.ntaganira.highbytes.wms.support.DispatchFlow(fx, receiving, dispatch, notes);
+            // Inventory Transactions Officer, Director of Supply Chain, Director of Commercial (countersign), Internal Controller (release).
+            assertThat(flow.chainRoles).containsExactly("INV_TX_OFFICER", "DIR_SUPPLY_CHAIN", "DIR_COMMERCIAL", "INTERNAL_CTRL");
+            UUID dao = flow.released();
+            assertThat(boundTo(dao)).isEqualTo(new2027);
+            UUID note = flow.raiseNote(dao);
+            flow.post(note);
+            assertThat(statusOf(note)).isEqualTo("POSTED");
+            assertThat(jdbc.sql("SELECT SUM(signed_quantity) FROM stock_movement WHERE item_id = :item AND direction = 'OUT'")
+                    .param("item", flow.grn.glass).query(BigDecimal.class).single()).isEqualByComparingTo("-20.000");
+        } finally {
+            jdbc.sql("UPDATE workflow_definition SET effective_from = DATE '2027-01-01' WHERE id = :id").param("id", new2027).update();
+            jdbc.sql("UPDATE workflow_definition SET effective_to = DATE '2027-01-01' WHERE id = :id").param("id", old2026).update();
+        }
+    }
+
+    private UUID definition(String type, String basis) {
+        return jdbc.sql("""
+                SELECT wd.id FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
+                 WHERE dt.code = :type AND wd.basis = :basis
+                """).param("type", type).param("basis", basis).query(UUID.class).single();
     }
 
     private UUID boundTo(UUID doc) {

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New delivery note' : 'Edit ' + ${dn.serialNo}">Delivery note</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · DELIVERY NOTE · THE GATE</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New delivery note' : 'Edit ' + ${dn.serialNo}">New delivery note</h1>
+    <p class="page-sub">
+      Against <a class="doc-link" th:href="@{'/dispatch/' + ${dao.id}}" th:text="${dao.serialNo}">DAO-KGL-2026-0001</a>
+      for <span th:text="${dao.customerName}">Customer</span>, from <span class="mono" th:text="${dao.locationCode}">KGL-MAIN</span>.
+      The load must equal the authorization exactly.
+    </p>
+  </div>
+
+  <!-- May these goods leave? Always the first thing on the page. -->
+  <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+
+  <div th:unless="${loadable}" class="alert alert-danger" role="alert">
+    <strong>This note cannot be raised.</strong>
+    <span th:if="${gate.dnId != null}">
+      <span th:text="${dao.serialNo}">DAO</span> already has a live delivery note,
+      <a class="doc-link" th:href="@{'/delivery-notes/' + ${gate.dnId}}" th:text="${gate.dnSerial}">DN</a>: one authorization is one load.
+    </span>
+    <span th:if="${gate.dnId == null}">Only a released authorization is loaded; the banner above says what is still missing.</span>
+  </div>
+
+  <form th:if="${loadable}" id="dn-form" th:action="${form.new} ? @{/delivery-notes} : @{'/delivery-notes/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <input type="hidden" th:field="*{version}">
+    <input type="hidden" th:field="*{authorizationId}">
+
+    <div th:if="${#fields.hasGlobalErrors()}" class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+      <i class="bi bi-exclamation-octagon-fill"></i>
+      <div><p th:each="e : ${#fields.globalErrors()}" th:text="${e}" class="mb-0"></p></div>
+    </div>
+
+    <div class="row g-3">
+
+      <div class="col-12">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-truck" aria-hidden="true"></i>
+              <h2 class="card-title">Vehicle and driver</h2>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-12 col-md-3">
+              <label for="vehicleRegistration" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Vehicle registration <span class="text-danger">*</span>
+              </label>
+              <input id="vehicleRegistration" th:field="*{vehicleRegistration}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('vehicleRegistration')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('vehicleRegistration')}" th:errors="*{vehicleRegistration}">error</div>
+            </div>
+            <div class="col-12 col-md-4">
+              <label for="driverName" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Driver <span class="text-danger">*</span>
+              </label>
+              <input id="driverName" th:field="*{driverName}" class="form-control"
+                     th:classappend="${#fields.hasErrors('driverName')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('driverName')}" th:errors="*{driverName}">error</div>
+            </div>
+            <div class="col-6 col-md-2">
+              <label for="driverPhone" class="form-label small fw-semibold" style="color: var(--color-heading)">Phone</label>
+              <input id="driverPhone" th:field="*{driverPhone}" class="form-control"
+                     th:classappend="${#fields.hasErrors('driverPhone')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('driverPhone')}" th:errors="*{driverPhone}">error</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <label for="driverIdNo" class="form-label small fw-semibold" style="color: var(--color-heading)">ID / licence no.</label>
+              <input id="driverIdNo" th:field="*{driverIdNo}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('driverIdNo')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('driverIdNo')}" th:errors="*{driverIdNo}">error</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-list-ol" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">Load</h2>
+                <p class="card-sub">Prefilled at the authorized quantities. Split a line to take it from several bins; the parts must add up. Measure glass with the approved device.</p>
+              </div>
+            </div>
+          </div>
+
+          <div th:if="${#fields.hasErrors('lines')}" class="alert alert-danger small" role="alert">
+            <p th:each="e : ${#fields.errors('lines')}" th:text="${e}" class="mb-0"></p>
+          </div>
+
+          <div id="dn-lines" th:fragment="lines" th:object="${form}">
+            <div class="table-responsive">
+              <table class="table hb-table compact align-middle mb-2">
+                <thead>
+                  <tr>
+                    <th scope="col">#</th>
+                    <th scope="col" style="min-width: 15rem">Authorized line</th>
+                    <th scope="col">On hand</th>
+                    <th scope="col">Quantity loaded</th>
+                    <th scope="col">From bin</th>
+                    <th scope="col">Measured thickness (mm)</th>
+                    <th scope="col"><span class="visually-hidden">Split or remove</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr th:each="line, st : *{lines}" th:with="al=${authLines.get(line.authorizationLineId)}">
+                    <td class="mono" th:text="${st.count}">1</td>
+                    <td>
+                      <input type="hidden" th:field="*{lines[__${st.index}__].authorizationLineId}">
+                      <th:block th:if="${al != null}">
+                        <span class="mono" th:text="${al.itemCode()}">GL-CF-6</span>
+                        <span class="d-block small text-body-secondary" th:text="${al.itemDescription()}">Clear float</span>
+                        <span class="d-block small">
+                          Authorized
+                          <strong class="mono" th:text="${#numbers.formatDecimal(al.quantity(), 1, 'COMMA', 3, 'POINT')}">100.000</strong>
+                          <span class="mono" th:text="${al.uomCode()}">SHEET</span>
+                          <span class="text-body-secondary" th:if="${al.glass() and al.nominalThicknessMm() != null}"
+                                th:text="'· nominal ' + ${al.nominalThicknessMm()} + ' mm'">· nominal 6.00 mm</span>
+                        </span>
+                      </th:block>
+                      <div class="invalid-feedback d-block" th:if="${#fields.hasErrors('lines[__${st.index}__].authorizationLineId')}"
+                           th:errors="*{lines[__${st.index}__].authorizationLineId}">error</div>
+                    </td>
+                    <td class="mono small">
+                      <th:block th:if="${al != null}" th:with="have=${available.get(al.itemId())}">
+                        <span th:if="${have == null}" style="color: var(--color-danger)">none</span>
+                        <th:block th:if="${have != null}">
+                          <span th:text="${#numbers.formatDecimal(have, 1, 'COMMA', 3, 'POINT')}">120.000</span>
+                          <span class="d-block text-body-secondary" th:each="p : ${stock.get(al.itemId())}"
+                                th:text="${p.place()} + ': ' + ${#numbers.formatDecimal(p.quantity(), 1, 'COMMA', 3, 'POINT')}">bin A1: 120.000</span>
+                        </th:block>
+                      </th:block>
+                    </td>
+                    <td>
+                      <input th:field="*{lines[__${st.index}__].quantity}" type="number" step="0.001" min="0.001"
+                             class="form-control form-control-sm mono" style="min-width: 7rem"
+                             th:classappend="${#fields.hasErrors('lines[__${st.index}__].quantity')} ? 'is-invalid'"
+                             th:attr="aria-label='Quantity loaded, line ' + ${st.count}">
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('lines[__${st.index}__].quantity')}"
+                           th:errors="*{lines[__${st.index}__].quantity}">error</div>
+                    </td>
+                    <td>
+                      <select th:field="*{lines[__${st.index}__].storageBinId}" class="form-select form-select-sm"
+                              th:classappend="${#fields.hasErrors('lines[__${st.index}__].storageBinId')} ? 'is-invalid'"
+                              th:attr="aria-label='Bin, line ' + ${st.count}">
+                        <option value="">— no bin —</option>
+                        <option th:each="b : ${bins}" th:value="${b.id()}" th:text="${b.label()}">A1-02</option>
+                      </select>
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('lines[__${st.index}__].storageBinId')}"
+                           th:errors="*{lines[__${st.index}__].storageBinId}">error</div>
+                    </td>
+                    <td>
+                      <input th:field="*{lines[__${st.index}__].measuredThicknessMm}" type="number" step="0.01" min="0.01"
+                             class="form-control form-control-sm mono" style="min-width: 6rem"
+                             th:classappend="${#fields.hasErrors('lines[__${st.index}__].measuredThicknessMm')} ? 'is-invalid'"
+                             th:attr="aria-label='Measured thickness, line ' + ${st.count}">
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('lines[__${st.index}__].measuredThicknessMm')}"
+                           th:errors="*{lines[__${st.index}__].measuredThicknessMm}">error</div>
+                    </td>
+                    <td class="text-nowrap">
+                      <button type="button" class="btn btn-sm btn-outline-primary"
+                              th:attr="hx-post=@{'/delivery-notes/lines/split/' + ${st.index}},aria-label='Split line ' + ${st.count} + ' across bins'"
+                              hx-include="#dn-form" hx-target="#dn-lines" hx-swap="outerHTML" title="Split across bins">
+                        <i class="bi bi-diagram-2"></i>
+                      </button>
+                      <button type="button" class="btn btn-sm btn-outline-danger"
+                              th:attr="hx-post=@{'/delivery-notes/lines/remove/' + ${st.index}},aria-label='Remove split line ' + ${st.count}"
+                              hx-include="#dn-form" hx-target="#dn-lines" hx-swap="outerHTML" title="Remove this part">
+                        <i class="bi bi-x-lg"></i>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Save delivery note' : 'Save changes'">Save delivery note</span>
+      </button>
+      <a th:href="${form.new} ? @{'/dispatch/' + ${dao.id}} : @{'/delivery-notes/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

@@ -60,18 +60,25 @@ shape, so it is worth building carefully.
 
 ## Then
 
-- [ ] Delivery Authorization + Delivery Note — the release gate. The
-      blocked-release banner is the most important screen in the system.
-      Its migration must also refuse cancelling a POSTED document whose
-      ticket has moved stock: V11 refuses POSTED→CANCELLED only for types
-      with `moves_stock`, and a DAO has none, so a posted DAO could read
-      CANCELLED while the stock it released stays gone (one `EXISTS` on
-      `transaction_ticket.source_document_id` in `document_lifecycle_guard`)
-- [ ] A deadlock or serialization failure (40P01/40001) is shown as "try
-      again" but audited as a REJECT, as if a control had refused it. Record
-      it as an error, not a refusal
-- [ ] A document action refused by `CurrentUser.requireAt` (wrong branch)
-      throws before any REJECT row is written
+- [x] Delivery Authorization + Delivery Note — the release gate (V12, customers
+      master, the release banner fragment `ui :: releaseGate`, the gate
+      screens). `/verify` clean (227 ok), `control-auditor` clean after two
+      rounds of fixes (2026-09-30)
+- [x] A deadlock or serialization failure (40P01/40001) is answered "try
+      again" and logged, not audited as a REJECT (`ContentionException`)
+- [x] A document action refused by `CurrentUser.requireAt` (wrong branch)
+      is recorded as REJECT (`DocumentService.requireRight`). Refused reads
+      (opening a form) are not recorded, so a prefetched or crawled link
+      cannot write audit rows in someone's name
+- [ ] Reversals: a ticket's source must be a GRN (RECEIPT/IN) or a DN
+      (DELIVERY/OUT), so no reversing ticket can exist yet. The reversal
+      module widens `ticket_guard` and `document_support_link` together
+- [ ] The DN-versus-DAO-cancel race and the negative-stock lock are proved
+      by reading and by `pg_locks`, not by two live sessions racing
+- [ ] Signed delivery acknowledgement (Sales returns it): attach the scan to
+      the delivery note (`attachment` table exists, storage does not)
+- [ ] The 2027 load-reconciliation waiver (COO) is not built: a short load
+      is cancelled and authorized again
 - [ ] Transfers — dispatch relieves to TRANSIT, receipt clears it
 - [ ] Cutting — **blocked** on the off-cut identity decision
 - [ ] Returns & Damage — quarantine location, write-off approval
@@ -113,9 +120,8 @@ shape, so it is worth building carefully.
 ## Known gaps
 
 - [ ] Workflow signer roles seeded with no permissions: Head of Inventory
-      and the Director of Commercial still hold none (V11 gave the Assistant
-      WH Manager, the Inventory Transactions Officer and the Director of
-      Supply Chain their receiving rights). They are policy roles, so they
+      and the COO still hold none (V11 and V12 placed the receiving and
+      dispatch rights on the Assistant WH Manager and the three 2027 roles). They are policy roles, so they
       get the view and action permissions of the documents they sign in the
       migration that builds each document
 - [ ] `DashboardService.kpis()` returns a placeholder for inventory accuracy

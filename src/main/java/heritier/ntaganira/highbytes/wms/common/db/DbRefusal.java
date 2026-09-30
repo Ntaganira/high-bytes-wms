@@ -38,14 +38,10 @@ public final class DbRefusal {
 
     /** The reason, when the failure is a control speaking; empty for anything else. */
     public static Optional<String> reason(Throwable failure) {
+        if (isContention(failure)) {
+            return Optional.of(ContentionException.MESSAGE);
+        }
         for (Throwable cause = failure; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
-            // A deadlock or serialization failure is not a control speaking, but the user's answer is the same
-            // plain one: nothing changed, try again.
-            if (cause instanceof PSQLException clash
-                    && ("40P01".equals(clash.getSQLState()) || "40001".equals(clash.getSQLState()))) {
-                return Optional.of("Another posting touched the same stock at the same moment, so nothing was "
-                                   + "changed. Try again.");
-            }
             if (cause instanceof PSQLException psql
                     && psql.getSQLState() != null
                     && HUMAN_STATES.contains(psql.getSQLState())) {
@@ -60,6 +56,20 @@ public final class DbRefusal {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * A deadlock (40P01) or serialization failure (40001): two requests met on
+     * the same rows and the database chose one to abort. Not a control speaking.
+     */
+    public static boolean isContention(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
+            if (cause instanceof PSQLException psql
+                    && ("40P01".equals(psql.getSQLState()) || "40001".equals(psql.getSQLState()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The name of the constraint a unique or check violation names, when there is one. */
@@ -79,6 +89,9 @@ public final class DbRefusal {
      * failure itself.
      */
     public static RuntimeException asRefusal(RuntimeException failure) {
+        if (isContention(failure)) {
+            return new ContentionException();
+        }
         return reason(failure)
                 .<RuntimeException>map(ControlRefusedException::new)
                 .orElse(failure);

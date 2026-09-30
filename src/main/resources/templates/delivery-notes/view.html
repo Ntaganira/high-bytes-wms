@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${dn.serialNo}">Delivery note</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${dn})}"></div>
+
+  <!-- May these goods leave? The gate of the authorization this note answers to. -->
+  <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · DELIVERY NOTE · DN-005</p>
+      <h1 class="page-title">Delivery to <span th:text="${dn.customerName}">Customer</span></h1>
+      <p class="page-sub">
+        Against <a class="doc-link" th:href="@{'/dispatch/' + ${dn.authorizationId}}" th:text="${dn.daoSerial}">DAO-KGL-2026-0001</a>,
+        from <span class="mono" th:text="${dn.locationCode}">KGL-MAIN</span>
+        <span th:text="'· ' + ${dn.locationName}">· Gahanga main store</span>
+      </p>
+    </div>
+    <div class="d-flex gap-2">
+      <a th:if="${actions.canEdit}" sec:authorize="hasAuthority('dispatch.post')"
+         th:href="@{'/delivery-notes/' + ${dn.id} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit load
+      </a>
+    </div>
+  </div>
+
+  <div class="alert alert-secondary d-flex align-items-start gap-2" role="status" th:if="${dn.status == 'CANCELLED'}">
+    <i class="bi bi-x-circle-fill"></i>
+    <div>
+      <strong>Cancelled</strong>
+      by <span th:text="${dn.cancelledByName}">Name</span>
+      on <span th:text="${#temporals.format(dn.cancelledAt, 'dd MMM yyyy HH:mm')}">30 Sep 10:00</span>.
+      Reason: <span th:text="${dn.cancelReason}">Reason</span>.
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-truck" aria-hidden="true"></i>
+            <h2 class="card-title">Vehicle and driver</h2>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Vehicle</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${dn.vehicleRegistration}">RAD 123 A</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Driver</dt>
+          <dd class="col-7 col-md-3" th:text="${dn.driverName}">Driver</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Phone</dt>
+          <dd class="col-7 col-md-3" th:text="${dn.driverPhone} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">ID / licence</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${dn.driverIdNo} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customs reference</dt>
+          <dd class="col-7 col-md-9 mono" th:text="${dn.customsReference} ?: '—'">—</dd>
+        </dl>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-ol" aria-hidden="true"></i>
+            <h2 class="card-title">Load</h2>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Item</th>
+                <th scope="col" class="num">Loaded</th>
+                <th scope="col">Unit</th>
+                <th scope="col" class="num">In base unit</th>
+                <th scope="col">From bin</th>
+                <th scope="col" class="num">Measured / nominal</th>
+                <th scope="col" th:if="${dn.status == 'DRAFT'}">On hand (base unit)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="l : ${lines}">
+                <td class="mono"><span th:text="${l.lineNo()}">1</span>
+                    <span class="d-block small text-body-secondary" th:text="'auth. ' + ${l.daoLineNo()}">auth. 1</span></td>
+                <td>
+                  <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                  <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                </td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(l.quantity(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
+                <td class="mono" th:text="${l.uomCode()}">SHEET</td>
+                <td class="num mono">
+                  <span th:text="${#numbers.formatDecimal(l.quantityBase(), 1, 'COMMA', 3, 'POINT')}">100.000</span>
+                  <span class="small text-body-secondary" th:text="${l.baseUomCode()}">SHEET</span>
+                </td>
+                <td class="mono" th:text="${l.binCode()} ?: '—'">A1-02</td>
+                <td class="num mono">
+                  <span th:text="${l.measuredThicknessMm() != null} ? ${l.measuredThicknessMm()} + ' mm' : '—'">6.00 mm</span>
+                  <span class="d-block small text-body-secondary" th:if="${l.nominalThicknessMm() != null}"
+                        th:text="'nominal ' + ${l.nominalThicknessMm()} + ' mm'">nominal 6.00 mm</span>
+                </td>
+                <td class="mono small" th:if="${dn.status == 'DRAFT'}">
+                  <th:block th:with="have=${available.get(l.itemId())}">
+                    <span th:if="${have == null}" style="color: var(--color-danger)">none on hand</span>
+                    <th:block th:if="${have != null}">
+                      <span th:text="${#numbers.formatDecimal(have, 1, 'COMMA', 3, 'POINT')}">120.000</span>
+                      <span class="d-block text-body-secondary" th:each="p : ${stock.get(l.itemId())}"
+                            th:text="${p.place()} + ': ' + ${#numbers.formatDecimal(p.quantity(), 1, 'COMMA', 3, 'POINT')}">bin A1: 120.000</span>
+                    </th:block>
+                  </th:block>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${posting != null}">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-journal-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Left the ledger</h2>
+              <p class="card-sub">
+                Ticket <span class="serial" th:text="${posting.ticketSerial}">TT-KGL-2026-0002</span>
+                · released at the gate by <span th:text="${dn.postedByName}">Name</span>
+                <span th:text="'on ' + ${#temporals.format(dn.postedAt, 'dd MMM yyyy HH:mm')}">on 30 Sep 11:00</span>
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Movement</th>
+                <th scope="col">Line</th>
+                <th scope="col">Item</th>
+                <th scope="col">Bin</th>
+                <th scope="col" class="num">Quantity out</th>
+                <th scope="col" class="num">Unit cost</th>
+                <th scope="col" class="num">Value</th>
+                <th scope="col" class="num">Balance after</th>
+                <th scope="col">Business date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="m : ${posting.movements}">
+                <td class="mono" th:text="${m.id()}">1</td>
+                <td class="mono" th:text="${m.lineNo()}">1</td>
+                <td class="mono" th:text="${m.itemCode()}">GL-CF-6</td>
+                <td class="mono" th:text="${m.binCode()} ?: '—'">A1</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.quantityBase(), 1, 'COMMA', 3, 'POINT')}">40.000</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.unitCost(), 1, 'COMMA', 4, 'POINT')}">8,869.5652</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">354,782.61</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.runningBalance(), 1, 'COMMA', 3, 'POINT')}">10.000</td>
+                <td class="mono" th:text="${#temporals.format(m.businessDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning" aria-hidden="true"></i>
+            <h2 class="card-title">The gate</h2>
+          </div>
+        </div>
+
+        <!-- Confirm release: posting moves the stock out, and cannot be undone. -->
+        <form th:if="${actions.canPost}" sec:authorize="hasAuthority('dispatch.post')"
+              th:action="@{'/delivery-notes/' + ${dn.id} + '/post'}" method="post" class="mb-3">
+          <p class="small">Confirming release posts this note and takes the load out of the ledger,
+            at the average cost, in one step. It cannot be undone: a wrong delivery is corrected by a reversal.</p>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="confirmRelease" name="confirm" value="true" required>
+            <label class="form-check-label small" for="confirmRelease">
+              The vehicle <strong class="mono" th:text="${dn.vehicleRegistration}">RAD 123 A</strong> is loaded exactly as listed,
+              and glass has been measured at the gate.
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-box-arrow-right"></i> Confirm release at the gate</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.postReason}" th:text="${actions.postReason}">Reason</p>
+
+        <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('dispatch.post')">
+          <summary class="small fw-semibold">Cancel this delivery note</summary>
+          <form th:action="@{'/delivery-notes/' + ${dn.id} + '/cancel'}" method="post" class="mt-2">
+            <label for="cancelReason" class="form-label small">Reason (required). The authorization becomes free to load again.</label>
+            <input id="cancelReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400"
+                   required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-slash-circle"></i> Cancel delivery note</button>
+          </form>
+        </details>
+        <p class="small text-body-secondary" th:if="${actions.cancelReason}" th:text="${actions.cancelReason}">Reason</p>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canPost and !actions.canCancel and !actions.canEdit
+                    and actions.postReason == null and actions.cancelReason == null}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">History</h2>
+              <p class="card-sub">Every change, refusal and posting, newest first</p>
+            </div>
+          </div>
+        </div>
+
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Changes to this note will be listed here.')}"></div>
+        </th:block>
+
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

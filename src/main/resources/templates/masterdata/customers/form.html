@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New customer' : 'Edit customer'">Customer</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">MASTER DATA · CUSTOMER</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New customer' : 'Edit ' + (${storedCode} ?: ${form.code})">New customer</h1>
+  </div>
+
+  <form th:action="${form.new} ? @{/customers} : @{'/customers/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-8">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-people" aria-hidden="true"></i>
+              <h2 class="card-title">Customer</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label for="code" class="form-label small fw-semibold" style="color: var(--color-heading)">Code <span class="text-danger">*</span></label>
+              <input id="code" th:field="*{code}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('code')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('code')}" th:errors="*{code}">error</div>
+            </div>
+            <div class="col-12 col-md-8">
+              <label for="name" class="form-label small fw-semibold" style="color: var(--color-heading)">Name <span class="text-danger">*</span></label>
+              <input id="name" th:field="*{name}" class="form-control"
+                     th:classappend="${#fields.hasErrors('name')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
+            </div>
+
+            <div class="col-6 col-md-4">
+              <label for="tin" class="form-label small fw-semibold" style="color: var(--color-heading)">TIN</label>
+              <input id="tin" th:field="*{tin}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('tin')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('tin')}" th:errors="*{tin}">error</div>
+            </div>
+            <div class="col-6 col-md-4">
+              <label for="market" class="form-label small fw-semibold" style="color: var(--color-heading)">Market <span class="text-danger">*</span></label>
+              <select id="market" th:field="*{market}" class="form-select"
+                      th:classappend="${#fields.hasErrors('market')} ? 'is-invalid'">
+                <option th:each="m : ${markets}" th:value="${m}" th:text="${m.label()}">Domestic</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('market')}" th:errors="*{market}">error</div>
+            </div>
+            <div class="col-12 col-md-4">
+              <label for="phone" class="form-label small fw-semibold" style="color: var(--color-heading)">Phone</label>
+              <input id="phone" th:field="*{phone}" class="form-control"
+                     th:classappend="${#fields.hasErrors('phone')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('phone')}" th:errors="*{phone}">error</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="email" class="form-label small fw-semibold" style="color: var(--color-heading)">Email</label>
+              <input id="email" th:field="*{email}" class="form-control"
+                     th:classappend="${#fields.hasErrors('email')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('email')}" th:errors="*{email}">error</div>
+            </div>
+            <div class="col-12 col-md-6">
+              <label for="address" class="form-label small fw-semibold" style="color: var(--color-heading)">Address</label>
+              <input id="address" th:field="*{address}" class="form-control"
+                     th:classappend="${#fields.hasErrors('address')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('address')}" th:errors="*{address}">error</div>
+            </div>
+
+            <div class="col-6 col-md-6">
+              <label for="creditLimit" class="form-label small fw-semibold" style="color: var(--color-heading)">Credit limit (RWF)</label>
+              <input id="creditLimit" th:field="*{creditLimit}" type="number" step="0.01" min="0" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('creditLimit')} ? 'is-invalid'">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('creditLimit')}" th:errors="*{creditLimit}">error</div>
+              <div class="form-text">Carried now, enforced when the order desk arrives.</div>
+            </div>
+            <div class="col-6 col-md-6">
+              <label for="paymentTermsDays" class="form-label small fw-semibold" style="color: var(--color-heading)">Payment terms (days)</label>
+              <input id="paymentTermsDays" th:field="*{paymentTermsDays}" type="number" step="1" min="0" max="365" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('paymentTermsDays')} ? 'is-invalid'">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('paymentTermsDays')}" th:errors="*{paymentTermsDays}">error</div>
+            </div>
+
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="active" th:field="*{active}">
+                <label class="form-check-label" for="active">
+                  Active
+                  <span class="text-body-secondary small d-block">
+                    An inactive customer cannot be named on a new authorization. It stays on every past one.
+                    Blocking is separate: use Block on the customer's page.
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Create customer' : 'Save changes'">Create customer</span>
+      </button>
+      <a th:href="${form.new} ? @{/customers} : @{'/customers/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+
+  </form>
+
+</div>
+</body>
+</html>

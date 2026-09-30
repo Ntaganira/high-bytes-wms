@@ -100,6 +100,7 @@ public class SecurityConfig {
                 .requestMatchers("/receiving/**")      .hasAuthority("receiving.view")
                 // Setting up who the company buys from is Finance's; the store only picks from the list.
                 .requestMatchers("/suppliers/**")      .hasAuthority("partner.manage")
+                .requestMatchers("/customers/**")      .hasAuthority("partner.manage")
                 .requestMatchers("/dispatch/**")       .hasAuthority("dispatch.view")
                 .requestMatchers("/delivery-notes/**") .hasAuthority("dispatch.view")
                 .requestMatchers("/transfers/**")      .hasAuthority("transfer.view")

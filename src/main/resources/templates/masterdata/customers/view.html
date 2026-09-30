@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${customer.code()}">Customer</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">MASTER DATA · CUSTOMER</p>
+      <h1 class="page-title mono" th:text="${customer.code()}">CUS-1</h1>
+      <p class="page-sub" th:text="${customer.name()}">Customer</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2" sec:authorize="hasAuthority('partner.manage')">
+      <a th:href="@{'/customers/' + ${customer.id()} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit
+      </a>
+      <form th:if="${customer.active()}" th:action="@{'/customers/' + ${customer.id()} + '/deactivate'}" method="post" class="m-0">
+        <button type="submit" class="btn btn-outline-danger"><i class="bi bi-slash-circle"></i> Deactivate</button>
+      </form>
+      <form th:unless="${customer.active()}" th:action="@{'/customers/' + ${customer.id()} + '/reactivate'}" method="post" class="m-0">
+        <button type="submit" class="btn btn-outline-success"><i class="bi bi-arrow-counterclockwise"></i> Reactivate</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-8">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-people" aria-hidden="true"></i>
+            <h2 class="card-title">Details</h2>
+          </div>
+          <span th:replace="~{fragments/ui :: chip(${customer.state()})}"></span>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">TIN</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${customer.tin()} ?: '—'">TIN</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Market</dt>
+          <dd class="col-7 col-md-3" th:text="${customer.market().label()}">Domestic</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Phone</dt>
+          <dd class="col-7 col-md-3" th:text="${customer.phone()} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Email</dt>
+          <dd class="col-7 col-md-3" th:text="${customer.email()} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Credit limit</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${customer.creditLimit() != null} ? ${#numbers.formatDecimal(customer.creditLimit(), 1, 'COMMA', 2, 'POINT')} : '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Payment terms</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${customer.paymentTermsDays() != null} ? ${customer.paymentTermsDays()} + ' days' : '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Address</dt>
+          <dd class="col-7 col-md-9" th:text="${customer.address()} ?: '—'">—</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-lg-4">
+      <section class="hb-card hb-card-body" sec:authorize="hasAuthority('partner.manage')">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-slash-octagon" aria-hidden="true"></i>
+            <h2 class="card-title">Delivery block</h2>
+          </div>
+        </div>
+        <th:block th:if="${customer.blocked()}">
+          <p class="small">This customer is <strong>blocked</strong>: no delivery authorization can be raised for it.</p>
+          <form th:action="@{'/customers/' + ${customer.id()} + '/unblock'}" method="post">
+            <label for="unblockReason" class="form-label small">Reason (optional)</label>
+            <input id="unblockReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400" autocomplete="off">
+            <button type="submit" class="btn btn-outline-success w-100"><i class="bi bi-unlock"></i> Unblock</button>
+          </form>
+        </th:block>
+        <th:block th:unless="${customer.blocked()}">
+          <p class="small text-body-secondary">Not blocked. Blocking stops any new delivery authorization for this customer; the reason is kept.</p>
+          <form th:action="@{'/customers/' + ${customer.id()} + '/block'}" method="post">
+            <label for="blockReason" class="form-label small">Reason (required)</label>
+            <input id="blockReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400" required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-slash-octagon"></i> Block customer</button>
+          </form>
+        </th:block>
+        <p class="text-body-secondary small mt-3 mb-0" th:if="${customer.authorizationCount() > 0}">
+          <i class="bi bi-lock"></i>
+          <span th:text="${customer.authorizationCount()}">3</span> delivery authorizations name this customer, so it can be deactivated but never deleted.
+        </p>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Change history</h2>
+              <p class="card-sub">Every change ever made to this record, newest first</p>
+            </div>
+          </div>
+        </div>
+
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Edits to this customer will be listed here.')}"></div>
+        </th:block>
+
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

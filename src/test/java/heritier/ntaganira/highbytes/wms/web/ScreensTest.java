@@ -222,6 +222,51 @@ class ScreensTest extends IntegrationTest {
     }
 
     @Test
+    void aCommitTimeRefusalOnTheCreateAndEditFormsIsShownAsAFormError() throws Exception {
+        // A deferred control, as the GRN's own "posted note must have moved stock" is: it speaks only at COMMIT.
+        jdbc.sql("""
+                CREATE FUNCTION test_form_commit_refusal() RETURNS trigger AS $body$
+                BEGIN
+                    RAISE EXCEPTION USING ERRCODE = '23Z02', MESSAGE = 'Test control - the receipt form was refused at commit.';
+                END $body$ LANGUAGE plpgsql
+                """).update();
+        jdbc.sql("CREATE CONSTRAINT TRIGGER test_form_commit_refusal AFTER INSERT OR UPDATE ON goods_received_note "
+                + "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.supplier_id = '" + flow.supplier + "') "
+                + "EXECUTE FUNCTION test_form_commit_refusal()").update();
+        try {
+            // Create: the page comes back with the reason, not a 500.
+            mvc.perform(as(storekeeper, post("/receiving").with(csrf())
+                            .param("supplierId", flow.supplier.toString())
+                            .param("locationId", flow.location.toString())
+                            .param("currencyCode", "RWF")
+                            .param("exchangeRate", "1")
+                            .param("lines[0].itemId", flow.silicone.toString())
+                            .param("lines[0].uomId", flow.pieces.toString())
+                            .param("lines[0].quantity", "5")
+                            .param("lines[0].unitPrice", "3000")))
+                    .andExpect(status().isOk())
+                    .andExpect(content().string(containsString("refused at commit")));
+
+            // Edit: the same.
+            mvc.perform(as(storekeeper, post("/receiving/" + draft).with(csrf())
+                            .param("version", "0")
+                            .param("supplierId", flow.supplier.toString())
+                            .param("locationId", flow.location.toString())
+                            .param("currencyCode", "RWF")
+                            .param("exchangeRate", "1")
+                            .param("lines[0].itemId", flow.silicone.toString())
+                            .param("lines[0].uomId", flow.pieces.toString())
+                            .param("lines[0].quantity", "5")
+                            .param("lines[0].unitPrice", "3000")))
+                    .andExpect(status().isOk())
+                    .andExpect(content().string(containsString("refused at commit")));
+        } finally {
+            jdbc.sql("DROP TRIGGER test_form_commit_refusal ON goods_received_note").update();
+            jdbc.sql("DROP FUNCTION test_form_commit_refusal()").update();
+        }
+    }
+
+    @Test
     void aRecordAtAnotherBranchIsRefusedEvenToSomeoneWhoHoldsTheRightThere() throws Exception {
         // Full rights at Rubavu, none at Gahanga: the Gahanga note is out of reach by its address.
         AppUserDetails rubavu = userDetails.reload(

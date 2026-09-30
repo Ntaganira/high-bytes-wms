@@ -68,9 +68,49 @@ public class LedgerService {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Why an issue cannot leave: what is on hand in the place it names, and
+     * where the item's stock at that location actually is, so the person at the
+     * gate knows which bin to choose rather than what a ledger row is.
+     */
+    private String shortage(MovementRequest m, BigDecimal onHand, BigDecimal wanted) {
+        String item = jdbc.sql("SELECT item_code FROM item WHERE id = :id")
+                .param("id", m.itemId(), Types.OTHER).query(String.class).single();
+        String location = jdbc.sql("SELECT code FROM location WHERE id = :id")
+                .param("id", m.locationId(), Types.OTHER).query(String.class).single();
+        String place = m.storageBinId() == null ? "unbinned" : "in bin " + jdbc.sql(
+                "SELECT bin_code FROM storage_bin WHERE id = :id")
+                .param("id", m.storageBinId(), Types.OTHER).query(String.class).single();
+        var elsewhere = jdbc.sql("""
+                SELECT COALESCE(b.bin_code, 'no bin') || ' ' || sb.qty_on_hand::text
+                  FROM stock_balance sb LEFT JOIN storage_bin b ON b.id = sb.storage_bin_id
+                 WHERE sb.item_id = :item AND sb.location_id = :location AND sb.qty_on_hand > 0
+                 ORDER BY b.bin_code NULLS FIRST
+                """)
+                .param("item", m.itemId(), Types.OTHER)
+                .param("location", m.locationId(), Types.OTHER)
+                .query(String.class).list();
+        return "Not enough stock: " + onHand.stripTrailingZeros().toPlainString() + " of " + item + " is on hand "
+                + place + " at " + location + ", and " + wanted.stripTrailingZeros().toPlainString()
+                + " was to leave. Stock never goes below zero."
+                + (elsewhere.isEmpty() ? " There is none at that location."
+                        : " At that location: " + String.join(", ", elsewhere) + ".");
+    }
+
     /** An (item, location) a posting is about to move. */
-    public record Place(UUID itemId, UUID locationId) {
-        String key() { return itemId + ":" + locationId; }
+    public record Place(UUID itemId, UUID locationId) {}
+
+    /**
+     * The one lock for a place: the very statement V12's
+     * {@code stock_movement_never_below_zero} trigger takes for an OUT movement
+     * (same string, same hash), so the two cannot drift apart. The trigger's
+     * own lock then re-enters one this transaction already holds.
+     */
+    private void lockPlace(UUID itemId, UUID locationId) {
+        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('stock:' || :item::text || ':' || :location::text, 0))")
+                .param("item", itemId, Types.OTHER)
+                .param("location", locationId, Types.OTHER)
+                .query((rs, n) -> 1).single();
     }
 
     /**
@@ -84,11 +124,13 @@ public class LedgerService {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void lockPlaces(java.util.Collection<Place> places) {
-        var keys = places.stream().map(Place::key).distinct().sorted().toList();
+        var ordered = places.stream().distinct()
+                .sorted(java.util.Comparator.comparing((Place p) -> p.itemId().toString())
+                        .thenComparing(p -> p.locationId().toString()))
+                .toList();
         try {
-            for (String key : keys) {
-                jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
-                        .param("key", key).query((rs, n) -> 1).single();
+            for (Place place : ordered) {
+                lockPlace(place.itemId(), place.locationId());
             }
         } catch (DataAccessException e) {
             throw DbRefusal.asRefusal(e);
@@ -106,9 +148,7 @@ public class LedgerService {
             throw new ControlRefusedException("A receipt into stock carries its value, which cannot be negative.");
         }
 
-        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
-                .param("key", m.itemId() + ":" + m.locationId())
-                .query((rs, n) -> 1).single();
+        lockPlace(m.itemId(), m.locationId());
 
         jdbc.sql("""
                 INSERT INTO stock_balance (item_id, location_id, storage_bin_id)
@@ -143,9 +183,7 @@ public class LedgerService {
             newTotal = row.totalValue().add(value);
         } else {
             if (row.quantity().compareTo(quantity) < 0) {
-                throw new ControlRefusedException("Only " + row.quantity().stripTrailingZeros().toPlainString()
-                        + " is on hand there, so " + quantity.stripTrailingZeros().toPlainString()
-                        + " cannot leave. Stock never goes below zero.");
+                throw new ControlRefusedException(shortage(m, row.quantity(), quantity));
             }
             newQuantity = row.quantity().subtract(quantity);
             value = newQuantity.signum() == 0
