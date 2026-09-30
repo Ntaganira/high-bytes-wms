@@ -32,7 +32,10 @@ else.
 3. **A locked business date refuses movements inside it.** Once
    `daily_close.status = 'LOCKED'`, an insert dated into that day at that
    branch is refused at the ledger.
-4. **A posted document cannot be altered.** Only cancellation columns change.
+4. **A posted document cannot be altered.** Only cancellation columns change,
+   and a posted document whose type moves stock cannot be cancelled at all:
+   the ledger would still carry the stock while the document read
+   CANCELLED. Posted stock is corrected by a reversing document (V11).
 5. **Approvals are immutable, and no user signs twice on one document.**
    Unique index on `(document_id, actor_user_id)` — this *is* the Board's
    central finding, encoded.
@@ -94,6 +97,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 ├── config/        SecurityConfig, WebConfig
 ├── common/
 │   ├── audit/     AuditService, AuditSnapshot, AuditEntry, AuditAction
+│   ├── db/        DbRefusal (the database's own reason), KigaliTime
 │   └── web/       GlobalModelAdvice, LoginController
 ├── branch/
 ├── security/      AppUserDetails, AccountStateFilter, SignInEvents, PasswordRules
@@ -104,9 +108,13 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 ├── dashboard/
 ├── masterdata/
 │   ├── item/      item master, glass attributes
-│   └── location/  locations, types, bins
-├── document/      NOT BUILT — the spine + workflow engine
-├── inventory/     NOT BUILT — receiving, dispatch, transfer, cutting, count
+│   ├── location/  locations, types, bins
+│   └── supplier/  suppliers (Finance, partner.manage)
+├── document/      the spine: serials, chain binding, submit, sign, cancel
+├── inventory/
+│   ├── ledger/    the only writer of stock_movement and stock_balance
+│   └── receiving/ Goods Received Notes
+│                  NOT BUILT — dispatch, transfer, cutting, count
 └── reporting/     NOT BUILT — daily close, KPIs, exports
 ```
 
@@ -233,8 +241,8 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 ## Build order for the rest of Phase 1
 
 1. ~~Master data~~ — done
-2. **Goods Received** — first document that posts to the ledger; sets the
-   pattern for the other eight
+2. ~~Goods Received~~ — done; the pattern for the other eight (V11,
+   `document/`, `inventory/ledger/`, `inventory/receiving/`)
 3. Delivery Authorization + Delivery Note — the release gate
 4. Transfers — adds goods-in-transit
 5. Cutting — needs the off-cut identity decision first (see Open questions)
@@ -252,6 +260,13 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 - Tolerance thresholds for count variances, damage and write-off approval.
 - Hosting: on-premises at Gahanga or cloud — decides whether bonded stock
   data leaves Rwanda.
+- **Who may cancel a document others have already signed?** Today a
+  receipt's creator, or anyone holding `receiving.create` at its branch, may
+  cancel it until it is posted. Cancelling moves no stock, but it lets one
+  person veto a chain the Directors and the Internal Controller have signed.
+- No segregation rule pairs the Director of Supply Chain with the Internal
+  Controller, so one person may hold both. On one document they can sign
+  only one step, but Board Table 6 may intend the pair to be blocked.
 
 ## Source documents
 

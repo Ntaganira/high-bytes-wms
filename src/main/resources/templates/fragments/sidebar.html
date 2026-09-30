@@ -89,7 +89,7 @@
     </th:block>
 
     <!-- Inventory -->
-    <th:block sec:authorize="hasAnyAuthority('stock.view','item.view','count.view')">
+    <th:block sec:authorize="hasAnyAuthority('stock.view','item.view','count.view','partner.manage')">
       <button class="side-label" type="button" data-bs-toggle="collapse"
               data-bs-target="#navInventory" aria-expanded="true" aria-controls="navInventory">
         Inventory <i class="bi bi-chevron-down"></i>
@@ -109,6 +109,11 @@
         <a th:href="@{/locations}" class="side-link" sec:authorize="hasAuthority('item.view')"
            th:classappend="${activeNav == 'locations'} ? 'active'">
           <i class="bi bi-geo-alt"></i> Locations &amp; Bins
+        </a>
+
+        <a th:href="@{/suppliers}" class="side-link" sec:authorize="hasAuthority('partner.manage')"
+           th:classappend="${activeNav == 'suppliers'} ? 'active'">
+          <i class="bi bi-shop"></i> Suppliers
         </a>
 
         <a th:href="@{/counts}" class="side-link" sec:authorize="hasAuthority('count.view')"

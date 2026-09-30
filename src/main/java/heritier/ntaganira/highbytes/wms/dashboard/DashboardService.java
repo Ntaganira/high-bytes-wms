@@ -125,7 +125,12 @@ public class DashboardService {
               JOIN workflow_step ws        ON ws.workflow_definition_id = wd.id
               JOIN role r                  ON r.id = ws.required_role_id
              WHERE d.branch_id = :branchId
-               AND d.status IN ('DRAFT','PENDING')
+               -- a draft awaits its raiser, not a signature; only a submitted document is waiting on someone
+               AND d.status = 'PENDING'
+               -- the raiser signs step 1 only, so a later step is not theirs
+               AND (d.created_by <> :userId
+                    OR ws.sequence_no = (SELECT MIN(fs.sequence_no) FROM workflow_step fs
+                                          WHERE fs.workflow_definition_id = wd.id))
                -- the step is not yet signed
                AND NOT EXISTS (SELECT 1 FROM document_approval da
                                 WHERE da.document_id = d.id AND da.workflow_step_id = ws.id)

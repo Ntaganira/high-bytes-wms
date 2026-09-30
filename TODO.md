@@ -38,29 +38,40 @@ compiled-and-run verified except where it says so.
 The first document that posts to the ledger. Everything after it copies this
 shape, so it is worth building carefully.
 
-- [ ] `goods_received_note` subtype table + lines (migration V11), with the
+- [x] `goods_received_note` subtype table + lines (migration V11), with the
       view and action permissions its chain signers need, placed on the
       Board roles that sign each step (the migration must
       `SET LOCAL highbytes.migration = 'on'` to change a policy role, and
       fails if the result leaves anyone in conflict)
-- [ ] Serial allocation from `serial_sequence`, concurrency-safe
+- [x] Serial allocation from `serial_sequence`, concurrency-safe
       (`UPDATE ... RETURNING`)
-- [ ] `ReceivingService`: draft, submit, approve, post
-- [ ] Workflow binding by **creation date**, not `now()`
-- [ ] Approval guards: not the raiser, not already signed
-- [ ] Posting writes the transaction ticket + ledger rows in one transaction
-- [ ] Landed cost capture (freight, duty, clearing, demurrage) with
+- [x] `ReceivingService`: draft, submit, approve, post
+- [x] Workflow binding by **creation date**, not `now()`
+- [x] Approval guards: not the raiser, not already signed
+- [x] Posting writes the transaction ticket + ledger rows in one transaction
+- [x] Landed cost capture (freight, duty, clearing, demurrage) with
       allocation across lines
-- [ ] Measured thickness per line, refused empty for glass
-- [ ] Customs reference required when receiving into a bonded location
-- [ ] List / form / view templates, line items via htmx
-- [ ] Testcontainers test: post a GRN, assert the ledger moved exactly right
-- [ ] `/verify` clean, `control-auditor` clean
+- [x] Measured thickness per line, refused empty for glass
+- [x] Customs reference required when receiving into a bonded location
+- [x] List / form / view templates, line items via htmx
+- [x] Testcontainers test: post a GRN, assert the ledger moved exactly right
+- [x] `/verify` clean (149 ok), `control-auditor` clean after one round of
+      fixes (2026-09-30); its low findings are under "Then"
 
 ## Then
 
 - [ ] Delivery Authorization + Delivery Note — the release gate. The
       blocked-release banner is the most important screen in the system.
+      Its migration must also refuse cancelling a POSTED document whose
+      ticket has moved stock: V11 refuses POSTED→CANCELLED only for types
+      with `moves_stock`, and a DAO has none, so a posted DAO could read
+      CANCELLED while the stock it released stays gone (one `EXISTS` on
+      `transaction_ticket.source_document_id` in `document_lifecycle_guard`)
+- [ ] A deadlock or serialization failure (40P01/40001) is shown as "try
+      again" but audited as a REJECT, as if a control had refused it. Record
+      it as an error, not a refusal
+- [ ] A document action refused by `CurrentUser.requireAt` (wrong branch)
+      throws before any REJECT row is written
 - [ ] Transfers — dispatch relieves to TRANSIT, receipt clears it
 - [ ] Cutting — **blocked** on the off-cut identity decision
 - [ ] Returns & Damage — quarantine location, write-off approval
@@ -81,22 +92,34 @@ shape, so it is worth building carefully.
       `workflow_definition` date changes as access changes (they decide who
       signs, and so who is operational)
 - [ ] A refusal the database raises at commit (a race the service's own
-      check did not see) shows a 500 and leaves no refusal record
+      check did not see) shows a 500 and leaves no refusal record on the
+      access screens (users, roles). Document actions already translate it
+      (`DocumentService.refusedAtCommit`); copy that shape
+- [ ] Database time zone: V9's access checks use `CURRENT_DATE` (the
+      session's zone), V11 uses `kigali_today()`. They disagree from 00:00 to
+      02:00 Kigali if the session runs in UTC. Set the app's connections to
+      Africa/Kigali, or move V9's checks to `kigali_today()` in a new migration
+- [ ] `stock_balance` is written only by `LedgerService`, but the database
+      does not stop anything else writing it, and `stock_balance_from_ledger`
+      groups by item and location, not by bin. Build the nightly comparison
+      (per bin) with Daily Close
+- [ ] No screen for unit conversions (`item_uom_conversion`): a receipt line
+      in a unit other than the item's base unit is refused until one exists
+- [ ] Approval queue (`/approvals`) and a transaction ticket screen; today a
+      ticket shows only inside its GRN
 - [ ] Access checks re-judge every holder per changed row; with hundreds of
       holders of one role a large permission change takes seconds
 
 ## Known gaps
 
-- [ ] **Not compiled.** Written without a build (Maven Central blocked in
-      the authoring environment). Expect import and signature fixes on the
-      first `mvn compile`.
-- [ ] Workflow signer roles seeded with no permissions (Assistant WH
-      Manager, Head of Inventory, the three 2027 roles). They are policy
-      roles, so they get the view and action permissions of the documents
-      they sign in the migration that builds each document
+- [ ] Workflow signer roles seeded with no permissions: Head of Inventory
+      and the Director of Commercial still hold none (V11 gave the Assistant
+      WH Manager, the Inventory Transactions Officer and the Director of
+      Supply Chain their receiving rights). They are policy roles, so they
+      get the view and action permissions of the documents they sign in the
+      migration that builds each document
 - [ ] `DashboardService.kpis()` returns a placeholder for inventory accuracy
       until count lines exist
-- [ ] No tests yet
 - [ ] `spring.jpa.hibernate.ddl-auto: validate` with zero `@Entity` classes —
       harmless today, but the first entity must match the schema exactly
 
@@ -128,6 +151,13 @@ shape, so it is worth building carefully.
       parent? Blocks cutting.
 - [ ] Tolerance thresholds: count variance, damage, write-off approval
 - [ ] Hosting: on-premises at Gahanga or cloud (bonded data residency)
+- [ ] **Who may cancel a document others have signed.** Today: a receipt's
+      creator or any `receiving.create` holder at its branch, until posted.
+      No stock moves, but one person can veto a signed chain. Kept as is on
+      2026-09-30 pending the client
+- [ ] Director of Supply Chain + Internal Controller: no segregation rule
+      pairs them (one person could hold both; per document they still sign
+      only one step). Does Board Table 6 intend a BLOCK pair?
 - [ ] Whether the Board knows QuickBooks is being replaced rather than
       configured — resolutions 11 and the roadmap still say configured
 - [ ] **Which Board role owns each right no role carries yet.** Chain steps
