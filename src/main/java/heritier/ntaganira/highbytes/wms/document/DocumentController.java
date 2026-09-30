@@ -61,8 +61,11 @@ public class DocumentController {
                 .optional()
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
 
-        if ("GRN".equals(target[1])) {
-            return "redirect:/receiving/" + target[0];
+        switch (target[1]) {
+            case "GRN" -> { return "redirect:/receiving/" + target[0]; }
+            case "DAO" -> { return "redirect:/dispatch/" + target[0]; }
+            case "DN"  -> { return "redirect:/delivery-notes/" + target[0]; }
+            default -> { /* a type whose screen is not built yet stays a 404 */ }
         }
         throw new ResponseStatusException(NOT_FOUND);
     }

@@ -19,7 +19,8 @@
       th:with="icon=${
         status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' or status == 'ACTIVE' ? 'bi-check-circle-fill' :
         status == 'HELD'      or status == 'PENDING'  or status == 'SCHEDULED' ? 'bi-clock-fill' :
-        status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' ? 'bi-exclamation-octagon-fill' :
+        status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' or status == 'BLOCKED' ? 'bi-exclamation-octagon-fill' :
+        status == 'DELIVERED' ? 'bi-truck' :
         status == 'TRANSIT'   or status == 'PROGRESS' ? 'bi-arrow-repeat' :
         status == 'BONDED'    or status == 'PROTECTED' or status == 'POLICY' ? 'bi-shield-lock-fill' :
         status == 'CANCELLED' or status == 'REVOKED'  ? 'bi-x-circle-fill' :
@@ -74,6 +75,62 @@
       </th:block>
     </span>
     <div class="small mt-1">No stock leaves the premises until every required signature is present.</div>
+  </div>
+</div>
+
+
+<!-- ===================================================================
+     The release gate: may these goods leave? Three answers, never a
+     generic message.
+       BLOCKED    "Do not load." Names every unsigned step: its role, who
+                  at this branch can sign it, how long it has waited, and
+                  whether that is past its escalation time.
+       RELEASED   Released by the Internal Controller, ready to load.
+       DELIVERED  The delivery note, the gate time and who posted it.
+       VOID       Rejected or cancelled: nothing may load against it.
+     Shown on the authorization, the delivery note form and view, and wherever
+     an authorization is picked for loading.
+     Usage: <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+     =================================================================== -->
+<div th:fragment="releaseGate(gate)" class="release-gate mb-3" role="alert"
+     th:classappend="'gate-' + ${#strings.toLowerCase(gate.state)}">
+  <i class="bi" aria-hidden="true"
+     th:classappend="${gate.state == 'RELEASED'} ? 'bi-unlock-fill' : (${gate.state == 'DELIVERED'} ? 'bi-truck' : 'bi-shield-exclamation')"></i>
+  <div>
+    <th:block th:if="${gate.state == 'BLOCKED'}">
+      <strong class="gate-title">Do not load</strong>
+      <span><span class="serial" th:text="${gate.daoSerial}">DAO-KGL-2026-0001</span>
+            is not fully signed. No stock leaves the premises until every signature is present, the Internal Controller's release last.</span>
+      <ul class="gate-waiting">
+        <li th:each="w : ${gate.waiting}">
+          <span class="fw-semibold" th:text="'Step ' + ${w.sequenceNo} + ' · ' + ${w.actionLabel} + ' · ' + ${w.roleName}">Step 2 · VERIFY · Warehouse Manager</span>
+          <span th:if="${w.current}"> — awaiting signature</span>
+          <span th:unless="${w.current}"> — not yet reached</span>
+          <span th:if="${!#lists.isEmpty(w.holders)}"
+                th:text="' · can sign: ' + ${#strings.listJoin(w.holders, ', ')}">can sign: names</span>
+          <span th:if="${#lists.isEmpty(w.holders)}"> · nobody at this branch holds this role today</span>
+          <span th:if="${w.hoursWaiting != null}" th:text="' · waiting ' + ${w.hoursWaiting} + ' h'">waiting 26 h</span>
+          <span th:if="${w.overdue}" class="overdue"
+                th:text="' · overdue (escalates after ' + ${w.escalateAfterHours} + ' h)'">overdue</span>
+        </li>
+      </ul>
+    </th:block>
+    <th:block th:if="${gate.state == 'RELEASED'}">
+      <strong class="gate-title">Released: ready to load</strong>
+      <span>Released by <strong th:text="${gate.releasedBy}">Name</strong>
+            <span th:text="'at ' + ${#temporals.format(gate.releasedAt, 'dd MMM yyyy HH:mm')}">at 30 Sep 10:00</span>.
+            <th:block th:if="${gate.dnSerial != null}">Load recorded on <span class="serial" th:text="${gate.dnSerial}">DN-KGL-2026-0001</span>, not yet posted at the gate.</th:block></span>
+    </th:block>
+    <th:block th:if="${gate.state == 'DELIVERED'}">
+      <strong class="gate-title">Delivered</strong>
+      <span>Left the premises on <span class="serial" th:text="${gate.dnSerial}">DN-KGL-2026-0001</span>
+            <span th:text="'at ' + ${#temporals.format(gate.deliveredAt, 'dd MMM yyyy HH:mm')}">at 30 Sep 11:00</span>,
+            posted at the gate by <strong th:text="${gate.deliveredBy}">Name</strong>.</span>
+    </th:block>
+    <th:block th:if="${gate.state == 'VOID'}">
+      <strong class="gate-title">Do not load</strong>
+      <span><span class="serial" th:text="${gate.daoSerial}">DAO</span> is <span th:text="${gate.note}">cancelled</span>. Nothing may load against it.</span>
+    </th:block>
   </div>
 </div>
 

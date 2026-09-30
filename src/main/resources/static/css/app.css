@@ -328,6 +328,8 @@ th.num, td.num { text-align: right; }
 .status-posted    { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
 .status-completed { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
 .status-released  { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
+.status-delivered { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
+.status-blocked   { background: var(--badge-low-bg);       color: var(--badge-low-text); }
 .status-progress  { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
 .status-transit   { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
 .status-rejected  { background: var(--badge-low-bg);       color: var(--badge-low-text); }
@@ -477,3 +479,28 @@ th.num, td.num { text-align: right; }
 @media (pointer: coarse) {
   .btn, .side-link, .qa-item, .icon-btn { min-height: 44px; }
 }
+
+/* ---- Release gate banner ---------------------------------------------------
+   The one screen element that says whether goods may leave. BLOCKED is loud
+   on purpose: danger tokens, a heavy edge, the words "Do not load". */
+.release-gate {
+  border: 1px solid var(--color-border);
+  border-left-width: 6px;
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  display: flex; align-items: flex-start; gap: 14px;
+}
+.release-gate > .bi { font-size: 1.6rem; flex-shrink: 0; line-height: 1.2; }
+.release-gate .gate-title { display: block; font-size: 1.05rem; font-weight: 800; letter-spacing: .01em; margin-bottom: 2px; }
+.release-gate.gate-blocked, .release-gate.gate-void {
+  border-color: var(--color-danger); background: var(--color-danger-light); color: var(--badge-low-text);
+}
+.release-gate.gate-released {
+  border-color: var(--color-success); background: var(--color-success-light); color: var(--badge-completed-text);
+}
+.release-gate.gate-delivered {
+  border-color: var(--color-muted); background: var(--badge-progress-bg); color: var(--badge-progress-text);
+}
+.release-gate .gate-waiting { list-style: none; margin: 8px 0 0; padding: 0; font-size: .85rem; }
+.release-gate .gate-waiting li { padding: 4px 0; border-top: 1px solid var(--color-danger); }
+.release-gate .gate-waiting .overdue { font-weight: 800; text-transform: uppercase; }

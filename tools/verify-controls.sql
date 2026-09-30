@@ -26,6 +26,7 @@ SET CONSTRAINTS ALL IMMEDIATE;
 -- steps, so it is asked for explicitly in check 23.
 SET CONSTRAINTS document_grn_posted_moved_stock DEFERRED;
 SET CONSTRAINTS stock_movement_ticket_posted DEFERRED;
+SET CONSTRAINTS document_dn_posted_moved_stock DEFERRED;
 
 INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
 VALUES ('_verify', 'Verification Fixture', 'x', TRUE, FALSE);
@@ -699,8 +700,11 @@ DO $$ BEGIN
   PERFORM pg_temp.grant_role('_verify_mig', 'FINANCE');
   PERFORM pg_temp.grant_role('_verify_mig', '_VERIFY_DVERIFY');
   PERFORM set_config('highbytes.migration', 'on', true);
+  -- V12 gave dispatch.verify to the Assistant WH Manager and the Director
+  -- Supply Chain as well, so it stops being one side's right only when it
+  -- leaves every role permitted alongside Finance.
   DELETE FROM role_permission
-   WHERE role_id = (SELECT id FROM role WHERE code = 'WH_MANAGER')
+   WHERE role_id IN (SELECT id FROM role WHERE code IN ('WH_MANAGER', 'ASST_WH_MANAGER', 'DIR_SUPPLY_CHAIN'))
      AND permission_id = (SELECT id FROM permission WHERE code = 'dispatch.verify');
   PERFORM set_config('highbytes.migration', 'off', true);
   RAISE WARNING 'FAIL 18d  a migration left someone holding what the rules now forbid';
@@ -709,7 +713,7 @@ END $$;
 
 DO $$ BEGIN
   INSERT INTO role_permission (role_id, permission_id)
-  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_CLOSER' AND p.code = 'dispatch.release';
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_CLOSER' AND p.code = 'transfer.approve';
   RAISE WARNING 'FAIL 18e  a right no policy role carries was handed out';
 EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18e  a right the policy has not placed cannot be handed out';
 END $$;
@@ -1330,24 +1334,756 @@ SELECT pg_temp.refuses('31b', 'a posted transaction ticket was cancelled',
       WHERE id = pg_temp.fx_id('tt_ok')$q$,
   '23Z02', '%corrected by a reversing document%');
 
--- A delivery authorization moves no stock itself: raised, signed by its whole
--- chain, approved and posted, it can still be cancelled.
+-- A count sheet moves no stock itself: raised, signed by its whole chain,
+-- approved and posted, it can still be cancelled. (This was a delivery
+-- authorization until V12 made a DAO permanently unpostable.)
 DO $$
 DECLARE d UUID;
 BEGIN
     INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
-    SELECT dt.id, b.id, '_VERIFY-DAO-31', pg_temp.verify_user()
-      FROM document_type dt, branch b WHERE dt.code = 'DAO' AND b.code = 'KGL'
+    SELECT dt.id, b.id, '_VERIFY-CNT-31', pg_temp.verify_user()
+      FROM document_type dt, branch b WHERE dt.code = 'CNT' AND b.code = 'KGL'
     RETURNING id INTO d;
     UPDATE document SET status = 'PENDING' WHERE id = d;
     PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d));
     UPDATE document SET status = 'APPROVED' WHERE id = d;
     UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('SALES') WHERE id = d;
-    INSERT INTO fx VALUES ('dao_posted', d);
+    INSERT INTO fx VALUES ('cnt_posted', d);
 END $$;
-SELECT pg_temp.accepts('31c', 'a posted document of a type that moves no stock (DAO) can still be cancelled',
+SELECT pg_temp.accepts('31c', 'a posted document of a type that moves no stock (a count sheet) can still be cancelled',
   $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
-      WHERE id = pg_temp.fx_id('dao_posted')$q$);
+      WHERE id = pg_temp.fx_id('cnt_posted')$q$);
+
+-- =====================================================================
+-- Delivery Authorization and Delivery Note (V12). As for Goods Received,
+-- every refusal must carry SQLSTATE 23Z02 (a workflow or document control)
+-- or 23514 (a malformed line) with the reason named.
+-- =====================================================================
+
+INSERT INTO customer (code, name) VALUES ('_VERIFY-CUST', 'Verification Customer');
+INSERT INTO customer (code, name, is_blocked) VALUES ('_VERIFY-BLOCKED', 'Verification Blocked Customer', TRUE);
+INSERT INTO item (item_code, description, product_type, base_uom_id)
+SELECT '_VERIFY-OTHER', 'Verification other item', 'HARDWARE', id FROM uom WHERE code = 'SHEET';
+INSERT INTO storage_bin (location_id, bin_code)
+SELECT id, '_VERIFY-BIN-MAIN' FROM location WHERE code = 'KGL-MAIN';
+
+-- A draft authorization: header and one glass line of p_qty sheets.
+CREATE FUNCTION pg_temp.make_dao(p_serial TEXT, p_qty NUMERIC DEFAULT 40, p_creator UUID DEFAULT NULL,
+                                 p_branch TEXT DEFAULT 'KGL', p_loc TEXT DEFAULT 'KGL-MAIN',
+                                 p_customs TEXT DEFAULT NULL) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, p_serial, COALESCE(p_creator, pg_temp.verify_user())
+      FROM document_type dt, branch b WHERE dt.code = 'DAO' AND b.code = p_branch
+    RETURNING id INTO d;
+    INSERT INTO delivery_authorization (document_id, customer_id, location_id, customs_reference)
+    SELECT d, c.id, l.id, p_customs FROM customer c, location l
+     WHERE c.code = '_VERIFY-CUST' AND l.code = p_loc;
+    INSERT INTO delivery_authorization_line (document_id, line_no, item_id, uom_id, quantity, qty_base_uom)
+    SELECT d, 1, i.id, u.id, p_qty, p_qty
+      FROM item i, uom u WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET';
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- An authorization taken to a state: DRAFT, PENDING, STEP1 (one signature),
+-- NORELEASE (every step but the last signed, still PENDING) or APPROVED.
+CREATE FUNCTION pg_temp.dao_at(p_serial TEXT, p_state TEXT, p_qty NUMERIC DEFAULT 40) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    d := pg_temp.make_dao(p_serial, p_qty);
+    IF p_state = 'DRAFT' THEN RETURN d; END IF;
+    UPDATE document SET status = 'PENDING' WHERE id = d;
+    IF p_state = 'PENDING' THEN RETURN d; END IF;
+    IF p_state = 'STEP1' THEN PERFORM pg_temp.sign_upto(d, 1); RETURN d; END IF;
+    IF p_state = 'NORELEASE' THEN PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d) - 1); RETURN d; END IF;
+    PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d));
+    UPDATE document SET status = 'APPROVED' WHERE id = d;
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- A draft delivery note loading exactly what the authorization lists.
+CREATE FUNCTION pg_temp.make_dn(p_serial TEXT, p_dao UUID, p_creator UUID DEFAULT NULL,
+                                p_bin TEXT DEFAULT NULL) RETURNS UUID AS $$
+DECLARE n UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, d.branch_id, p_serial, COALESCE(p_creator, pg_temp.verify_user())
+      FROM document_type dt, document d WHERE dt.code = 'DN' AND d.id = p_dao
+    RETURNING id INTO n;
+    INSERT INTO delivery_note (document_id, authorization_id, vehicle_registration, driver_name)
+    VALUES (n, p_dao, 'RAB 123 A', 'Verification Driver');
+    INSERT INTO delivery_note_line (document_id, line_no, authorization_line_id, item_id, uom_id,
+                                    quantity, qty_base_uom, storage_bin_id, measured_thickness_mm)
+    SELECT n, al.line_no, al.id, al.item_id, al.uom_id, al.quantity, al.qty_base_uom,
+           (SELECT sb.id FROM storage_bin sb WHERE sb.bin_code = p_bin),
+           CASE WHEN i.product_type = 'GLASS' THEN 6.0 END
+      FROM delivery_authorization_line al JOIN item i ON i.id = al.item_id
+     WHERE al.document_id = p_dao;
+    RETURN n;
+END $$ LANGUAGE plpgsql;
+
+-- The person who may post a note in these fixtures: a signer of the
+-- authorization (step 2), which the rules allow.
+CREATE FUNCTION pg_temp.gate_poster(p_dao UUID) RETURNS UUID AS $$
+    SELECT pg_temp.holder(pg_temp.step_role(p_dao, 2));
+$$ LANGUAGE sql;
+
+CREATE FUNCTION pg_temp.make_dn_ticket(p_dn UUID, p_poster UUID, p_serial TEXT) RETURNS UUID AS $$
+DECLARE t UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, d.branch_id, p_serial, p_poster
+      FROM document_type dt, document d WHERE dt.code = 'TT' AND d.id = p_dn
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id,
+                                    source_document_id, customs_reference)
+    SELECT t, 'DELIVERY', 'OUT', a.location_id, p_dn, a.customs_reference
+      FROM delivery_note n JOIN delivery_authorization a ON a.document_id = n.authorization_id
+     WHERE n.document_id = p_dn;
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+    SELECT t, l.line_no, l.item_id, l.quantity, l.uom_id, l.qty_base_uom, l.storage_bin_id
+      FROM delivery_note_line l WHERE l.document_id = p_dn;
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+CREATE FUNCTION pg_temp.move_out(p_ticket UUID, p_poster UUID, p_date DATE) RETURNS VOID AS $$
+    INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, storage_bin_id,
+                                direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                running_balance, business_date, posted_by)
+    SELECT tl.id, d.id, d.branch_id, tl.item_id, t.from_location_id, tl.storage_bin_id,
+           'OUT', tl.qty_base_uom, -tl.qty_base_uom, 1000, tl.qty_base_uom * 1000, 0, p_date, p_poster
+      FROM ticket_line tl
+      JOIN transaction_ticket t ON t.document_id = tl.ticket_id
+      JOIN document d ON d.id = t.document_id
+     WHERE tl.ticket_id = p_ticket;
+$$ LANGUAGE sql;
+
+-- The whole gate: approved authorization, note raised, posted by a signer,
+-- ticket written, stock moved out, ticket posted.
+CREATE FUNCTION pg_temp.deliver(p_serial TEXT, p_qty NUMERIC DEFAULT 40) RETURNS UUID AS $$
+DECLARE
+    dao UUID; dn UUID; tt UUID; poster UUID;
+BEGIN
+    dao    := pg_temp.dao_at(p_serial, 'APPROVED', p_qty);
+    poster := pg_temp.gate_poster(dao);
+    dn     := pg_temp.make_dn(p_serial || '-DN', dao);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = dn;
+    tt     := pg_temp.make_dn_ticket(dn, poster, p_serial || '-TT');
+    PERFORM pg_temp.move_out(tt, poster, kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = tt;
+    INSERT INTO fx VALUES (p_serial, dao), (p_serial || '-DN', dn), (p_serial || '-TT', tt);
+    RETURN dao;
+END $$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------
+-- 32. The dispatch rights sit on the roles that sign each step, and
+--     nobody is left in conflict
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    bad TEXT;
+    msg TEXT;
+BEGIN
+    SELECT string_agg(v.role_code || ' has {' || COALESCE(have.perms, '') || '} expected {' || v.want || '}', '; ')
+      INTO bad
+      FROM (VALUES
+            ('ASST_WH_MANAGER',  'dispatch.post,dispatch.verify,dispatch.view'),
+            ('WH_MANAGER',       'dispatch.post,dispatch.verify,dispatch.view'),
+            ('FINANCE',          'dispatch.approve,dispatch.create,dispatch.view'),
+            ('INTERNAL_CTRL',    'dispatch.release,dispatch.verify,dispatch.view'),
+            ('INV_TX_OFFICER',   'dispatch.create,dispatch.view'),
+            ('DIR_SUPPLY_CHAIN', 'dispatch.verify,dispatch.view'),
+            ('DIR_COMMERCIAL',   'dispatch.countersign,dispatch.view')
+           ) AS v(role_code, want)
+      LEFT JOIN LATERAL (
+            SELECT string_agg(p.code, ',' ORDER BY p.code) AS perms
+              FROM role r JOIN role_permission rp ON rp.role_id = r.id
+              JOIN permission p ON p.id = rp.permission_id AND p.module = 'dispatch'
+             WHERE r.code = v.role_code) have ON TRUE
+     WHERE have.perms IS DISTINCT FROM v.want;
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   32a  dispatch rights sit on the roles whose steps they serve';
+    ELSE
+        RAISE WARNING 'FAIL 32a  %', bad;
+    END IF;
+
+    -- Every step of both delivery authorization chains has a role carrying the
+    -- right its action needs.
+    SELECT string_agg(r.code || ' signs ' || ws.action_label || ' without ' || need.code, '; ')
+      INTO bad
+      FROM workflow_step ws
+      JOIN workflow_definition wd ON wd.id = ws.workflow_definition_id
+      JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'DAO'
+      JOIN role r ON r.id = ws.required_role_id
+      CROSS JOIN LATERAL (SELECT CASE ws.action_label
+                                   WHEN 'PREPARE' THEN 'dispatch.create'
+                                   WHEN 'VERIFY' THEN 'dispatch.verify'
+                                   WHEN 'COUNTERSIGN' THEN 'dispatch.countersign'
+                                   WHEN 'RELEASE' THEN 'dispatch.release' END AS code) need
+     WHERE NOT EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.id = rp.permission_id
+                        WHERE rp.role_id = r.id AND p.code = need.code);
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   32b  every delivery chain signer carries the right its step needs';
+    ELSE
+        RAISE WARNING 'FAIL 32b  %', bad;
+    END IF;
+
+    SELECT string_agg(r.code, ',' ORDER BY r.code) INTO bad
+      FROM role r JOIN role_permission rp ON rp.role_id = r.id JOIN permission p ON p.id = rp.permission_id
+     WHERE p.code = 'dispatch.post';
+    IF bad = 'ASST_WH_MANAGER,WH_MANAGER' THEN
+        RAISE NOTICE 'ok   32c  only the warehouse roles carry dispatch.post';
+    ELSE
+        RAISE WARNING 'FAIL 32c  dispatch.post is carried by %', bad;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM permission WHERE code = 'dispatch.post' AND module = 'dispatch' AND action = 'POST' AND duty = 'TRANSACT')
+       AND EXISTS (SELECT 1 FROM permission WHERE code = 'dispatch.countersign' AND action = 'APPROVE' AND duty = 'TRANSACT') THEN
+        RAISE NOTICE 'ok   32d  dispatch.post and dispatch.countersign are transactional rights';
+    ELSE
+        RAISE WARNING 'FAIL 32d  the new dispatch rights are missing or misclassified';
+    END IF;
+
+    msg := access_conflict_anywhere();
+    IF msg IS NULL THEN
+        RAISE NOTICE 'ok   32e  nobody, and no role, is left in conflict';
+    ELSE
+        RAISE WARNING 'FAIL 32e  %', msg;
+    END IF;
+END $$;
+
+SELECT pg_temp.refuses('32f', 'the Internal Controller was given dispatch.post',
+  $q$INSERT INTO role_permission (role_id, permission_id)
+     SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'dispatch.post'$q$,
+  '23Z01');
+SELECT pg_temp.refuses('32g', 'the Internal Controller and the warehouse were held by one person',
+  $q$INSERT INTO user_role (user_id, role_id, assigned_by)
+     SELECT pg_temp.holder('WH_MANAGER'), r.id, pg_temp.verify_user() FROM role r WHERE r.code = 'INTERNAL_CTRL'$q$,
+  '23Z01');
+
+-- ---------------------------------------------------------------------
+-- 33. The delivery authorization: content frozen at submission, header
+--     rules, signing down the chain, never posted
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('d_draft',  pg_temp.dao_at('_VERIFY-D-DRAFT',  'DRAFT')),
+        ('d_pend',   pg_temp.dao_at('_VERIFY-D-PEND',   'PENDING')),
+        ('d_step1',  pg_temp.dao_at('_VERIFY-D-STEP1',  'STEP1')),
+        ('d_norel',  pg_temp.dao_at('_VERIFY-D-NOREL',  'NORELEASE')),
+        ('d_appr',   pg_temp.dao_at('_VERIFY-D-APPR',   'APPROVED'));
+END $$;
+
+SELECT pg_temp.refuses('33a', 'a submitted authorization''s header was edited',
+  $q$UPDATE delivery_authorization SET customer_reference = 'CHANGED' WHERE document_id = pg_temp.fx_id('d_pend')$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.refuses('33b', 'a line was added after submission',
+  $q$INSERT INTO delivery_authorization_line (document_id, line_no, item_id, uom_id, quantity, qty_base_uom)
+     SELECT pg_temp.fx_id('d_pend'), 2, i.id, u.id, 1, 1 FROM item i, uom u
+      WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET'$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.refuses('33c', 'a line was changed after submission',
+  $q$UPDATE delivery_authorization_line SET quantity = 500, qty_base_uom = 500 WHERE document_id = pg_temp.fx_id('d_pend')$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.refuses('33d', 'a line was deleted after submission',
+  $q$DELETE FROM delivery_authorization_line WHERE document_id = pg_temp.fx_id('d_appr')$q$,
+  '23Z02', '%APPROVED%cannot change%');
+SELECT pg_temp.accepts('33e', 'a draft authorization is still editable',
+  $q$UPDATE delivery_authorization_line SET quantity = 50, qty_base_uom = 50 WHERE document_id = pg_temp.fx_id('d_draft')$q$);
+
+DO $$
+DECLARE d UUID; c UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, '_VERIFY-D-BOND', pg_temp.verify_user()
+      FROM document_type dt, branch b WHERE dt.code = 'DAO' AND b.code = 'RBV'
+    RETURNING id INTO d;
+    INSERT INTO fx VALUES ('d_bond', d);
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, '_VERIFY-D-EMPTY', pg_temp.verify_user()
+      FROM document_type dt, branch b WHERE dt.code = 'DAO' AND b.code = 'KGL'
+    RETURNING id INTO c;
+    INSERT INTO fx VALUES ('d_empty', c);
+    INSERT INTO delivery_authorization (document_id, customer_id, location_id)
+    SELECT c, cu.id, l.id FROM customer cu, location l WHERE cu.code = '_VERIFY-CUST' AND l.code = 'KGL-MAIN';
+END $$;
+SELECT pg_temp.refuses('33f', 'bonded stock was authorized to leave with no customs reference',
+  $q$INSERT INTO delivery_authorization (document_id, customer_id, location_id)
+     SELECT pg_temp.fx_id('d_bond'), c.id, l.id FROM customer c, location l
+      WHERE c.code = '_VERIFY-CUST' AND l.code = 'RBV-BOND'$q$,
+  '23514', '%customs reference%');
+SELECT pg_temp.refuses('33g', 'a blank customs reference was accepted',
+  $q$INSERT INTO delivery_authorization (document_id, customer_id, location_id, customs_reference)
+     SELECT pg_temp.fx_id('d_bond'), c.id, l.id, '  ' FROM customer c, location l
+      WHERE c.code = '_VERIFY-CUST' AND l.code = 'RBV-BOND'$q$,
+  '23514', '%dao_customs_reference_not_blank%');
+SELECT pg_temp.accepts('33h', 'a bonded authorization with its customs reference is accepted',
+  $q$INSERT INTO delivery_authorization (document_id, customer_id, location_id, customs_reference)
+     SELECT pg_temp.fx_id('d_bond'), c.id, l.id, 'C-2026-DAO' FROM customer c, location l
+      WHERE c.code = '_VERIFY-CUST' AND l.code = 'RBV-BOND'$q$);
+SELECT pg_temp.refuses('33i', 'an authorization for a blocked customer was accepted',
+  $q$UPDATE delivery_authorization SET customer_id = (SELECT id FROM customer WHERE code = '_VERIFY-BLOCKED')
+      WHERE document_id = pg_temp.fx_id('d_draft')$q$,
+  '23514', '%blocked%');
+SELECT pg_temp.refuses('33j', 'an authorization at Gahanga released from a Rubavu location',
+  $q$UPDATE delivery_authorization SET location_id = (SELECT id FROM location WHERE code = 'RBV-BOND'),
+                                       customs_reference = 'C-1'
+      WHERE document_id = pg_temp.fx_id('d_draft')$q$,
+  '23514', '%not at the branch%');
+SELECT pg_temp.refuses('33k', 'a base quantity that does not follow from the entered one was accepted',
+  $q$UPDATE delivery_authorization_line SET qty_base_uom = 999 WHERE document_id = pg_temp.fx_id('d_draft')$q$,
+  '23514', '%base unit%');
+SELECT pg_temp.refuses('33l', 'an authorization with no lines was submitted',
+  $q$UPDATE document SET status = 'PENDING' WHERE id = pg_temp.fx_id('d_empty')$q$,
+  '23Z02', '%no lines%');
+SELECT pg_temp.refuses('33m', 'the Internal Controller''s release was signed out of order',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('d_pend'), pg_temp.steps_in(pg_temp.fx_id('d_pend')),
+                         pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('d_pend'), pg_temp.steps_in(pg_temp.fx_id('d_pend')))))$q$,
+  '23Z02', '%must sign%before step%');
+SELECT pg_temp.refuses('33n', 'someone without the step''s role signed the authorization',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('d_pend'), 1, pg_temp.holder('SALES'))$q$,
+  '23Z02', '%does not hold%');
+SELECT pg_temp.refuses('33o', 'an approved authorization was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('SALES') WHERE id = pg_temp.fx_id('d_appr')$q$,
+  '23Z02', '%never posted%');
+SELECT pg_temp.accepts('33p', 'the whole chain signs an authorization in order, each in its own role',
+  $q$SELECT pg_temp.dao_at('_VERIFY-D-CHAIN', 'APPROVED')$q$);
+
+-- ---------------------------------------------------------------------
+-- 34. The delivery note is raised only against a fully signed
+--     authorization, once, and matches it
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('34a', 'a note was raised against an authorization still pending',
+  $q$SELECT pg_temp.make_dn('_VERIFY-DN-PEND', pg_temp.fx_id('d_pend'))$q$,
+  '23Z02', '%is PENDING%fully signed%');
+SELECT pg_temp.refuses('34b', 'a note was raised against an authorization missing the release',
+  $q$SELECT pg_temp.make_dn('_VERIFY-DN-NOREL', pg_temp.fx_id('d_norel'))$q$,
+  '23Z02', '%is PENDING%');
+SELECT pg_temp.refuses('34c', 'a note was raised against a draft authorization',
+  $q$SELECT pg_temp.make_dn('_VERIFY-DN-DRAFT', pg_temp.fx_id('d_draft'))$q$,
+  '23Z02', '%is DRAFT%');
+
+DO $$
+DECLARE dn UUID;
+BEGIN
+    dn := pg_temp.make_dn('_VERIFY-DN-A', pg_temp.fx_id('d_appr'));
+    INSERT INTO fx VALUES ('dn_a', dn);
+END $$;
+SELECT pg_temp.refuses('34d', 'a second live note was raised for one authorization',
+  $q$SELECT pg_temp.make_dn('_VERIFY-DN-A2', pg_temp.fx_id('d_appr'))$q$,
+  '23Z02', '%already has a live delivery note%');
+
+-- Glass needs its gate thickness; the line must serve its own authorization
+-- and match it; bins belong to the authorization's location.
+SELECT pg_temp.refuses('34e', 'a glass line without a gate measurement was accepted',
+  $q$UPDATE delivery_note_line SET measured_thickness_mm = NULL WHERE document_id = pg_temp.fx_id('dn_a')$q$,
+  '23514', '%thickness%');
+SELECT pg_temp.refuses('34f', 'a bin from another location was accepted',
+  $q$UPDATE delivery_note_line SET storage_bin_id = (SELECT id FROM storage_bin WHERE bin_code = '_VERIFY-BIN')
+      WHERE document_id = pg_temp.fx_id('dn_a')$q$,
+  '23514', '%not in the location%');
+SELECT pg_temp.refuses('34g', 'a note line served a line of another authorization',
+  $q$UPDATE delivery_note_line SET authorization_line_id =
+        (SELECT id FROM delivery_authorization_line WHERE document_id = pg_temp.fx_id('d_draft'))
+      WHERE document_id = pg_temp.fx_id('dn_a')$q$,
+  '23514', '%different authorization%');
+SELECT pg_temp.refuses('34h', 'a note line loaded another item than authorized',
+  $q$UPDATE delivery_note_line SET item_id = (SELECT id FROM item WHERE item_code = '_VERIFY-OTHER')
+      WHERE document_id = pg_temp.fx_id('dn_a')$q$,
+  '23514', '%differs from authorization line%');
+SELECT pg_temp.refuses('34i', 'a note was re-pointed at another authorization',
+  $q$UPDATE delivery_note SET authorization_id = pg_temp.fx_id('d_bond') WHERE document_id = pg_temp.fx_id('dn_a')$q$,
+  '23Z02', '%bound to one authorization for life%');
+SELECT pg_temp.refuses('34j', 'a note with a blank vehicle was accepted',
+  $q$UPDATE delivery_note SET vehicle_registration = '  ' WHERE document_id = pg_temp.fx_id('dn_a')$q$,
+  '23514', '%dn_vehicle_not_blank%');
+
+-- A cancelled note frees the authorization for another load.
+SELECT pg_temp.accepts('34k', 'a draft note can be cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('dn_a')$q$);
+SELECT pg_temp.accepts('34l', 'with the first note cancelled, a new note is raised for the authorization',
+  $q$SELECT pg_temp.make_dn('_VERIFY-DN-A3', pg_temp.fx_id('d_appr'))$q$);
+
+-- ---------------------------------------------------------------------
+-- 35. Posting the note is the gate: who, how much, and the ledger
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    dao UUID := pg_temp.dao_at('_VERIFY-D-GATE', 'APPROVED', 40);
+BEGIN
+    INSERT INTO fx VALUES ('d_gate', dao), ('dn_gate', pg_temp.make_dn('_VERIFY-DN-GATE', dao));
+END $$;
+
+SELECT pg_temp.refuses('35a', 'the person who raised the authorization posted its note',
+  $q$UPDATE document SET status = 'POSTED', posted_by = (SELECT created_by FROM document WHERE id = pg_temp.fx_id('d_gate'))
+      WHERE id = pg_temp.fx_id('dn_gate')$q$,
+  '23Z02', '%person who raised authorization%');
+SELECT pg_temp.refuses('35b', 'a note was posted naming nobody',
+  $q$UPDATE document SET status = 'POSTED' WHERE id = pg_temp.fx_id('dn_gate')$q$,
+  '23Z02', '%must name who records%');
+UPDATE delivery_note_line SET quantity = 30, qty_base_uom = 30 WHERE document_id = pg_temp.fx_id('dn_gate');
+SELECT pg_temp.refuses('35c', 'a short load was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.gate_poster(pg_temp.fx_id('d_gate'))
+      WHERE id = pg_temp.fx_id('dn_gate')$q$,
+  '23Z02', '%allows 40.000 and%loads 30.000%');
+UPDATE delivery_note_line SET quantity = 50, qty_base_uom = 50 WHERE document_id = pg_temp.fx_id('dn_gate');
+SELECT pg_temp.refuses('35d', 'an over load was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.gate_poster(pg_temp.fx_id('d_gate'))
+      WHERE id = pg_temp.fx_id('dn_gate')$q$,
+  '23Z02', '%allows 40.000 and%loads 50.000%');
+
+-- Two lines summing to the authorized quantity are an exact load.
+UPDATE delivery_note_line SET quantity = 15, qty_base_uom = 15 WHERE document_id = pg_temp.fx_id('dn_gate');
+INSERT INTO delivery_note_line (document_id, line_no, authorization_line_id, item_id, uom_id,
+                                quantity, qty_base_uom, storage_bin_id, measured_thickness_mm)
+SELECT n.document_id, 2, l.authorization_line_id, l.item_id, l.uom_id, 25, 25,
+       NULL, 6.0
+  FROM delivery_note_line l JOIN delivery_note n ON n.document_id = l.document_id
+ WHERE l.document_id = pg_temp.fx_id('dn_gate') AND l.line_no = 1;
+SELECT pg_temp.accepts('35e', 'an exact load, split over two lines, is posted by a signer of the authorization',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.gate_poster(pg_temp.fx_id('d_gate'))
+      WHERE id = pg_temp.fx_id('dn_gate')$q$);
+SELECT pg_temp.refuses('35f', 'a posted note''s load was changed',
+  $q$UPDATE delivery_note_line SET quantity = 1 WHERE document_id = pg_temp.fx_id('dn_gate')$q$,
+  '23Z02', '%POSTED%cannot change%');
+SELECT pg_temp.refuses('35g', 'a posted note''s details were changed',
+  $q$UPDATE delivery_note SET driver_name = 'Someone Else' WHERE document_id = pg_temp.fx_id('dn_gate')$q$,
+  '23Z02', '%POSTED%cannot change%');
+
+-- The ledger: the ticket for the posted note, stock out.
+DO $$
+DECLARE
+    poster UUID := pg_temp.gate_poster(pg_temp.fx_id('d_gate'));
+BEGIN
+    INSERT INTO fx VALUES ('tt_gate', pg_temp.make_dn_ticket(pg_temp.fx_id('dn_gate'), poster, '_VERIFY-TT-GATE'));
+END $$;
+SELECT pg_temp.refuses('35h', 'stock left the ledger recorded by someone other than the person who posted the note',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_gate'), pg_temp.verify_user(), kigali_today())$q$,
+  '23Z02', '%posted by someone else%');
+SELECT pg_temp.accepts('35i', 'the movements OUT for the posted note, against the released authorization, are accepted',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_gate'), pg_temp.gate_poster(pg_temp.fx_id('d_gate')), kigali_today())$q$);
+UPDATE document SET status = 'POSTED', posted_by = pg_temp.gate_poster(pg_temp.fx_id('d_gate'))
+ WHERE id = pg_temp.fx_id('tt_gate');
+SELECT pg_temp.refuses('35j', 'a delivery ticket line was moved twice',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_gate'), pg_temp.gate_poster(pg_temp.fx_id('d_gate')), kigali_today())$q$,
+  '23505', '%stock_movement_one_per_ticket_line%');
+SELECT pg_temp.refuses('35k', 'a second delivery ticket was raised for one note',
+  $q$SELECT pg_temp.make_dn_ticket(pg_temp.fx_id('dn_gate'), pg_temp.holder('FINANCE'), '_VERIFY-TT-GATE2')$q$,
+  '23505', '%transaction_ticket_one_delivery_per_source%');
+
+-- A whole delivery through the gate, for the checks that follow.
+SELECT pg_temp.accepts('35l', 'a complete delivery (authorize, sign, raise, post, move, post ticket) passes every guard',
+  $q$SELECT pg_temp.deliver('_VERIFY-D-OK', 10)$q$);
+
+-- Delivered notes and tickets moved their stock: the commit-time check passes.
+SELECT pg_temp.accepts('35m', 'posted notes that moved their stock pass the commit check',
+  $q$SET CONSTRAINTS document_dn_posted_moved_stock, stock_movement_ticket_posted IMMEDIATE$q$);
+SET CONSTRAINTS document_dn_posted_moved_stock, stock_movement_ticket_posted DEFERRED;
+
+-- A note that reaches the ledger before it is posted moves nothing.
+DO $$
+DECLARE
+    dn  UUID := pg_temp.make_dn('_VERIFY-DN-EARLY', pg_temp.dao_at('_VERIFY-D-EARLY', 'APPROVED', 5));
+BEGIN
+    INSERT INTO fx VALUES ('tt_early', pg_temp.make_dn_ticket(dn, pg_temp.holder('FINANCE'), '_VERIFY-TT-EARLY'));
+END $$;
+SELECT pg_temp.refuses('35n', 'stock left against a delivery note that had not been posted',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_early'), pg_temp.holder('FINANCE'), kigali_today())$q$,
+  '23Z02', '%must be posted before its stock moves%');
+
+-- A ticket cannot carry lines the note did not load.
+SELECT pg_temp.refuses('35o', 'a delivery ticket line differed from the note line',
+  $q$UPDATE ticket_line SET quantity = 1, qty_base_uom = 1 WHERE ticket_id = pg_temp.fx_id('tt_early')$q$,
+  '23Z02', '%differs from line 1%');
+-- ---------------------------------------------------------------------
+-- 36. An authorization acted on can never read CANCELLED
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('36a', 'a delivered authorization was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-D-OK')$q$,
+  '23Z02', '%stock has already moved%');
+SELECT pg_temp.refuses('36b', 'an authorization was cancelled under a live note',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('d_appr')$q$,
+  '23Z02', '%still answers to it%');
+SELECT pg_temp.refuses('36c', 'a delivered note was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-D-OK-DN')$q$,
+  '23Z02', '%corrected by a reversing document%');
+SELECT pg_temp.refuses('36d', 'a delivered ticket was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-D-OK-TT')$q$,
+  '23Z02', '%corrected by a reversing document%');
+DO $$
+DECLARE d UUID;
+BEGIN
+    d := pg_temp.dao_at('_VERIFY-D-CANCEL', 'APPROVED');
+    INSERT INTO fx VALUES ('d_cancel', d);
+END $$;
+SELECT pg_temp.accepts('36e', 'an approved authorization nothing has acted on can be cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('d_cancel')$q$);
+SELECT pg_temp.refuses('36f', 'a pending authorization with an unsigned chain was cancelled without naming who',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'x' WHERE id = pg_temp.fx_id('d_pend')$q$,
+  '23Z02', '%must name who cancels%');
+SELECT pg_temp.accepts('36g', 'an authorization whose only note was cancelled can be cancelled too',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = (SELECT id FROM document WHERE serial_no = '_VERIFY-DN-A3')$q$);
+SELECT pg_temp.accepts('36h', 'and then the authorization itself',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('d_appr')$q$);
+
+-- ---------------------------------------------------------------------
+-- 37. Stock never goes negative
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('37a', 'a balance row with a negative quantity on hand was accepted',
+  $q$INSERT INTO stock_balance (item_id, location_id, qty_on_hand)
+     SELECT i.id, l.id, -1 FROM item i, location l WHERE i.item_code = '_VERIFY-OTHER' AND l.code = 'KGL-MAIN'$q$,
+  '23514', '%stock_balance_never_negative%');
+
+-- More than is on hand: authorized and loaded, but the ledger refuses.
+DO $$
+DECLARE
+    dao UUID := pg_temp.dao_at('_VERIFY-D-HUGE', 'APPROVED', 100000);
+    dn  UUID := pg_temp.make_dn('_VERIFY-DN-HUGE', dao);
+    p   UUID := pg_temp.gate_poster(dao);
+BEGIN
+    UPDATE document SET status = 'POSTED', posted_by = p WHERE id = dn;
+    INSERT INTO fx VALUES ('tt_huge', pg_temp.make_dn_ticket(dn, p, '_VERIFY-TT-HUGE')), ('p_huge', p);
+END $$;
+SELECT pg_temp.refuses('37b', 'stock left that was not there',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_huge'), pg_temp.fx_id('p_huge'), kigali_today())$q$,
+  '23Z02', '%Not enough stock%short by%');
+
+-- A named bin must hold what leaves from it.
+DO $$
+DECLARE
+    dao UUID := pg_temp.dao_at('_VERIFY-D-BIN', 'APPROVED', 5);
+    dn  UUID := pg_temp.make_dn('_VERIFY-DN-BIN', dao, NULL, '_VERIFY-BIN-MAIN');
+    p   UUID := pg_temp.gate_poster(dao);
+BEGIN
+    UPDATE document SET status = 'POSTED', posted_by = p WHERE id = dn;
+    INSERT INTO fx VALUES ('tt_bin', pg_temp.make_dn_ticket(dn, p, '_VERIFY-TT-BIN')), ('p_bin', p);
+END $$;
+SELECT pg_temp.refuses('37c', 'stock left a bin that held none of it',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_bin'), pg_temp.fx_id('p_bin'), kigali_today())$q$,
+  '23Z02', '%Not enough stock in bin%');
+
+-- Nothing moved in those two: the notes stand posted without their stock, which
+-- the commit check refuses.
+SELECT pg_temp.refuses('37d', 'a posted delivery note whose stock never left was accepted at commit',
+  $q$SET CONSTRAINTS document_dn_posted_moved_stock IMMEDIATE$q$,
+  '23Z02', '%never left the ledger%');
+SET CONSTRAINTS document_dn_posted_moved_stock DEFERRED;
+
+-- ---------------------------------------------------------------------
+-- 39. What the control audit found in V12
+-- ---------------------------------------------------------------------
+
+-- A ticket answers only to a goods received note or a delivery note. An
+-- approved authorization must not, on its own, let stock leave.
+DO $$
+DECLARE n INT;
+BEGIN
+    FOR n IN 1..4 LOOP
+        WITH d AS (
+            INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+            SELECT dt.id, b.id, '_VERIFY-TT-S' || n, pg_temp.verify_user()
+              FROM document_type dt, branch b WHERE dt.code = 'TT' AND b.code = 'KGL'
+            RETURNING id)
+        INSERT INTO fx SELECT '_VERIFY-TT-S' || n, id FROM d;
+    END LOOP;
+END $$;
+
+SELECT pg_temp.refuses('39a', 'a ticket sourced from an approved delivery authorization was accepted',
+  $q$INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id)
+     SELECT pg_temp.fx_id('_VERIFY-TT-S1'), 'DELIVERY', 'OUT', l.id, pg_temp.fx_id('d_gate')
+       FROM location l WHERE l.code = 'KGL-MAIN'$q$,
+  '23Z02', '%answers only to a goods received note or a delivery note%');
+SELECT pg_temp.refuses('39b', 'a ticket sourced from a count sheet was accepted',
+  $q$INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id)
+     SELECT pg_temp.fx_id('_VERIFY-TT-S2'), 'ADJUSTMENT', 'OUT', l.id, pg_temp.fx_id('cnt_posted')
+       FROM location l WHERE l.code = 'KGL-MAIN'$q$,
+  '23Z02', '%answers only to a goods received note or a delivery note%');
+SELECT pg_temp.refuses('39c', 'a ticket with no source document was accepted',
+  $q$INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id)
+     SELECT pg_temp.fx_id('_VERIFY-TT-S3'), 'ADJUSTMENT', 'OUT', l.id
+       FROM location l WHERE l.code = 'KGL-MAIN'$q$,
+  '23Z02', '%names no supporting document%');
+
+-- Even if such a ticket row somehow exists (its own trigger switched off for
+-- this test), the ledger refuses the movement against it.
+ALTER TABLE transaction_ticket DISABLE TRIGGER transaction_ticket_rules;
+ALTER TABLE ticket_line DISABLE TRIGGER ticket_line_rules;
+INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id)
+SELECT pg_temp.fx_id('_VERIFY-TT-S1'), 'DELIVERY', 'OUT', l.id, pg_temp.fx_id('d_gate')
+  FROM location l WHERE l.code = 'KGL-MAIN';
+INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom)
+SELECT pg_temp.fx_id('_VERIFY-TT-S1'), 1, i.id, 5, u.id, 5
+  FROM item i, uom u WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET';
+INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id)
+SELECT pg_temp.fx_id('_VERIFY-TT-S4'), 'ADJUSTMENT', 'OUT', l.id
+  FROM location l WHERE l.code = 'KGL-MAIN';
+INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom)
+SELECT pg_temp.fx_id('_VERIFY-TT-S4'), 1, i.id, 5, u.id, 5
+  FROM item i, uom u WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET';
+ALTER TABLE transaction_ticket ENABLE TRIGGER transaction_ticket_rules;
+ALTER TABLE ticket_line ENABLE TRIGGER ticket_line_rules;
+
+SELECT pg_temp.refuses('39d', 'stock left against a ticket sourced from an authorization',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('_VERIFY-TT-S1'), pg_temp.holder('FINANCE'), kigali_today())$q$,
+  '23Z02', '%answers to no goods received note or delivery note%');
+SELECT pg_temp.refuses('39e', 'stock left against a ticket with no source',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('_VERIFY-TT-S4'), pg_temp.holder('FINANCE'), kigali_today())$q$,
+  '23Z02', '%answers to no goods received note or delivery note%');
+
+-- The unbinned bucket is a bucket: 10 in a bin does not cover 10 unbinned.
+-- KGL-CUT holds 10 sheets in bin _VERIFY-BIN and nothing unbinned.
+CREATE FUNCTION pg_temp.receive_into_bin(p_serial TEXT, p_qty NUMERIC) RETURNS VOID AS $$
+DECLARE
+    fin UUID := pg_temp.holder('FINANCE');
+    g   UUID;
+    tt  UUID;
+BEGIN
+    g := pg_temp.make_grn(p_serial, NULL, 'KGL', 'KGL-CUT');
+    UPDATE goods_received_line SET quantity = p_qty, qty_base_uom = p_qty,
+           storage_bin_id = (SELECT id FROM storage_bin WHERE bin_code = '_VERIFY-BIN')
+     WHERE document_id = g;
+    UPDATE document SET status = 'PENDING' WHERE id = g;
+    PERFORM pg_temp.sign_upto(g, pg_temp.steps_in(g));
+    UPDATE document SET status = 'APPROVED' WHERE id = g;
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = g;
+    tt := pg_temp.make_ticket(g, fin, p_serial || '-TT');
+    PERFORM pg_temp.move_ticket(tt, fin, kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = tt;
+END $$ LANGUAGE plpgsql;
+
+-- An authorization, note and (unmoved) ticket at a given location and bin.
+CREATE FUNCTION pg_temp.gate_at(p_serial TEXT, p_qty NUMERIC, p_loc TEXT, p_bin TEXT) RETURNS UUID AS $$
+DECLARE
+    dao UUID; dn UUID; poster UUID;
+BEGIN
+    dao := pg_temp.make_dao(p_serial, p_qty, NULL, 'KGL', p_loc);
+    UPDATE document SET status = 'PENDING' WHERE id = dao;
+    PERFORM pg_temp.sign_upto(dao, pg_temp.steps_in(dao));
+    UPDATE document SET status = 'APPROVED' WHERE id = dao;
+    poster := pg_temp.gate_poster(dao);
+    dn := pg_temp.make_dn(p_serial || '-DN', dao, NULL, p_bin);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = dn;
+    INSERT INTO fx VALUES (p_serial || '-P', poster);
+    RETURN pg_temp.make_dn_ticket(dn, poster, p_serial || '-TT');
+END $$ LANGUAGE plpgsql;
+
+DO $$
+BEGIN
+    PERFORM pg_temp.receive_into_bin('_VERIFY-G-BIN10', 10);
+    INSERT INTO fx VALUES ('tt_unb', pg_temp.gate_at('_VERIFY-D-UNB', 10, 'KGL-CUT', NULL));
+    INSERT INTO fx VALUES ('tt_bin_ok', pg_temp.gate_at('_VERIFY-D-BINOK', 4, 'KGL-CUT', '_VERIFY-BIN'));
+END $$;
+SELECT pg_temp.refuses('39f', 'an unbinned OUT beyond the unbinned stock, while the stock sits in a bin, was accepted',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_unb'), pg_temp.fx_id('_VERIFY-D-UNB-P'), kigali_today())$q$,
+  '23Z02', '%Not enough unbinned stock%');
+SELECT pg_temp.accepts('39g', 'an OUT from the bin that holds the stock is accepted',
+  $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_bin_ok'), pg_temp.fx_id('_VERIFY-D-BINOK-P'), kigali_today())$q$);
+SELECT pg_temp.accepts('39h', 'an unbinned OUT within the unbinned stock is accepted',
+  $q$SELECT pg_temp.deliver('_VERIFY-D-UNB2', 3)$q$);
+
+-- The Internal Controller does not let out what it released. The IC holder
+-- signed the RELEASE step of this authorization; a verifier may post (35e),
+-- a releaser may not. The database checks the person, not the right the
+-- service checks, so the test names the IC holder as poster.
+DO $$
+DECLARE dao UUID := pg_temp.dao_at('_VERIFY-D-IC', 'APPROVED');
+BEGIN
+    INSERT INTO fx VALUES ('d_ic', dao), ('dn_ic', pg_temp.make_dn('_VERIFY-DN-IC', dao));
+END $$;
+SELECT pg_temp.refuses('39i', 'the Internal Controller, who signed the release, posted the delivery note',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('INTERNAL_CTRL')
+      WHERE id = pg_temp.fx_id('dn_ic')$q$,
+  '23Z02', '%signed the release of authorization%');
+SELECT pg_temp.accepts('39j', 'the same note is posted by a signer of a verifying step',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.gate_poster(pg_temp.fx_id('d_ic'))
+      WHERE id = pg_temp.fx_id('dn_ic')$q$);
+
+-- Cancelling a DAO takes the lock a DN insert takes, so the two serialise.
+-- Functionally the cancel still works on an untouched authorization and is
+-- still refused under a live note (36b); here the lock is seen held.
+DO $$
+DECLARE d UUID := pg_temp.dao_at('_VERIFY-D-LOCK', 'APPROVED');
+BEGIN
+    INSERT INTO fx VALUES ('d_lock', d);
+END $$;
+SELECT pg_temp.accepts('39k', 'an untouched authorization is still cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('d_lock')$q$);
+DO $$
+DECLARE key BIGINT := hashtextextended('dn:' || pg_temp.fx_id('d_lock')::text, 0);
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_locks
+                WHERE locktype = 'advisory' AND pid = pg_backend_pid()
+                  AND ((classid::bigint << 32) | objid::bigint) = key) THEN
+        RAISE NOTICE 'ok   39l  cancelling a delivery authorization takes the lock a delivery note insert takes';
+    ELSE
+        RAISE WARNING 'FAIL 39l  the cancellation did not take the delivery note lock';
+    END IF;
+END $$;
+-- The authorization whose note is posted (39j) cannot now be cancelled.
+SELECT pg_temp.refuses('39m', 'an authorization was cancelled under a live, posted note',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('d_ic')$q$,
+  '23Z02', '%still answers to it%');
+
+-- ---------------------------------------------------------------------
+-- 38. The chain switch for the delivery authorization is a row, and the
+--     2027 chain signs with the new rights. Skipped once the date passes.
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    old_def UUID; new_def UUID; d UUID; bound UUID;
+BEGIN
+    IF kigali_today() >= DATE '2027-01-01' THEN
+        RAISE NOTICE 'ok   38   (skipped: the 2027 chain is already in force)';
+        RETURN;
+    END IF;
+    SELECT wd.id INTO old_def FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
+     WHERE dt.code = 'DAO' AND wd.basis = 'POLICY_2026';
+    SELECT wd.id INTO new_def FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
+     WHERE dt.code = 'DAO' AND wd.basis = 'RESTRUCTURE_2027';
+
+    UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = old_def;
+    UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = new_def;
+
+    d := pg_temp.dao_at('_VERIFY-D-2027', 'PENDING');
+    SELECT workflow_definition_id INTO bound FROM document WHERE id = d;
+    IF bound = new_def THEN
+        RAISE NOTICE 'ok   38a  once the switch date arrives a new authorization binds to the 2027 chain';
+    ELSE
+        RAISE WARNING 'FAIL 38a  a new authorization bound to % instead of the 2027 chain', bound;
+    END IF;
+
+    BEGIN
+        PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d));
+        UPDATE document SET status = 'APPROVED' WHERE id = d;
+        RAISE NOTICE 'ok   38b  the 2027 chain (ITO, Director Supply Chain, Director Commercial, Internal Controller) signs and approves';
+    EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'FAIL 38b  the 2027 chain could not sign: %', SQLERRM;
+    END;
+
+    SELECT workflow_definition_id INTO bound FROM document WHERE id = pg_temp.fx_id('d_step1');
+    IF bound = old_def THEN
+        BEGIN
+            PERFORM pg_temp.sign(pg_temp.fx_id('d_step1'), 2, pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('d_step1'), 2)));
+            RAISE NOTICE 'ok   38c  an open authorization finishes under the 2026 chain it began with';
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'FAIL 38c  an open authorization could not finish under its own chain: %', SQLERRM;
+        END;
+    ELSE
+        RAISE WARNING 'FAIL 38c  an open authorization moved to another chain';
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------
 -- 27. The chain switch is a row, and a document finishes under its chain.

@@ -366,6 +366,20 @@ class ReceivingPostingTest extends IntegrationTest {
     }
 
     @Test
+    void anActionRefusedForTheWrongBranchIsRecordedAsRejectWithItsReason() {
+        UUID id = flow.draft();
+        UUID outsider = fx.userAt("RBV", "rbvout", flow.chainRoles.get(0));
+        fx.actAs(outsider, fx.branch("RBV"));
+
+        assertThatThrownBy(() -> receiving.cancel(id, "not mine")).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> receiving.update(id, flow.standardForm())).isInstanceOf(AccessDeniedException.class);
+        assertThat(jdbc.sql("SELECT COUNT(*) FROM audit_log WHERE entity_id = :id AND action = 'REJECT' "
+                        + "AND reason LIKE '%receiving.create%not held%'")
+                .param("id", id).query(Long.class).single()).isEqualTo(2L);
+        assertThat(statusOf(id)).isEqualTo("DRAFT");
+    }
+
+    @Test
     void postingsThatTouchTheSameItemsInOppositeOrderNeverDeadlock() throws Exception {
         // Ten approved receipts of the same two items, half listing them glass-first and half silicone-first.
         List<UUID> notes = new java.util.ArrayList<>();

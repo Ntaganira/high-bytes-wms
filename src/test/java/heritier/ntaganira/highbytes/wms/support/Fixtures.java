@@ -156,16 +156,33 @@ public class Fixtures {
      * whichever chain applies on the day it runs.
      */
     public List<String> receiptChainRoles() {
+        return chainRoles("GRN");
+    }
+
+    /** The role codes of the chain a document of this type raised today binds to, in signing order. */
+    public List<String> chainRoles(String documentType) {
         return jdbc.sql("""
                 SELECT r.code
                   FROM workflow_definition wd
-                  JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'GRN'
+                  JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = :type
                   JOIN workflow_step ws ON ws.workflow_definition_id = wd.id
                   JOIN role r ON r.id = ws.required_role_id
                  WHERE kigali_today() >= wd.effective_from
                    AND (wd.effective_to IS NULL OR kigali_today() < wd.effective_to)
                  ORDER BY ws.sequence_no
                 """)
+                .param("type", documentType)
                 .query(String.class).list();
+    }
+
+    public UUID customer(String prefix, boolean blocked) {
+        UUID id = UUID.randomUUID();
+        jdbc.sql("INSERT INTO customer (id, code, name, is_blocked) VALUES (:id, :code, :name, :blocked)")
+                .param("id", id, Types.OTHER)
+                .param("code", ("C-" + id.toString().substring(0, 8)).toUpperCase())
+                .param("name", "Customer " + prefix)
+                .param("blocked", blocked)
+                .update();
+        return id;
     }
 }

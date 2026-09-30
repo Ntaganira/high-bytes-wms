@@ -24,16 +24,30 @@ package heritier.ntaganira.highbytes.wms.document;
 public enum DocumentKind {
 
     GRN("GRN", "receiving", "Goods Received Note"),
+    DAO("DAO", "dispatch", "Delivery Authorization Order"),
+    /** Posted by the warehouse at the gate, so cancelling one is the gate's right too. */
+    DN("DN", "dispatch", "Delivery Note", "post"),
     TT("TT", "ticket", "Transaction Ticket");
 
     private final String code;
     private final String module;
     private final String title;
+    private final String cancelAction;
 
     DocumentKind(String code, String module, String title) {
+        this(code, module, title, "create");
+    }
+
+    DocumentKind(String code, String module, String title, String cancelAction) {
         this.code = code;
         this.module = module;
         this.title = title;
+        this.cancelAction = cancelAction;
+    }
+
+    /** The right that cancels a document of this kind: whoever raises it, unless the type says otherwise. */
+    public String cancelRight() {
+        return right(cancelAction);
     }
 
     public String code()   { return code; }

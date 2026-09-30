@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${dao.serialNo}">Delivery authorization</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${dao})}"></div>
+
+  <!-- The release gate leads the page: may these goods leave? -->
+  <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · DELIVERY AUTHORIZATION · DAO-004</p>
+      <h1 class="page-title">Delivery to <span th:text="${dao.customerName}">Customer</span></h1>
+      <p class="page-sub">
+        Dated <span class="mono" th:text="${#temporals.format(dao.documentDate, 'dd MMM yyyy')}">30 Sep 2026</span>
+        from <span class="mono" th:text="${dao.locationCode}">KGL-MAIN</span>
+        <span th:text="'· ' + ${dao.locationName}">· Gahanga main store</span>
+        <th:block th:if="${dao.supersedesId != null}">
+          · corrects <a class="doc-link" th:href="@{'/dispatch/' + ${dao.supersedesId}}" th:text="${dao.supersedesSerial}">DAO-KGL-2026-0001</a>
+        </th:block>
+      </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a th:if="${actions.canEdit}" sec:authorize="hasAuthority('dispatch.create')"
+         th:href="@{'/dispatch/' + ${dao.id} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit draft
+      </a>
+      <a th:if="${actions.canCorrect}" sec:authorize="hasAuthority('dispatch.create')"
+         th:href="@{/dispatch/new(correctionOf=${dao.id})}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-repeat"></i> Raise a corrected copy
+      </a>
+      <a th:if="${actions.canLoad}" sec:authorize="hasAuthority('dispatch.post')"
+         th:href="@{/delivery-notes/new(dao=${dao.id})}" class="btn btn-primary-action">
+        <i class="bi bi-truck"></i> Raise the delivery note
+      </a>
+      <a th:if="${gate.dnId != null}" sec:authorize="hasAuthority('dispatch.view')"
+         th:href="@{'/delivery-notes/' + ${gate.dnId}}" class="btn btn-outline-secondary">
+        <i class="bi bi-truck"></i> Delivery note <span th:text="${gate.dnSerial}">DN</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="alert alert-secondary d-flex align-items-start gap-2" role="status" th:if="${dao.status == 'CANCELLED'}">
+    <i class="bi bi-x-circle-fill"></i>
+    <div>
+      <strong>Cancelled</strong>
+      by <span th:text="${dao.cancelledByName}">Name</span>
+      on <span th:text="${#temporals.format(dao.cancelledAt, 'dd MMM yyyy HH:mm')}">30 Sep 10:00</span>.
+      Reason: <span th:text="${dao.cancelReason}">Reason</span>. The serial stays on the register.
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-truck" aria-hidden="true"></i>
+            <h2 class="card-title">Delivery</h2>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customer</dt>
+          <dd class="col-7 col-md-3">
+            <span th:text="${dao.customerName}">Customer</span>
+            <span th:if="${dao.customerBlocked}"><span th:replace="~{fragments/ui :: chip('BLOCKED')}"></span></span>
+          </dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customer order</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${dao.customerReference} ?: '—'">PO-1</dd>
+
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customs reference</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${dao.customsReference} ?: '—'">C-2026-1</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Reference</dt>
+          <dd class="col-7 col-md-3" th:text="${dao.reference} ?: '—'">—</dd>
+
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Delivery address</dt>
+          <dd class="col-7 col-md-9" th:text="${dao.deliveryAddress} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Notes</dt>
+          <dd class="col-7 col-md-9" th:text="${dao.notes} ?: '—'">—</dd>
+        </dl>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-ol" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Authorized lines</h2>
+              <p class="card-sub">With what is on the shelf at <span class="mono" th:text="${dao.locationCode}">KGL-MAIN</span> now, so a shortfall is seen before the truck arrives</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Item</th>
+                <th scope="col" class="num">Authorized</th>
+                <th scope="col">Unit</th>
+                <th scope="col" class="num">In base unit</th>
+                <th scope="col">On hand (base unit)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="l : ${lines}">
+                <td class="mono" th:text="${l.lineNo()}">1</td>
+                <td>
+                  <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                  <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                  <span class="d-block small text-body-secondary" th:if="${l.nominalThicknessMm() != null}"
+                        th:text="'Nominal ' + ${l.nominalThicknessMm()} + ' mm'">Nominal 6.00 mm</span>
+                  <span class="d-block small text-body-secondary" th:if="${l.note()}" th:text="${l.note()}">note</span>
+                </td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(l.quantity(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
+                <td class="mono" th:text="${l.uomCode()}">SHEET</td>
+                <td class="num mono">
+                  <span th:text="${#numbers.formatDecimal(l.quantityBase(), 1, 'COMMA', 3, 'POINT')}">100.000</span>
+                  <span class="small text-body-secondary" th:text="${l.baseUomCode()}">SHEET</span>
+                </td>
+                <td class="mono small">
+                  <th:block th:with="have=${available.get(l.itemId())}">
+                    <span th:if="${have == null}" style="color: var(--color-danger)">none on hand</span>
+                    <th:block th:if="${have != null}">
+                      <span th:text="${#numbers.formatDecimal(have, 1, 'COMMA', 3, 'POINT')}">120.000</span>
+                      <span th:if="${have.compareTo(l.quantityBase()) < 0}" style="color: var(--color-danger)">· short</span>
+                      <span class="d-block text-body-secondary" th:each="p : ${stock.get(l.itemId())}"
+                            th:text="${p.place()} + ': ' + ${#numbers.formatDecimal(p.quantity(), 1, 'COMMA', 3, 'POINT')}">bin A1: 120.000</span>
+                    </th:block>
+                  </th:block>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-pen" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Approval chain</h2>
+              <p class="card-sub" th:if="${chainInfo != null}">
+                Chain v<span th:text="${chainInfo.version}">2</span>
+                · <span th:text="${chainInfo.basis == 'RESTRUCTURE_2027'} ? 'Board restructuring 2027' : 'Inventory Policy 2026'">Policy</span>,
+                in force on the day this authorization was created
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <ol th:replace="~{fragments/ui :: approvalChain(${chain})}"></ol>
+
+        <p class="small text-body-secondary mt-3 mb-0">
+          Raised by <span th:text="${dao.createdByName}">Name</span>
+          on <span th:text="${#temporals.format(dao.createdAt, 'dd MMM HH:mm')}">30 Sep 09:00</span>.
+          The warehouse posts the delivery note at the gate; whoever raised this authorization does not.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning" aria-hidden="true"></i>
+            <h2 class="card-title">What you can do</h2>
+          </div>
+        </div>
+
+        <form th:if="${actions.canSubmit}"
+              sec:authorize="hasAnyAuthority('dispatch.create','dispatch.verify','dispatch.countersign','dispatch.release')"
+              th:action="@{'/dispatch/' + ${dao.id} + '/submit'}" method="post" class="mb-3">
+          <p class="small">Submitting signs step 1 for you
+            (<span th:text="${actions.nextStep?.actionLabel}">PREPARE</span> as
+            <span th:text="${actions.nextStep?.roleName}">Finance</span>).
+            After that the authorization can no longer be edited.</p>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-send"></i> Submit for signature</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.submitReason}" th:text="${actions.submitReason}">Reason</p>
+
+        <th:block th:if="${actions.canSign}"
+                  sec:authorize="hasAnyAuthority('dispatch.create','dispatch.verify','dispatch.countersign','dispatch.release')">
+          <form th:action="@{'/dispatch/' + ${dao.id} + '/approve'}" method="post" class="mb-2">
+            <label for="approveComment" class="form-label small fw-semibold" style="color: var(--color-heading)">
+              Sign step <span th:text="${actions.nextStep.sequenceNo}">2</span>
+              (<span th:text="${actions.nextStep.roleName}">Role</span>)
+            </label>
+            <input id="approveComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                   placeholder="Comment (optional)" autocomplete="off">
+            <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-check2-circle"></i> Approve</button>
+          </form>
+          <details class="mb-3">
+            <summary class="small fw-semibold">Reject this authorization</summary>
+            <form th:action="@{'/dispatch/' + ${dao.id} + '/reject'}" method="post" class="mt-2">
+              <label for="rejectComment" class="form-label small">Reason (required). A rejected authorization is final; a corrected copy replaces it.</label>
+              <input id="rejectComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                     required autocomplete="off">
+              <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-x-octagon"></i> Reject</button>
+            </form>
+          </details>
+        </th:block>
+        <p class="small text-body-secondary" th:if="${actions.signReason}" th:text="${actions.signReason}">Reason</p>
+
+        <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('dispatch.create')">
+          <summary class="small fw-semibold">Cancel this authorization</summary>
+          <form th:action="@{'/dispatch/' + ${dao.id} + '/cancel'}" method="post" class="mt-2">
+            <label for="cancelReason" class="form-label small">Reason (required). The serial stays on the register.</label>
+            <input id="cancelReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400"
+                   required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-slash-circle"></i> Cancel authorization</button>
+          </form>
+        </details>
+        <p class="small text-body-secondary" th:if="${actions.cancelReason}" th:text="${actions.cancelReason}">Reason</p>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canSubmit and !actions.canSign and !actions.canCancel and !actions.canEdit
+                    and !actions.canLoad and actions.submitReason == null and actions.signReason == null
+                    and actions.cancelReason == null and !actions.canCorrect}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">History</h2>
+              <p class="card-sub">Every change, signature, refusal and cancellation, newest first</p>
+            </div>
+          </div>
+        </div>
+
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Changes to this authorization will be listed here.')}"></div>
+        </th:block>
+
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

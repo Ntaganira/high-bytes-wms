@@ -16,6 +16,7 @@ import heritier.ntaganira.highbytes.wms.common.audit.AuditAction;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditService;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditSnapshot;
 import heritier.ntaganira.highbytes.wms.common.db.ControlRefusedException;
+import heritier.ntaganira.highbytes.wms.common.db.ContentionException;
 import heritier.ntaganira.highbytes.wms.common.db.DbRefusal;
 import heritier.ntaganira.highbytes.wms.common.db.KigaliTime;
 import heritier.ntaganira.highbytes.wms.document.ChainInfo;
@@ -262,8 +263,8 @@ public class ReceivingService {
     /** The note as its form holds it, for editing or for raising a corrected copy. */
     @PreAuthorize("hasAuthority('receiving.create')")
     public GrnForm formFor(UUID id) {
+        CurrentUser.requireAt("receiving.create", documents.header(id).branchId());   // a read: refused, not recorded
         GrnHeader g = find(id);
-        CurrentUser.requireAt("receiving.create", g.branchId());
         GrnForm form = new GrnForm();
         form.setId(g.id());
         form.setVersion(g.version());
@@ -316,7 +317,7 @@ public class ReceivingService {
     @PreAuthorize("hasAuthority('receiving.create')")
     public UUID create(GrnForm form) {
         UUID branchId = locationBranch(form.getLocationId());
-        CurrentUser.requireAt("receiving.create", branchId);
+        documents.requireRightAt(DocumentKind.GRN, branchId, "receiving.create", "Raise a goods received note");
         requireCorrectable(form.getSupersedesDocumentId(), branchId);
 
         try {
@@ -346,7 +347,7 @@ public class ReceivingService {
     @PreAuthorize("hasAuthority('receiving.create')")
     public void update(UUID id, GrnForm form) {
         DocumentHeader d = documents.lock(id);
-        CurrentUser.requireAt("receiving.create", d.branchId());
+        documents.requireRight(d, "receiving.create", "Edit");
         if (form.getVersion() == null) {
             throw documents.refused(d, "Edit", "This form did not say which version of " + d.serialNo()
                     + " it was opened from. Reload the note and try again.");
@@ -473,6 +474,8 @@ public class ReceivingService {
                         landed.forLine(line.lineNo()).totalRwf()), poster);
                 movementIds.add(entry.movementId());
             }
+        } catch (ContentionException e) {
+            throw e;        // a lost race, not a refusal: logged by the engine, never audited as REJECT
         } catch (ControlRefusedException e) {
             throw documents.refused(d, "Post", e.getMessage());
         } catch (DataAccessException e) {

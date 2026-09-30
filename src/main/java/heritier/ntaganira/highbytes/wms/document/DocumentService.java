@@ -15,10 +15,13 @@ import heritier.ntaganira.highbytes.wms.common.audit.AuditAction;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditService;
 import heritier.ntaganira.highbytes.wms.common.audit.AuditSnapshot;
 import heritier.ntaganira.highbytes.wms.common.db.ControlRefusedException;
+import heritier.ntaganira.highbytes.wms.common.db.ContentionException;
 import heritier.ntaganira.highbytes.wms.common.db.DbRefusal;
 import heritier.ntaganira.highbytes.wms.common.db.KigaliTime;
 import heritier.ntaganira.highbytes.wms.security.CurrentUser;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -65,6 +68,8 @@ import java.util.stream.Collectors;
 @Service
 @Transactional(readOnly = true)
 public class DocumentService {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentService.class);
 
     private static final String HEADER = """
             SELECT d.id, dt.code AS type_code, d.branch_id, b.code AS branch_code, b.name AS branch_name,
@@ -336,8 +341,8 @@ public class DocumentService {
         }
         // Everyone, the raiser included, needs the right at the document's own branch: raising a
         // note once does not keep the power to cancel it after the right has gone.
-        if (!CurrentUser.holdsAt(d.kind().right("create"), d.branchId())) {
-            return StepCheck.no(null, "Cancelling " + d.serialNo() + " needs the " + d.kind().right("create")
+        if (!CurrentUser.holdsAt(d.kind().cancelRight(), d.branchId())) {
+            return StepCheck.no(null, "Cancelling " + d.serialNo() + " needs the " + d.kind().cancelRight()
                     + " right at " + d.branchName() + ", whoever raised it.");
         }
         return StepCheck.yes(null);
@@ -459,7 +464,7 @@ public class DocumentService {
             throw refused(d, attempt, d.serialNo() + " is " + d.status()
                     + ", so it takes no signature. Signatures are taken only while a submitted document awaits approval.");
         }
-        CurrentUser.requireAt(d.kind().rightForStep(step.actionLabel()), d.branchId());
+        requireRight(d, d.kind().rightForStep(step.actionLabel()), attempt);
         if (!approve && note == null) {
             throw refused(d, attempt, "A rejection needs a reason: say what is wrong so the document can be raised again correctly.");
         }
@@ -492,7 +497,7 @@ public class DocumentService {
     @Transactional
     public DocumentHeader cancel(UUID id, String reason) {
         DocumentHeader d = lock(id);
-        CurrentUser.requireAt(d.kind().right("create"), d.branchId());
+        requireRight(d, d.kind().cancelRight(), "Cancel");
         String note = blankToNull(reason);
         StepCheck check = canCancel(d);
         if (!check.allowed()) {
@@ -530,7 +535,7 @@ public class DocumentService {
     @Transactional
     public DocumentHeader beginPost(UUID id) {
         DocumentHeader d = lock(id);
-        CurrentUser.requireAt(d.kind().right("post"), d.branchId());
+        requireRight(d, d.kind().right("post"), "Post");
         if ("POSTED".equals(d.status())) {
             throw refused(d, "Post", d.serialNo() + " is already posted. Posting twice would move the stock twice.");
         }
@@ -588,6 +593,10 @@ public class DocumentService {
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public Optional<ControlRefusedException> refusedAtCommit(UUID documentId, String attempt, Throwable failure) {
+        if (DbRefusal.isContention(failure)) {
+            log.error("{} of document {} lost a race at commit; asked to try again", attempt, documentId, failure);
+            return Optional.of(new ContentionException());
+        }
         Optional<String> reason = DbRefusal.reason(failure);
         if (reason.isEmpty()) return Optional.empty();
         DocumentHeader d = jdbc.sql(HEADER).param("id", documentId, Types.OTHER)
@@ -602,6 +611,47 @@ public class DocumentService {
     // ---- refusals -----------------------------------------------------------
 
     /**
+     * Requires a right at a branch for an action that has no document yet
+     * (raising one there): the refusal is recorded against the document type
+     * and branch, with no entity id. For actions only; a read that is refused
+     * (opening a form) uses {@link CurrentUser#requireAt} and records nothing,
+     * so a prefetched or crawled link cannot write audit rows in someone's name.
+     */
+    public void requireRightAt(DocumentKind kind, UUID branchId, String right, String attempt) {
+        try {
+            CurrentUser.requireAt(right, branchId);
+        } catch (AccessDeniedException e) {
+            var branch = jdbc.sql("SELECT id, code, name, is_bonded, branch_type FROM branch WHERE id = :id")
+                    .param("id", branchId, Types.OTHER)
+                    .query((rs, n) -> new heritier.ntaganira.highbytes.wms.branch.BranchView(
+                            rs.getObject("id", UUID.class), rs.getString("code"), rs.getString("name"),
+                            rs.getBoolean("is_bonded"), rs.getString("branch_type")))
+                    .optional().orElse(null);
+            audit.recordRefusal("document", null, kind.code() + " · " + attempt,
+                    AuditSnapshot.of().value("Attempted", attempt), branch,
+                    "The " + right + " right is not held at " + (branch == null ? "that branch" : branch.name()) + ".");
+            throw e;
+        }
+    }
+
+    /**
+     * Requires a right at the document's own branch. A refusal is recorded as
+     * REJECT (surviving the rollback) before the 403 goes on its way: someone
+     * acting on another branch's document by its address is what the trail is
+     * for. For actions only, as {@link #requireRightAt}.
+     */
+    public void requireRight(DocumentHeader d, String right, String attempt) {
+        try {
+            CurrentUser.requireAt(right, d.branchId());
+        } catch (AccessDeniedException e) {
+            audit.recordRefusal("document", d.id(), d.label(),
+                    AuditSnapshot.of().value("Attempted", attempt), d.branch(),
+                    "The " + right + " right is not held at " + d.branchName() + ".");
+            throw e;
+        }
+    }
+
+    /**
      * A refusal, recorded as REJECT in the audit trail (which survives the
      * rollback) and returned for the caller to throw.
      */
@@ -613,6 +663,10 @@ public class DocumentService {
 
     /** A database failure as a refusal when a control spoke; otherwise the failure itself. */
     public RuntimeException refusedBy(DocumentHeader d, String attempt, DataAccessException failure) {
+        if (DbRefusal.isContention(failure)) {
+            log.error("{} of {} lost a race for the same rows; asked to try again", attempt, d.serialNo(), failure);
+            return new ContentionException();
+        }
         return DbRefusal.reason(failure)
                 .<RuntimeException>map(reason -> refused(d, attempt, reason))
                 .orElse(failure);

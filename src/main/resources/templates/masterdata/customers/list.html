@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Customers</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">MASTER DATA</p>
+      <h1 class="page-title">Customers</h1>
+      <p class="page-sub">Who the company delivers to. A delivery authorization can name only an active customer who is not blocked.</p>
+    </div>
+    <a th:href="@{/customers/new}" class="btn btn-primary-action" sec:authorize="hasAuthority('partner.manage')">
+      <i class="bi bi-plus-lg"></i> New customer
+    </a>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/customers}">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-5">
+        <label for="q" class="form-label small fw-semibold" style="color: var(--color-heading)">Search</label>
+        <input id="q" name="q" type="search" class="form-control" th:value="${q}" placeholder="Code, name or TIN">
+      </div>
+      <div class="col-6 col-md-3 pb-1">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="includeInactive" name="includeInactive"
+                 value="true" th:checked="${includeInactive}">
+          <label class="form-check-label small" for="includeInactive">Show inactive</label>
+        </div>
+      </div>
+      <div class="col-12 col-md-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/customers}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Code</th>
+            <th scope="col">Name</th>
+            <th scope="col">TIN</th>
+            <th scope="col">Market</th>
+            <th scope="col" class="num">Authorizations</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="c : ${customers}" th:classappend="${!c.active()} ? 'opacity-75'">
+            <td><a class="doc-link" th:href="@{'/customers/' + ${c.id()}}" th:text="${c.code()}">CUS-1</a></td>
+            <td th:text="${c.name()}">Customer</td>
+            <td class="mono" th:text="${c.tin()} ?: '—'">TIN</td>
+            <td th:text="${c.market().label()}">Domestic</td>
+            <td class="num" th:text="${c.authorizationCount()}">0</td>
+            <td><span th:replace="~{fragments/ui :: chip(${c.state()})}"></span></td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(customers)}">
+            <td colspan="6">
+              <div th:replace="~{fragments/ui :: emptyState('bi-people', 'No customers match', 'Clear the search, or add the first customer.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
