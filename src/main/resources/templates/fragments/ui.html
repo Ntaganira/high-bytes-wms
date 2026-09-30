@@ -20,7 +20,9 @@
         status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' or status == 'ACTIVE' ? 'bi-check-circle-fill' :
         status == 'HELD'      or status == 'PENDING'  or status == 'SCHEDULED' ? 'bi-clock-fill' :
         status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' or status == 'BLOCKED' ? 'bi-exclamation-octagon-fill' :
-        status == 'DELIVERED' ? 'bi-truck' :
+        status == 'DELIVERED' or status == 'DISPATCHED' ? 'bi-truck' :
+        status == 'RECEIVED' ? 'bi-box-arrow-in-down' :
+        status == 'IN_TRANSIT' ? 'bi-arrow-repeat' :
         status == 'TRANSIT'   or status == 'PROGRESS' ? 'bi-arrow-repeat' :
         status == 'BONDED'    or status == 'PROTECTED' or status == 'POLICY' ? 'bi-shield-lock-fill' :
         status == 'CANCELLED' or status == 'REVOKED'  ? 'bi-x-circle-fill' :
@@ -31,7 +33,7 @@
         status == 'READ'      ? 'bi-eye-fill' :
         status == 'LOCKED'    ? 'bi-lock-fill' : 'bi-circle-fill'}">
   <i class="bi" th:classappend="${icon}" aria-hidden="true"></i>
-  <span th:text="${status}">STATUS</span>
+  <span th:text="${#strings.replace(status, '_', ' ')}">STATUS</span>
 </span>
 
 
@@ -95,12 +97,13 @@
 <div th:fragment="releaseGate(gate)" class="release-gate mb-3" role="alert"
      th:classappend="'gate-' + ${#strings.toLowerCase(gate.state)}">
   <i class="bi" aria-hidden="true"
-     th:classappend="${gate.state == 'RELEASED'} ? 'bi-unlock-fill' : (${gate.state == 'DELIVERED'} ? 'bi-truck' : 'bi-shield-exclamation')"></i>
+     th:classappend="${gate.state == 'RELEASED'} ? 'bi-unlock-fill' : (${gate.state == 'DELIVERED' or gate.state == 'DISPATCHED'} ? 'bi-truck' : (${gate.state == 'IN_TRANSIT'} ? 'bi-exclamation-triangle-fill' : (${gate.state == 'RECEIVED'} ? 'bi-check-circle-fill' : 'bi-shield-exclamation')))"></i>
   <div>
     <th:block th:if="${gate.state == 'BLOCKED'}">
-      <strong class="gate-title">Do not load</strong>
+      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Do not dispatch' : 'Do not load'">Do not load</strong>
       <span><span class="serial" th:text="${gate.daoSerial}">DAO-KGL-2026-0001</span>
-            is not fully signed. No stock leaves the premises until every signature is present, the Internal Controller's release last.</span>
+            <span th:if="${gate.kind != 'TRF'}">is not fully signed. No stock leaves the premises until every signature is present, the Internal Controller's release last.</span>
+            <span th:if="${gate.kind == 'TRF'}">is not fully approved. No stock leaves the source branch until every signature is present, the Internal Controller's verification last.</span></span>
       <ul class="gate-waiting">
         <li th:each="w : ${gate.waiting}">
           <span class="fw-semibold" th:text="'Step ' + ${w.sequenceNo} + ' · ' + ${w.actionLabel} + ' · ' + ${w.roleName}">Step 2 · VERIFY · Warehouse Manager</span>
@@ -116,8 +119,8 @@
       </ul>
     </th:block>
     <th:block th:if="${gate.state == 'RELEASED'}">
-      <strong class="gate-title">Released: ready to load</strong>
-      <span>Released by <strong th:text="${gate.releasedBy}">Name</strong>
+      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Approved: ready to dispatch' : 'Released: ready to load'">Released: ready to load</strong>
+      <span><span th:text="${gate.kind == 'TRF'} ? 'Approved by' : 'Released by'">Released by</span> <strong th:text="${gate.releasedBy}">Name</strong>
             <span th:text="'at ' + ${#temporals.format(gate.releasedAt, 'dd MMM yyyy HH:mm')}">at 30 Sep 10:00</span>.
             <th:block th:if="${gate.dnSerial != null}">Load recorded on <span class="serial" th:text="${gate.dnSerial}">DN-KGL-2026-0001</span>, not yet posted at the gate.</th:block></span>
     </th:block>
@@ -127,9 +130,27 @@
             <span th:text="'at ' + ${#temporals.format(gate.deliveredAt, 'dd MMM yyyy HH:mm')}">at 30 Sep 11:00</span>,
             posted at the gate by <strong th:text="${gate.deliveredBy}">Name</strong>.</span>
     </th:block>
+    <!-- Transfers only: after the dispatch the consignment is on its way, short, or home. -->
+    <th:block th:if="${gate.state == 'DISPATCHED'}">
+      <strong class="gate-title">Dispatched: in transit</strong>
+      <span>Left the source branch
+            <span th:text="'at ' + ${#temporals.format(gate.deliveredAt, 'dd MMM yyyy HH:mm')}">at 30 Sep 11:00</span>,
+            recorded at the gate by <strong th:text="${gate.deliveredBy}">Name</strong>, for <span th:text="${gate.note}">Rubavu</span>.
+            Awaiting receipt at the destination.</span>
+    </th:block>
+    <th:block th:if="${gate.state == 'IN_TRANSIT'}">
+      <strong class="gate-title">Received, with stock left in transit</strong>
+      <span>Part of this consignment did not arrive. The shortfall stays in the source branch's transit location,
+            visible on every line below, until a loss or damage report clears it.</span>
+    </th:block>
+    <th:block th:if="${gate.state == 'RECEIVED'}">
+      <strong class="gate-title">Received in full</strong>
+      <span>Everything dispatched has been received at the destination.</span>
+    </th:block>
     <th:block th:if="${gate.state == 'VOID'}">
-      <strong class="gate-title">Do not load</strong>
-      <span><span class="serial" th:text="${gate.daoSerial}">DAO</span> is <span th:text="${gate.note}">cancelled</span>. Nothing may load against it.</span>
+      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Do not dispatch' : 'Do not load'">Do not load</strong>
+      <span><span class="serial" th:text="${gate.daoSerial}">DAO</span> is <span th:text="${gate.note}">cancelled</span>.
+            Nothing may <span th:text="${gate.kind == 'TRF'} ? 'leave' : 'load'">load</span> against it.</span>
     </th:block>
   </div>
 </div>

@@ -504,3 +504,14 @@ th.num, td.num { text-align: right; }
 .release-gate .gate-waiting { list-style: none; margin: 8px 0 0; padding: 0; font-size: .85rem; }
 .release-gate .gate-waiting li { padding: 4px 0; border-top: 1px solid var(--color-danger); }
 .release-gate .gate-waiting .overdue { font-weight: 800; text-transform: uppercase; }
+
+/* Transfer states, derived from the document and its receipts. */
+.status-dispatched { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
+.status-in_transit { background: var(--badge-held-bg);      color: var(--badge-held-text); }
+.status-received   { background: var(--badge-completed-bg); color: var(--badge-completed-text); }
+.release-gate.gate-dispatched, .release-gate.gate-in_transit {
+  border-color: var(--color-warning); background: var(--color-warning-light); color: var(--badge-held-text);
+}
+.release-gate.gate-received {
+  border-color: var(--color-success); background: var(--color-success-light); color: var(--badge-completed-text);
+}

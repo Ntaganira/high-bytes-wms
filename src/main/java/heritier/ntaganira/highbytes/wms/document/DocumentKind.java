@@ -26,19 +26,25 @@ public enum DocumentKind {
     GRN("GRN", "receiving", "Goods Received Note"),
     DAO("DAO", "dispatch", "Delivery Authorization Order"),
     /** Posted by the warehouse at the gate, so cancelling one is the gate's right too. */
-    DN("DN", "dispatch", "Delivery Note", "post"),
+    DN("DN", "dispatch", "Delivery Note", "post", "post"),
+    /** Raised at the source branch; posting it is the dispatch at the source gate. */
+    TRF("TRF", "transfer", "Inter-Warehouse Transfer", "create", "dispatch"),
+    /** Raised at the destination branch; posting it is the receipt, and cancelling one is the receiver's right. */
+    TRR("TRR", "transfer", "Transfer Receipt", "receive", "receive"),
     TT("TT", "ticket", "Transaction Ticket");
 
     private final String code;
     private final String module;
     private final String title;
     private final String cancelAction;
+    private final String postAction;
 
     DocumentKind(String code, String module, String title) {
-        this(code, module, title, "create");
+        this(code, module, title, "create", "post");
     }
 
-    DocumentKind(String code, String module, String title, String cancelAction) {
+    DocumentKind(String code, String module, String title, String cancelAction, String postAction) {
+        this.postAction = postAction;
         this.code = code;
         this.module = module;
         this.title = title;
@@ -48,6 +54,11 @@ public enum DocumentKind {
     /** The right that cancels a document of this kind: whoever raises it, unless the type says otherwise. */
     public String cancelRight() {
         return right(cancelAction);
+    }
+
+    /** The right that posts a document of this kind: {@code receiving.post}, {@code transfer.dispatch}, {@code transfer.receive}. */
+    public String postRight() {
+        return right(postAction);
     }
 
     public String code()   { return code; }

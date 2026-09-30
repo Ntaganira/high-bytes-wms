@@ -79,7 +79,11 @@ shape, so it is worth building carefully.
       the delivery note (`attachment` table exists, storage does not)
 - [ ] The 2027 load-reconciliation waiver (COO) is not built: a short load
       is cancelled and authorized again
-- [ ] Transfers — dispatch relieves to TRANSIT, receipt clears it
+- [x] Transfers — dispatch relieves to TRANSIT, receipt clears it (V13, `inventory/transfer/`; a
+      shortfall stays in transit until a damage or loss document exists)
+- [ ] Damage and loss documents must clear stock left in transit (`transfer_line_position.in_transit_base`)
+- [ ] The 2027 transfer approver (Managing Director) is for the client to confirm; reversing a posted
+      transfer or receipt is not built
 - [ ] Cutting — **blocked** on the off-cut identity decision
 - [ ] Returns & Damage — quarantine location, write-off approval
 - [ ] Counts + Variances — blind entry (book quantity absent from the page,
@@ -119,9 +123,9 @@ shape, so it is worth building carefully.
 
 ## Known gaps
 
-- [ ] Workflow signer roles seeded with no permissions: Head of Inventory
-      and the COO still hold none (V11 and V12 placed the receiving and
-      dispatch rights on the Assistant WH Manager and the three 2027 roles). They are policy roles, so they
+- [ ] Workflow signer roles seeded with no permissions: the COO still holds
+      none (V11–V13 placed the receiving, dispatch and transfer rights on the
+      Assistant WH Manager, the Head of Inventory and the three 2027 roles). They are policy roles, so they
       get the view and action permissions of the documents they sign in the
       migration that builds each document
 - [ ] `DashboardService.kpis()` returns a placeholder for inventory accuracy

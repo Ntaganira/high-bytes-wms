@@ -50,7 +50,14 @@ public class GlobalModelAdvice {
             SELECT
               COUNT(*) FILTER (WHERE dt.code = 'GRN' AND d.status = 'PENDING')          AS goods_received_pending,
               COUNT(*) FILTER (WHERE dt.code = 'DAO' AND d.status IN ('PENDING','DRAFT')) AS releases_held,
-              COUNT(*) FILTER (WHERE dt.code = 'TRF' AND d.status = 'APPROVED')         AS transfers_in_transit,
+              (SELECT COUNT(*) FROM document x JOIN document_type xt ON xt.id = x.document_type_id AND xt.code = 'TRF'
+                WHERE (x.branch_id = :branchId AND x.status = 'APPROVED')
+                   OR (x.status = 'POSTED'
+                       AND EXISTS (SELECT 1 FROM transfer_order o JOIN location l ON l.id = o.to_location_id
+                                    WHERE o.document_id = x.id AND l.branch_id = :branchId)
+                       AND NOT EXISTS (SELECT 1 FROM transfer_receipt r JOIN document rd ON rd.id = r.document_id
+                                        WHERE r.transfer_id = x.id AND rd.status <> 'CANCELLED')))
+                                                                                          AS transfers_in_transit,
               COUNT(*) FILTER (WHERE dt.code = 'CNT' AND d.status IN ('DRAFT','PENDING')) AS counts_open,
               COUNT(*) FILTER (WHERE dt.code = 'VR'  AND d.status <> 'POSTED')          AS variances_open,
               0                                                                          AS delivery_notes_overdue

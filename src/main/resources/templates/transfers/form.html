@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New transfer' : 'Edit ' + ${trf.serialNo}">Transfer</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · TRANSFER</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New transfer' : 'Edit ' + ${trf.serialNo}">New transfer</h1>
+    <p class="page-sub" th:if="${form.new}">
+      Saved as a draft at this branch, dated today (Kigali time) and bound to the approval chain in force today.
+      Stock leaves only when the transfer is fully approved and the warehouse dispatches it.
+    </p>
+  </div>
+
+  <form id="trf-form" th:action="${form.new} ? @{/transfers} : @{'/transfers/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <input type="hidden" th:field="*{version}">
+    <input type="hidden" th:field="*{supersedesDocumentId}">
+
+    <div th:if="${#fields.hasGlobalErrors()}" class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+      <i class="bi bi-exclamation-octagon-fill"></i>
+      <div><p th:each="e : ${#fields.globalErrors()}" th:text="${e}" class="mb-0"></p></div>
+    </div>
+
+    <div class="alert alert-warning small" th:if="${form.supersedesDocumentId != null}" role="status">
+      <i class="bi bi-arrow-repeat"></i>
+      This is a corrected copy of an earlier transfer. Check every field before you save: the original stays as it is.
+    </div>
+
+    <div class="row g-3">
+
+      <div class="col-12 col-xl-8">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+              <h2 class="card-title">From and to</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label for="fromLocationId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Leaves from <span class="text-danger">*</span>
+              </label>
+              <select id="fromLocationId" th:field="*{fromLocationId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('fromLocationId')} ? 'is-invalid'"
+                      th:attr="hx-post=@{/transfers/lines/refresh}"
+                      hx-include="#trf-form" hx-target="#trf-lines" hx-swap="outerHTML" hx-trigger="change">
+                <option value="">— choose —</option>
+                <option th:each="l : ${sources}" th:value="${l.id()}" th:text="${l.label()}">KGL-MAIN — Gahanga main store</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('fromLocationId')}" th:errors="*{fromLocationId}">error</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="toLocationId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Going to <span class="text-danger">*</span>
+              </label>
+              <select id="toLocationId" th:field="*{toLocationId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('toLocationId')} ? 'is-invalid'">
+                <option value="">— choose —</option>
+                <option th:each="l : ${destinations}" th:value="${l.id()}" th:text="${l.label()}">Rubavu · RBV-BOND</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('toLocationId')}" th:errors="*{toLocationId}">error</div>
+              <div class="form-text">Transfers are between branches: only locations at other branches are offered.</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="customsReference" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Customs reference <span class="text-danger" th:if="${bondedHere}">*</span>
+              </label>
+              <input id="customsReference" th:field="*{customsReference}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('customsReference')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('customsReference')}" th:errors="*{customsReference}">error</div>
+              <div class="form-text">Required when either side, or either branch, is bonded: duty-suspended goods are accountable to Customs on the move.</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="note" class="form-label small fw-semibold" style="color: var(--color-heading)">Why</label>
+              <input id="note" th:field="*{note}" class="form-control"
+                     th:classappend="${#fields.hasErrors('note')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('note')}" th:errors="*{note}">error</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-sticky" aria-hidden="true"></i>
+              <h2 class="card-title">Reference and notes</h2>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="reference" class="form-label small fw-semibold" style="color: var(--color-heading)">Reference</label>
+            <input id="reference" th:field="*{reference}" class="form-control"
+                   th:classappend="${#fields.hasErrors('reference')} ? 'is-invalid'" autocomplete="off">
+            <div class="invalid-feedback" th:if="${#fields.hasErrors('reference')}" th:errors="*{reference}">error</div>
+          </div>
+          <label for="notes" class="form-label small fw-semibold" style="color: var(--color-heading)">Notes</label>
+          <textarea id="notes" th:field="*{notes}" rows="3" class="form-control"
+                    th:classappend="${#fields.hasErrors('notes')} ? 'is-invalid'"></textarea>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('notes')}" th:errors="*{notes}">error</div>
+        </section>
+      </div>
+
+      <div class="col-12">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-list-ol" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">Lines</h2>
+                <p class="card-sub">Exactly what will be dispatched. To send one item from two bins, add it twice with a bin each.</p>
+              </div>
+            </div>
+          </div>
+
+          <div th:if="${#fields.hasErrors('lines')}" class="alert alert-danger small" role="alert">
+            <p th:each="e : ${#fields.errors('lines')}" th:text="${e}" class="mb-0"></p>
+          </div>
+
+          <div id="trf-lines" th:fragment="lines" th:object="${form}">
+            <div class="table-responsive">
+              <table class="table hb-table compact align-middle mb-2">
+                <thead>
+                  <tr>
+                    <th scope="col">#</th>
+                    <th scope="col" style="min-width: 16rem">Item</th>
+                    <th scope="col">Quantity</th>
+                    <th scope="col">Unit</th>
+                    <th scope="col">From bin</th>
+                    <th scope="col" style="min-width: 10rem">Note</th>
+                    <th scope="col"><span class="visually-hidden">Remove</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr th:each="line, st : *{lines}">
+                    <td class="mono" th:text="${st.count}">1</td>
+                    <td>
+                      <select th:field="*{lines[__${st.index}__].itemId}" class="form-select form-select-sm"
+                              th:classappend="${#fields.hasErrors('lines[__${st.index}__].itemId')} ? 'is-invalid'"
+                              th:attr="aria-label='Item, line ' + ${st.count}">
+                        <option value="">— item —</option>
+                        <option th:each="i : ${items}" th:value="${i.id()}" th:text="${i.label()}">GL-CF-6</option>
+                      </select>
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('lines[__${st.index}__].itemId')}"
+                           th:errors="*{lines[__${st.index}__].itemId}">error</div>
+                    </td>
+                    <td>
+                      <input th:field="*{lines[__${st.index}__].quantity}" type="number" step="0.001" min="0.001"
+                             class="form-control form-control-sm mono" style="min-width: 6rem"
+                             th:classappend="${#fields.hasErrors('lines[__${st.index}__].quantity')} ? 'is-invalid'"
+                             th:attr="aria-label='Quantity, line ' + ${st.count}">
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('lines[__${st.index}__].quantity')}"
+                           th:errors="*{lines[__${st.index}__].quantity}">error</div>
+                    </td>
+                    <td>
+                      <select th:field="*{lines[__${st.index}__].uomId}" class="form-select form-select-sm"
+                              th:classappend="${#fields.hasErrors('lines[__${st.index}__].uomId')} ? 'is-invalid'"
+                              th:attr="aria-label='Unit, line ' + ${st.count}">
+                        <option value="">— unit —</option>
+                        <option th:each="u : ${units}" th:value="${u.id()}" th:text="${u.code()}">SHEET</option>
+                      </select>
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('lines[__${st.index}__].uomId')}"
+                           th:errors="*{lines[__${st.index}__].uomId}">error</div>
+                    </td>
+                    <td>
+                      <select th:field="*{lines[__${st.index}__].storageBinId}" class="form-select form-select-sm"
+                              th:attr="aria-label='Bin, line ' + ${st.count}">
+                        <option value="">— none —</option>
+                        <option th:each="b : ${bins}" th:value="${b.id()}" th:text="${b.label()}">A1-02</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input th:field="*{lines[__${st.index}__].note}" class="form-control form-control-sm"
+                             th:attr="aria-label='Note, line ' + ${st.count}" autocomplete="off">
+                    </td>
+                    <td>
+                      <button type="button" class="btn btn-sm btn-outline-danger"
+                              th:attr="hx-post=@{'/transfers/lines/remove/' + ${st.index}},aria-label='Remove line ' + ${st.count}"
+                              hx-include="#trf-form" hx-target="#trf-lines" hx-swap="outerHTML"
+                              th:disabled="${#lists.size(form.lines) le 1}">
+                        <i class="bi bi-x-lg"></i>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-primary"
+                    th:attr="hx-post=@{/transfers/lines/add}"
+                    hx-include="#trf-form" hx-target="#trf-lines" hx-swap="outerHTML">
+              <i class="bi bi-plus-lg"></i> Add line
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Save draft' : 'Save changes'">Save draft</span>
+      </button>
+      <a th:href="${form.new} ? @{/transfers} : @{'/transfers/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+
+  </form>
+
+</div>
+</body>
+</html>

@@ -65,6 +65,8 @@ public class DocumentController {
             case "GRN" -> { return "redirect:/receiving/" + target[0]; }
             case "DAO" -> { return "redirect:/dispatch/" + target[0]; }
             case "DN"  -> { return "redirect:/delivery-notes/" + target[0]; }
+            case "TRF" -> { return "redirect:/transfers/" + target[0]; }
+            case "TRR" -> { return "redirect:/transfers/receipts/" + target[0]; }
             default -> { /* a type whose screen is not built yet stays a 404 */ }
         }
         throw new ResponseStatusException(NOT_FOUND);

@@ -90,6 +90,19 @@ public class Fixtures {
         return id;
     }
 
+    /** An extra grant of a role to an existing user at another branch, made by the administrator. */
+    public void grantAt(UUID userId, String roleCode, String branchCode) {
+        jdbc.sql("""
+                INSERT INTO user_role (user_id, role_id, branch_id, valid_from, assigned_by)
+                SELECT :user, r.id, :branch, CURRENT_DATE, :admin FROM role r WHERE r.code = :role
+                """)
+                .param("user", userId, Types.OTHER)
+                .param("branch", branch(branchCode), Types.OTHER)
+                .param("admin", admin(), Types.OTHER)
+                .param("role", roleCode)
+                .update();
+    }
+
     public UUID user(String prefix, String... roleCodes) {
         return userAt("KGL", prefix, roleCodes);
     }

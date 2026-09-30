@@ -36,6 +36,8 @@ class ChainSwitchTest extends IntegrationTest {
     @Autowired ReceivingService receiving;
     @Autowired heritier.ntaganira.highbytes.wms.inventory.dispatch.DispatchService dispatch;
     @Autowired heritier.ntaganira.highbytes.wms.inventory.dispatch.DeliveryNoteService notes;
+    @Autowired heritier.ntaganira.highbytes.wms.inventory.transfer.TransferService transfers;
+    @Autowired heritier.ntaganira.highbytes.wms.inventory.transfer.ReceiptService receipts;
 
     private UUID definition(String basis) {
         return jdbc.sql("""
@@ -107,6 +109,33 @@ class ChainSwitchTest extends IntegrationTest {
             assertThat(statusOf(note)).isEqualTo("POSTED");
             assertThat(jdbc.sql("SELECT SUM(signed_quantity) FROM stock_movement WHERE item_id = :item AND direction = 'OUT'")
                     .param("item", flow.grn.glass).query(BigDecimal.class).single()).isEqualByComparingTo("-20.000");
+        } finally {
+            jdbc.sql("UPDATE workflow_definition SET effective_from = DATE '2027-01-01' WHERE id = :id").param("id", new2027).update();
+            jdbc.sql("UPDATE workflow_definition SET effective_to = DATE '2027-01-01' WHERE id = :id").param("id", old2026).update();
+        }
+    }
+
+    @Test
+    void theRestructuredTransferChainHasTheManagingDirectorApproveAndTheTransferArrives() {
+        assumeTrue(jdbc.sql("SELECT kigali_today() < DATE '2027-01-01'").query(Boolean.class).single(),
+                "the 2027 chain is already in force; there is no switch to bring forward");
+        UUID old2026 = definition("TRF", "POLICY_2026");
+        UUID new2027 = definition("TRF", "RESTRUCTURE_2027");
+
+        jdbc.sql("UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = :id").param("id", old2026).update();
+        jdbc.sql("UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = :id").param("id", new2027).update();
+        try {
+            var flow = new heritier.ntaganira.highbytes.wms.support.TransferFlow(fx, receiving, transfers, receipts);
+            // Warehouse Manager prepares, the Managing Director approves, the Internal Controller verifies.
+            assertThat(flow.chainRoles).containsExactly("WH_MANAGER", "MANAGING_DIR", "INTERNAL_CTRL");
+            UUID trf = flow.approved();
+            assertThat(boundTo(trf)).isEqualTo(new2027);
+            flow.dispatch(trf);
+            flow.postReceipt(flow.raiseReceipt(flow.receiptForm(trf)));
+            assertThat(statusOf(trf)).isEqualTo("POSTED");
+            assertThat(jdbc.sql("SELECT COALESCE(SUM(qty_on_hand), 0) FROM stock_balance sb JOIN location l ON l.id = sb.location_id "
+                    + "WHERE sb.item_id = :item AND l.code = 'RBV-BOND'")
+                    .param("item", flow.grn.glass).query(BigDecimal.class).single()).isEqualByComparingTo("20");
         } finally {
             jdbc.sql("UPDATE workflow_definition SET effective_from = DATE '2027-01-01' WHERE id = :id").param("id", new2027).update();
             jdbc.sql("UPDATE workflow_definition SET effective_to = DATE '2027-01-01' WHERE id = :id").param("id", old2026).update();

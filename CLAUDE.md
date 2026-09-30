@@ -115,8 +115,9 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 ├── inventory/
 │   ├── ledger/    the only writer of stock_movement and stock_balance
 │   ├── receiving/ Goods Received Notes
-│   └── dispatch/  Delivery Authorizations, Delivery Notes (the gate)
-│                  NOT BUILT — transfer, cutting, damage, count
+│   ├── dispatch/  Delivery Authorizations, Delivery Notes (the gate)
+│   └── transfer/  inter-branch transfers and their receipts (via TRANSIT)
+│                  NOT BUILT — cutting, damage, count
 └── reporting/     NOT BUILT — daily close, KPIs, exports
 ```
 
@@ -195,16 +196,16 @@ Schema for the unbuilt modules is already in place (V3, V4).
   commit (`access_conflict_anywhere()`), so a migration that makes someone's
   roles conflict fails.
 - **Each document module's migration places its rights on the Board role
-  that owns them.** Until then a right such as `transfer.approve`,
-  `cutting.release` or `ticket.create` is carried by no policy role, so no
-  role created at runtime may carry it either. Placing it is what lets the
-  segregation rules judge who else may hold it. V11 and V12 placed the
-  receiving and dispatch rights; the Head of Inventory and the COO still
-  hold none, and get theirs the same way. Give a right to the role whose step it
+  that owns them.** Until then a right such as `cutting.release`,
+  `damage.approve` for a new signer, or `ticket.create` is carried by no
+  policy role, so no role created at runtime may carry it either. Placing it
+  is what lets the segregation rules judge who else may hold it. V11–V13
+  placed the receiving, dispatch and transfer rights; the COO still holds
+  none, and gets its rights the same way. Give a right to the role whose step it
   signs, and ask the client when the chain does not say.
 - **A new stock-moving document widens two lists together.** Stock moves
   only through a transaction ticket whose source is a type `ticket_guard`
-  handles (GRN and DN today), and the ledger finds the approving document
+  handles (GRN, DN, TRF and TRR today), and the ledger finds the approving document
   by walking `document_support_link` (V12). A module that moves stock adds
   its type to both in its migration, or its tickets are refused.
 - **The access checks run at COMMIT** (deferred constraint triggers). A
@@ -251,7 +252,8 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 2. ~~Goods Received~~ — done; the pattern for the other eight (V11,
    `document/`, `inventory/ledger/`, `inventory/receiving/`)
 3. ~~Delivery Authorization + Delivery Note~~ — done; the release gate (V12)
-4. Transfers — adds goods-in-transit
+4. ~~Transfers~~ — done; goods in transit, each consignment at its own
+   cost (V13)
 5. Cutting — needs the off-cut identity decision first (see Open questions)
 6. Returns & Damage — quarantine, write-off approval
 7. Counts + Variances — blind entry, adjustment tickets
@@ -267,6 +269,10 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 - Tolerance thresholds for count variances, damage and write-off approval.
 - Hosting: on-premises at Gahanga or cloud — decides whether bonded stock
   data leaves Rwanda.
+- **Who approves transfers from 1 January 2027?** The Head of Inventory
+  role ends with the 2026 policy. V13 gives the approval to the Managing
+  Director, the other role Inventory Policy §11 names; the client is to
+  confirm (the Board paper may intend the Director of Supply Chain).
 - **Who may cancel a document others have already signed?** Today a
   receipt's creator, or anyone holding `receiving.create` at its branch, may
   cancel it until it is posted. Cancelling moves no stock, but it lets one

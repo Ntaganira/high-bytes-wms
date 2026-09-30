@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="'Dispatch ' + ${trf.serialNo}">Dispatch</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · TRANSFER · THE SOURCE GATE</p>
+    <h1 class="page-title">Dispatch <span class="serial" th:text="${trf.serialNo}">TRF-KGL-2026-0001</span></h1>
+    <p class="page-sub">
+      <span th:text="${trf.branchName}">Gahanga</span> to <span th:text="${trf.toBranchName}">Rubavu</span>.
+      Exactly the approved quantities leave <span class="mono" th:text="${trf.fromCode}">KGL-MAIN</span> into
+      transit at <span class="mono" th:text="${trf.transitCode}">KGL-TRAN</span>.
+    </p>
+  </div>
+
+  <!-- May this leave? Always the first thing on the page. -->
+  <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+
+  <section class="hb-card hb-card-body mb-3">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-list-ol" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">What leaves</h2>
+          <p class="card-sub">With what is on the shelf now, per bin. A short shelf is refused at the gate.</p>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table hb-table compact mb-0">
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">Item</th>
+            <th scope="col" class="num">Quantity</th>
+            <th scope="col">Unit</th>
+            <th scope="col">From bin</th>
+            <th scope="col">On hand (base unit)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="l : ${lines}">
+            <td class="mono" th:text="${l.lineNo()}">1</td>
+            <td><span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span></td>
+            <td class="num mono" th:text="${#numbers.formatDecimal(l.quantity(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
+            <td class="mono" th:text="${l.uomCode()}">SHEET</td>
+            <td class="mono" th:text="${l.binCode()} ?: '—'">A1</td>
+            <td class="mono small">
+              <th:block th:with="have=${available.get(l.itemId())}">
+                <span th:if="${have == null}" style="color: var(--color-danger)">none on hand</span>
+                <th:block th:if="${have != null}">
+                  <span th:text="${#numbers.formatDecimal(have, 1, 'COMMA', 3, 'POINT')}">120.000</span>
+                  <span th:if="${have.compareTo(l.quantityBase()) < 0}" style="color: var(--color-danger)">· short</span>
+                  <span class="d-block text-body-secondary" th:each="p : ${stock.get(l.itemId())}"
+                        th:text="${p.place()} + ': ' + ${#numbers.formatDecimal(p.quantity(), 1, 'COMMA', 3, 'POINT')}">bin A1: 120.000</span>
+                </th:block>
+              </th:block>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="hb-card hb-card-body" style="max-width: 40rem">
+    <form th:if="${actions.canDispatch}" sec:authorize="hasAuthority('transfer.dispatch')"
+          th:action="@{'/transfers/' + ${trf.id} + '/dispatch'}" method="post">
+      <p class="small">Confirming dispatch posts this transfer and moves the goods out of
+        <span class="mono" th:text="${trf.fromCode}">KGL-MAIN</span> into transit, at cost, in one step.
+        It cannot be undone: a wrong transfer is corrected by a reversal, never by cancelling.</p>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="confirmDispatch" name="confirm" value="true" required>
+        <label class="form-check-label small" for="confirmDispatch">
+          The consignment is loaded exactly as listed, and is leaving now for
+          <strong th:text="${trf.toBranchName}">Rubavu</strong>.
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary-action"><i class="bi bi-box-arrow-up-right"></i> Confirm dispatch at the gate</button>
+      <a th:href="@{'/transfers/' + ${trf.id}}" class="btn btn-outline-secondary">Back to the transfer</a>
+    </form>
+    <p class="small mb-0" th:unless="${actions.canDispatch}">
+      <span th:text="${actions.dispatchReason} ?: 'This transfer cannot be dispatched by you now.'">Reason</span>
+      <a th:href="@{'/transfers/' + ${trf.id}}">Back to the transfer</a>
+    </p>
+  </section>
+
+</div>
+</body>
+</html>

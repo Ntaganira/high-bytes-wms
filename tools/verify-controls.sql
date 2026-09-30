@@ -27,6 +27,10 @@ SET CONSTRAINTS ALL IMMEDIATE;
 SET CONSTRAINTS document_grn_posted_moved_stock DEFERRED;
 SET CONSTRAINTS stock_movement_ticket_posted DEFERRED;
 SET CONSTRAINTS document_dn_posted_moved_stock DEFERRED;
+SET CONSTRAINTS document_trf_posted_moved_stock DEFERRED;
+SET CONSTRAINTS document_trr_posted_moved_stock DEFERRED;
+SET CONSTRAINTS document_trf_value_kept DEFERRED;
+SET CONSTRAINTS document_trr_value_share DEFERRED;
 
 INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
 VALUES ('_verify', 'Verification Fixture', 'x', TRUE, FALSE);
@@ -713,7 +717,7 @@ END $$;
 
 DO $$ BEGIN
   INSERT INTO role_permission (role_id, permission_id)
-  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_CLOSER' AND p.code = 'transfer.approve';
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_CLOSER' AND p.code = 'cutting.release';
   RAISE WARNING 'FAIL 18e  a right no policy role carries was handed out';
 EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18e  a right the policy has not placed cannot be handed out';
 END $$;
@@ -1902,12 +1906,12 @@ SELECT pg_temp.refuses('39a', 'a ticket sourced from an approved delivery author
   $q$INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id)
      SELECT pg_temp.fx_id('_VERIFY-TT-S1'), 'DELIVERY', 'OUT', l.id, pg_temp.fx_id('d_gate')
        FROM location l WHERE l.code = 'KGL-MAIN'$q$,
-  '23Z02', '%answers only to a goods received note or a delivery note%');
+  '23Z02', '%answers only to a goods received note%');
 SELECT pg_temp.refuses('39b', 'a ticket sourced from a count sheet was accepted',
   $q$INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id)
      SELECT pg_temp.fx_id('_VERIFY-TT-S2'), 'ADJUSTMENT', 'OUT', l.id, pg_temp.fx_id('cnt_posted')
        FROM location l WHERE l.code = 'KGL-MAIN'$q$,
-  '23Z02', '%answers only to a goods received note or a delivery note%');
+  '23Z02', '%answers only to a goods received note%');
 SELECT pg_temp.refuses('39c', 'a ticket with no source document was accepted',
   $q$INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id)
      SELECT pg_temp.fx_id('_VERIFY-TT-S3'), 'ADJUSTMENT', 'OUT', l.id
@@ -1935,10 +1939,10 @@ ALTER TABLE ticket_line ENABLE TRIGGER ticket_line_rules;
 
 SELECT pg_temp.refuses('39d', 'stock left against a ticket sourced from an authorization',
   $q$SELECT pg_temp.move_out(pg_temp.fx_id('_VERIFY-TT-S1'), pg_temp.holder('FINANCE'), kigali_today())$q$,
-  '23Z02', '%answers to no goods received note or delivery note%');
+  '23Z02', '%answers to no goods received note%');
 SELECT pg_temp.refuses('39e', 'stock left against a ticket with no source',
   $q$SELECT pg_temp.move_out(pg_temp.fx_id('_VERIFY-TT-S4'), pg_temp.holder('FINANCE'), kigali_today())$q$,
-  '23Z02', '%answers to no goods received note or delivery note%');
+  '23Z02', '%answers to no goods received note%');
 
 -- The unbinned bucket is a bucket: 10 in a bin does not cover 10 unbinned.
 -- KGL-CUT holds 10 sheets in bin _VERIFY-BIN and nothing unbinned.
@@ -1988,6 +1992,8 @@ SELECT pg_temp.refuses('39f', 'an unbinned OUT beyond the unbinned stock, while 
   '23Z02', '%Not enough unbinned stock%');
 SELECT pg_temp.accepts('39g', 'an OUT from the bin that holds the stock is accepted',
   $q$SELECT pg_temp.move_out(pg_temp.fx_id('tt_bin_ok'), pg_temp.fx_id('_VERIFY-D-BINOK-P'), kigali_today())$q$);
+UPDATE document SET status = 'POSTED', posted_by = pg_temp.fx_id('_VERIFY-D-BINOK-P')
+ WHERE id = pg_temp.fx_id('tt_bin_ok');
 SELECT pg_temp.accepts('39h', 'an unbinned OUT within the unbinned stock is accepted',
   $q$SELECT pg_temp.deliver('_VERIFY-D-UNB2', 3)$q$);
 
@@ -2035,6 +2041,1003 @@ SELECT pg_temp.refuses('39m', 'an authorization was cancelled under a live, post
   $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
       WHERE id = pg_temp.fx_id('d_ic')$q$,
   '23Z02', '%still answers to it%');
+
+-- =====================================================================
+-- Transfers (V13): dispatch at the source gate, receipt at the
+-- destination, the shortfall left in transit. As before, every refusal
+-- must carry SQLSTATE 23Z02 (a workflow or document control) or 23514 (a
+-- malformed line) with the reason named.
+-- =====================================================================
+
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT id, '_VERIFY-WH2', 'Verification second warehouse', 'WAREHOUSE' FROM branch WHERE code = 'KGL';
+
+-- The independent receiver: holds the warehouse role (so may receive) but
+-- raised, dispatched and signed nothing on any fixture transfer.
+CREATE FUNCTION pg_temp.receiver() RETURNS UUID AS $$
+DECLARE u UUID;
+BEGIN
+    SELECT id INTO u FROM app_user WHERE username = '_verify_receiver';
+    IF u IS NULL THEN
+        INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
+        VALUES ('_verify_receiver', 'Verification Receiver', 'x', TRUE, FALSE) RETURNING id INTO u;
+        PERFORM pg_temp.grant_role('_verify_receiver', 'WH_MANAGER');
+    END IF;
+    RETURN u;
+END $$ LANGUAGE plpgsql;
+
+CREATE FUNCTION pg_temp.glass_at(p_loc TEXT) RETURNS NUMERIC AS $$
+    SELECT COALESCE(SUM(m.signed_quantity), 0)
+      FROM stock_movement m
+      JOIN location l ON l.id = m.location_id
+      JOIN item i ON i.id = m.item_id
+     WHERE l.code = p_loc AND i.item_code = '_VERIFY-GLASS';
+$$ LANGUAGE sql;
+
+-- A draft transfer of p_qty glass sheets, source branch KGL.
+CREATE FUNCTION pg_temp.make_trf(p_serial TEXT, p_qty NUMERIC DEFAULT 20, p_creator UUID DEFAULT NULL,
+                                 p_from TEXT DEFAULT 'KGL-MAIN', p_to TEXT DEFAULT 'RBV-BOND',
+                                 p_customs TEXT DEFAULT 'C-TRF-1', p_bin TEXT DEFAULT NULL) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, l.branch_id, p_serial, COALESCE(p_creator, pg_temp.verify_user())
+      FROM document_type dt, location l WHERE dt.code = 'TRF' AND l.code = p_from
+    RETURNING id INTO d;
+    INSERT INTO transfer_order (document_id, from_location_id, to_location_id, customs_reference)
+    SELECT d, f.id, t.id, p_customs FROM location f, location t WHERE f.code = p_from AND t.code = p_to;
+    INSERT INTO transfer_order_line (document_id, line_no, item_id, uom_id, quantity, qty_base_uom, storage_bin_id)
+    SELECT d, 1, i.id, u.id, p_qty, p_qty, (SELECT sb.id FROM storage_bin sb WHERE sb.bin_code = p_bin)
+      FROM item i, uom u WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET';
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- A transfer taken to a state: DRAFT, PENDING, STEP1 or APPROVED.
+CREATE FUNCTION pg_temp.trf_at(p_serial TEXT, p_state TEXT, p_qty NUMERIC DEFAULT 20) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    d := pg_temp.make_trf(p_serial, p_qty);
+    IF p_state = 'DRAFT' THEN RETURN d; END IF;
+    UPDATE document SET status = 'PENDING' WHERE id = d;
+    IF p_state = 'PENDING' THEN RETURN d; END IF;
+    IF p_state = 'STEP1' THEN PERFORM pg_temp.sign_upto(d, 1); RETURN d; END IF;
+    PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d));
+    UPDATE document SET status = 'APPROVED' WHERE id = d;
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- One dispatch ticket: leg 'OUT' (source location) or 'IN' (source transit).
+CREATE FUNCTION pg_temp.trf_leg_ticket(p_trf UUID, p_poster UUID, p_serial TEXT, p_leg TEXT) RETURNS UUID AS $$
+DECLARE t UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, d.branch_id, p_serial, p_poster
+      FROM document_type dt, document d WHERE dt.code = 'TT' AND d.id = p_trf
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, to_location_id,
+                                    source_document_id, customs_reference)
+    SELECT t,
+           CASE p_leg WHEN 'OUT' THEN 'TRANSFER_OUT' ELSE 'TRANSFER_IN' END,
+           p_leg,
+           CASE p_leg WHEN 'OUT' THEN x.from_location_id END,
+           CASE p_leg WHEN 'IN' THEN x.transit_location_id END,
+           p_trf, x.customs_reference
+      FROM transfer_order x WHERE x.document_id = p_trf;
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+    SELECT t, l.line_no, l.item_id, l.quantity, l.uom_id, l.qty_base_uom,
+           CASE p_leg WHEN 'OUT' THEN l.storage_bin_id END
+      FROM transfer_order_line l WHERE l.document_id = p_trf;
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+-- One leg of a receipt. The OUT leg moves the SOURCE branch's transit location
+-- and sits on that branch's register; the IN leg is at the destination branch.
+CREATE FUNCTION pg_temp.trr_leg_ticket(p_trr UUID, p_poster UUID, p_serial TEXT, p_leg TEXT) RETURNS UUID AS $$
+DECLARE t UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, CASE p_leg WHEN 'OUT' THEN td.branch_id ELSE rd.branch_id END, p_serial, p_poster
+      FROM document_type dt, document rd, transfer_receipt r, document td
+     WHERE dt.code = 'TT' AND rd.id = p_trr AND r.document_id = rd.id AND td.id = r.transfer_id
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, to_location_id,
+                                    source_document_id, customs_reference)
+    SELECT t,
+           CASE p_leg WHEN 'OUT' THEN 'TRANSFER_OUT' ELSE 'TRANSFER_IN' END,
+           p_leg,
+           CASE p_leg WHEN 'OUT' THEN x.transit_location_id END,
+           CASE p_leg WHEN 'IN' THEN x.to_location_id END,
+           p_trr, x.customs_reference
+      FROM transfer_receipt r JOIN transfer_order x ON x.document_id = r.transfer_id
+     WHERE r.document_id = p_trr;
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+    SELECT t, l.line_no, l.item_id, l.quantity, l.uom_id, l.qty_base_uom,
+           CASE p_leg WHEN 'IN' THEN l.storage_bin_id END
+      FROM transfer_receipt_line l WHERE l.document_id = p_trr;
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+-- The movements of one ticket, in the ticket's own direction.
+CREATE FUNCTION pg_temp.move_leg(p_ticket UUID, p_poster UUID, p_date DATE, p_value NUMERIC DEFAULT NULL,
+                                 p_values NUMERIC[] DEFAULT NULL) RETURNS VOID AS $$
+    INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, storage_bin_id,
+                                direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                running_balance, business_date, posted_by)
+    SELECT tl.id, d.id, d.branch_id, tl.item_id,
+           CASE t.direction WHEN 'IN' THEN t.to_location_id ELSE t.from_location_id END,
+           tl.storage_bin_id, t.direction, tl.qty_base_uom,
+           CASE t.direction WHEN 'IN' THEN tl.qty_base_uom ELSE -tl.qty_base_uom END,
+           1000, COALESCE(p_values[tl.line_no], p_value, tl.qty_base_uom * 1000), 0, p_date, p_poster
+      FROM ticket_line tl
+      JOIN transaction_ticket t ON t.document_id = tl.ticket_id
+      JOIN document d ON d.id = t.document_id
+     WHERE tl.ticket_id = p_ticket;
+$$ LANGUAGE sql;
+
+-- The whole dispatch: approved transfer, posted by the Assistant WH Manager
+-- (who signs nothing on a transfer), both tickets, both movements, both
+-- tickets posted.
+CREATE FUNCTION pg_temp.dispatch(p_serial TEXT, p_qty NUMERIC DEFAULT 20) RETURNS UUID AS $$
+DECLARE
+    t UUID; a UUID; b UUID;
+    poster UUID := pg_temp.holder('ASST_WH_MANAGER');
+BEGIN
+    t := pg_temp.trf_at(p_serial, 'APPROVED', p_qty);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = t;
+    a := pg_temp.trf_leg_ticket(t, poster, p_serial || '-OUT', 'OUT');
+    b := pg_temp.trf_leg_ticket(t, poster, p_serial || '-IN', 'IN');
+    PERFORM pg_temp.move_leg(a, poster, kigali_today());
+    PERFORM pg_temp.move_leg(b, poster, kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id IN (a, b);
+    INSERT INTO fx VALUES (p_serial, t), (p_serial || '-OUT', a), (p_serial || '-IN', b);
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+-- A draft receipt at the destination branch; p_qty NULL receives in full.
+CREATE FUNCTION pg_temp.make_trr(p_serial TEXT, p_trf UUID, p_creator UUID DEFAULT NULL,
+                                 p_branch TEXT DEFAULT 'RBV', p_qty NUMERIC DEFAULT NULL,
+                                 p_bin TEXT DEFAULT NULL) RETURNS UUID AS $$
+DECLARE r UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, p_serial, COALESCE(p_creator, pg_temp.receiver())
+      FROM document_type dt, branch b WHERE dt.code = 'TRR' AND b.code = p_branch
+    RETURNING id INTO r;
+    INSERT INTO transfer_receipt (document_id, transfer_id) VALUES (r, p_trf);
+    INSERT INTO transfer_receipt_line (document_id, line_no, transfer_line_id, item_id, uom_id,
+                                       quantity, qty_base_uom, storage_bin_id, entered_by)
+    SELECT r, tl.line_no, tl.id, tl.item_id, tl.uom_id,
+           COALESCE(p_qty, tl.quantity), COALESCE(p_qty, tl.quantity),
+           (SELECT sb.id FROM storage_bin sb WHERE sb.bin_code = p_bin),
+           COALESCE(p_creator, pg_temp.receiver())
+      FROM transfer_order_line tl WHERE tl.document_id = p_trf;
+    RETURN r;
+END $$ LANGUAGE plpgsql;
+
+-- Post a drafted receipt by the independent receiver, write both tickets and
+-- their movements (values default to the proportional cost), post the tickets.
+CREATE FUNCTION pg_temp.finish_receipt(p_trr UUID, p_serial TEXT, p_out_value NUMERIC DEFAULT NULL,
+                                       p_in_value NUMERIC DEFAULT NULL,
+                                       p_out_values NUMERIC[] DEFAULT NULL,
+                                       p_in_values NUMERIC[] DEFAULT NULL) RETURNS UUID AS $$
+DECLARE
+    a UUID; b UUID;
+    poster UUID := pg_temp.receiver();
+BEGIN
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = p_trr;
+    a := pg_temp.trr_leg_ticket(p_trr, poster, p_serial || '-OUT', 'OUT');
+    b := pg_temp.trr_leg_ticket(p_trr, poster, p_serial || '-IN', 'IN');
+    PERFORM pg_temp.move_leg(a, poster, kigali_today(), p_out_value, p_out_values);
+    PERFORM pg_temp.move_leg(b, poster, kigali_today(), p_in_value, p_in_values);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id IN (a, b);
+    INSERT INTO fx VALUES (p_serial, p_trr), (p_serial || '-OUT', a), (p_serial || '-IN', b);
+    RETURN p_trr;
+END $$ LANGUAGE plpgsql;
+
+CREATE FUNCTION pg_temp.receive(p_serial TEXT, p_trf UUID, p_qty NUMERIC DEFAULT NULL) RETURNS UUID AS $$
+    SELECT pg_temp.finish_receipt(pg_temp.make_trr(p_serial, p_trf, NULL, 'RBV', p_qty), p_serial);
+$$ LANGUAGE sql;
+
+-- A dispatch with stated values on its two legs (total value of the line).
+CREATE FUNCTION pg_temp.dispatch_v(p_serial TEXT, p_qty NUMERIC, p_out_value NUMERIC, p_in_value NUMERIC) RETURNS UUID AS $$
+DECLARE
+    t UUID; a UUID; b UUID;
+    poster UUID := pg_temp.holder('ASST_WH_MANAGER');
+BEGIN
+    t := pg_temp.trf_at(p_serial, 'APPROVED', p_qty);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = t;
+    a := pg_temp.trf_leg_ticket(t, poster, p_serial || '-OUT', 'OUT');
+    b := pg_temp.trf_leg_ticket(t, poster, p_serial || '-IN', 'IN');
+    PERFORM pg_temp.move_leg(a, poster, kigali_today(), p_out_value);
+    PERFORM pg_temp.move_leg(b, poster, kigali_today(), p_in_value);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id IN (a, b);
+    INSERT INTO fx VALUES (p_serial, t), (p_serial || '-OUT', a), (p_serial || '-IN', b);
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+-- A scenario whose commit-time check is asked for at its end, inside a
+-- subtransaction: a refusal rolls the whole scenario back, so a broken
+-- posting leaves nothing pending for the checks that follow.
+CREATE FUNCTION pg_temp.refuses_at_commit(p_label TEXT, p_desc TEXT, p_sql TEXT, p_trigger TEXT, p_like TEXT) RETURNS VOID AS $$
+BEGIN
+    EXECUTE p_sql;
+    EXECUTE 'SET CONSTRAINTS ' || p_trigger || ' IMMEDIATE';
+    RAISE WARNING 'FAIL % % was accepted at commit', p_label, p_desc;
+EXCEPTION WHEN OTHERS THEN
+    IF SQLSTATE = '23Z02' AND SQLERRM ILIKE p_like THEN
+        RAISE NOTICE 'ok   % refused at commit: %', p_label, p_desc;
+    ELSE
+        RAISE WARNING 'FAIL % % was refused for another reason (%): %', p_label, p_desc, SQLSTATE, SQLERRM;
+    END IF;
+END $$ LANGUAGE plpgsql;
+
+CREATE FUNCTION pg_temp.accepts_at_commit(p_label TEXT, p_desc TEXT, p_sql TEXT, p_trigger TEXT) RETURNS VOID AS $$
+BEGIN
+    EXECUTE p_sql;
+    EXECUTE 'SET CONSTRAINTS ' || p_trigger || ' IMMEDIATE';
+    RAISE NOTICE 'ok   % accepted at commit: %', p_label, p_desc;
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL % % was refused (%): %', p_label, p_desc, SQLSTATE, SQLERRM;
+END $$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------
+-- 40. The transfer rights sit on the roles whose steps they serve; both
+--     chains; nobody is left in conflict
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    bad TEXT;
+    msg TEXT;
+BEGIN
+    SELECT string_agg(v.role_code || ' has {' || COALESCE(have.perms, '') || '} expected {' || v.want || '}', '; ')
+      INTO bad
+      FROM (VALUES
+            ('WH_MANAGER',      'transfer.create,transfer.dispatch,transfer.receive,transfer.view'),
+            ('ASST_WH_MANAGER', 'transfer.dispatch,transfer.receive,transfer.view'),
+            ('HEAD_INVENTORY',  'transfer.approve,transfer.view'),
+            ('MANAGING_DIR',    'transfer.approve,transfer.view'),
+            ('INTERNAL_CTRL',   'transfer.verify,transfer.view')
+           ) AS v(role_code, want)
+      LEFT JOIN LATERAL (
+            SELECT string_agg(p.code, ',' ORDER BY p.code) AS perms
+              FROM role r JOIN role_permission rp ON rp.role_id = r.id
+              JOIN permission p ON p.id = rp.permission_id AND p.module = 'transfer'
+             WHERE r.code = v.role_code) have ON TRUE
+     WHERE have.perms IS DISTINCT FROM v.want;
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   40a  transfer rights sit on the roles whose steps they serve';
+    ELSE
+        RAISE WARNING 'FAIL 40a  %', bad;
+    END IF;
+
+    SELECT string_agg(r.code || ' signs ' || ws.action_label || ' without ' || need.code, '; ')
+      INTO bad
+      FROM workflow_step ws
+      JOIN workflow_definition wd ON wd.id = ws.workflow_definition_id
+      JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'TRF'
+      JOIN role r ON r.id = ws.required_role_id
+      CROSS JOIN LATERAL (SELECT CASE ws.action_label
+                                   WHEN 'PREPARE' THEN 'transfer.create'
+                                   WHEN 'APPROVE' THEN 'transfer.approve'
+                                   WHEN 'VERIFY'  THEN 'transfer.verify' END AS code) need
+     WHERE NOT EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.id = rp.permission_id
+                        WHERE rp.role_id = r.id AND p.code = need.code);
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   40b  every transfer chain signer carries the right its step needs';
+    ELSE
+        RAISE WARNING 'FAIL 40b  %', bad;
+    END IF;
+
+    SELECT string_agg(p.code || ':' || r.code, ',' ORDER BY p.code, r.code) INTO bad
+      FROM role r JOIN role_permission rp ON rp.role_id = r.id JOIN permission p ON p.id = rp.permission_id
+     WHERE p.code IN ('transfer.dispatch', 'transfer.receive');
+    IF bad = 'transfer.dispatch:ASST_WH_MANAGER,transfer.dispatch:WH_MANAGER,transfer.receive:ASST_WH_MANAGER,transfer.receive:WH_MANAGER' THEN
+        RAISE NOTICE 'ok   40c  only the warehouse roles carry dispatch and receipt';
+    ELSE
+        RAISE WARNING 'FAIL 40c  dispatch and receipt are carried by %', bad;
+    END IF;
+
+    -- Both definitions: the 2026 chain ends on 1 January 2027 where the 2027 one begins.
+    SELECT string_agg(wd.version || ':' || wd.effective_from || '..' || COALESCE(wd.effective_to::text, 'open') || ':' ||
+                      (SELECT string_agg(ws.sequence_no || r.code || '/' || ws.action_label, ',' ORDER BY ws.sequence_no)
+                         FROM workflow_step ws JOIN role r ON r.id = ws.required_role_id
+                        WHERE ws.workflow_definition_id = wd.id), ' | ' ORDER BY wd.version)
+      INTO bad
+      FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'TRF';
+    IF bad = '1:2026-07-01..2027-01-01:1WH_MANAGER/PREPARE,2HEAD_INVENTORY/APPROVE,3INTERNAL_CTRL/VERIFY | 2:2027-01-01..open:1WH_MANAGER/PREPARE,2MANAGING_DIR/APPROVE,3INTERNAL_CTRL/VERIFY' THEN
+        RAISE NOTICE 'ok   40d  the 2026 chain (Head of Inventory) ends where the 2027 chain (Managing Director) begins';
+    ELSE
+        RAISE WARNING 'FAIL 40d  transfer chains read %', bad;
+    END IF;
+
+    msg := access_conflict_anywhere();
+    IF msg IS NULL THEN
+        RAISE NOTICE 'ok   40e  nobody, and no role, is left in conflict';
+    ELSE
+        RAISE WARNING 'FAIL 40e  %', msg;
+    END IF;
+END $$;
+
+SELECT pg_temp.refuses('40f', 'the Internal Controller was given transfer.dispatch',
+  $q$INSERT INTO role_permission (role_id, permission_id)
+     SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'transfer.dispatch'$q$,
+  '23Z01');
+SELECT pg_temp.refuses('40g', 'the Internal Controller was given transfer.receive',
+  $q$INSERT INTO role_permission (role_id, permission_id)
+     SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'transfer.receive'$q$,
+  '23Z01');
+SELECT pg_temp.refuses('40h', 'the Internal Controller and the dispatching warehouse were held by one person',
+  $q$INSERT INTO user_role (user_id, role_id, assigned_by)
+     SELECT pg_temp.holder('ASST_WH_MANAGER'), r.id, pg_temp.verify_user() FROM role r WHERE r.code = 'INTERNAL_CTRL'$q$,
+  '23Z01');
+
+-- ---------------------------------------------------------------------
+-- 41. The transfer: between branches only, bonded rules, frozen at
+--     submission, signed down its chain
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('41a', 'a transfer between two locations of one branch was accepted',
+  $q$SELECT pg_temp.make_trf('_VERIFY-T-SAME', 20, NULL, 'KGL-MAIN', '_VERIFY-WH2', NULL)$q$,
+  '23514', '%same branch%');
+SELECT pg_temp.refuses('41b', 'a transfer into a bonded location without a customs reference was accepted',
+  $q$SELECT pg_temp.make_trf('_VERIFY-T-NOCUST', 20, NULL, 'KGL-MAIN', 'RBV-BOND', NULL)$q$,
+  '23514', '%customs reference%');
+SELECT pg_temp.refuses('41c', 'a blank customs reference was accepted',
+  $q$SELECT pg_temp.make_trf('_VERIFY-T-BLANK', 20, NULL, 'KGL-MAIN', 'RBV-BOND', '  ')$q$,
+  '23514', '%transfer_customs_reference_not_blank%');
+SELECT pg_temp.refuses('41d', 'a transfer out of a cutting floor was accepted',
+  $q$SELECT pg_temp.make_trf('_VERIFY-T-CUT', 20, NULL, 'KGL-CUT', 'RBV-BOND')$q$,
+  '23514', '%warehouse or bonded%');
+
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT id, '_VERIFY-TRAN2', 'Verification second transit', 'TRANSIT' FROM branch WHERE code = 'KGL';
+SELECT pg_temp.refuses('41e', 'a transfer was raised where the source branch has two transit locations',
+  $q$SELECT pg_temp.make_trf('_VERIFY-T-TWOTRAN')$q$,
+  '23514', '%exactly one active transit location%');
+UPDATE location SET is_active = FALSE WHERE code = '_VERIFY-TRAN2';
+
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('t_draft', pg_temp.trf_at('_VERIFY-T-DRAFT', 'DRAFT')),
+        ('t_pend',  pg_temp.trf_at('_VERIFY-T-PEND',  'PENDING')),
+        ('t_step1', pg_temp.trf_at('_VERIFY-T-STEP1', 'STEP1')),
+        ('t_appr',  pg_temp.trf_at('_VERIFY-T-APPR',  'APPROVED'));
+END $$;
+
+DO $$
+DECLARE tr UUID; tn UUID;
+BEGIN
+    SELECT transit_location_id INTO tr FROM transfer_order WHERE document_id = pg_temp.fx_id('t_draft');
+    SELECT id INTO tn FROM location WHERE code = 'KGL-TRAN';
+    IF tr = tn THEN
+        RAISE NOTICE 'ok   41f  the database assigns the source branch''s transit location';
+    ELSE
+        RAISE WARNING 'FAIL 41f  the transit location is %', tr;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('41g', 'another transit location was chosen',
+  $q$UPDATE transfer_order SET transit_location_id = (SELECT id FROM location WHERE code = 'KGL-CUT')
+      WHERE document_id = pg_temp.fx_id('t_draft')$q$,
+  '23514', '%another cannot be chosen%');
+SELECT pg_temp.refuses('41h', 'a submitted transfer''s header was edited',
+  $q$UPDATE transfer_order SET note = 'CHANGED' WHERE document_id = pg_temp.fx_id('t_pend')$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.refuses('41i', 'a line was added after submission',
+  $q$INSERT INTO transfer_order_line (document_id, line_no, item_id, uom_id, quantity, qty_base_uom)
+     SELECT pg_temp.fx_id('t_pend'), 2, i.id, u.id, 1, 1 FROM item i, uom u
+      WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET'$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.refuses('41j', 'a line was changed after approval',
+  $q$UPDATE transfer_order_line SET quantity = 500, qty_base_uom = 500 WHERE document_id = pg_temp.fx_id('t_appr')$q$,
+  '23Z02', '%APPROVED%cannot change%');
+SELECT pg_temp.refuses('41k', 'a line was deleted after submission',
+  $q$DELETE FROM transfer_order_line WHERE document_id = pg_temp.fx_id('t_pend')$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.accepts('41l', 'a draft transfer is still editable',
+  $q$UPDATE transfer_order_line SET quantity = 25, qty_base_uom = 25 WHERE document_id = pg_temp.fx_id('t_draft')$q$);
+SELECT pg_temp.refuses('41m', 'a base quantity that does not follow from the entered one was accepted',
+  $q$UPDATE transfer_order_line SET qty_base_uom = 999 WHERE document_id = pg_temp.fx_id('t_draft')$q$,
+  '23514', '%base unit%');
+SELECT pg_temp.refuses('41n', 'a bin from another location was accepted',
+  $q$UPDATE transfer_order_line SET storage_bin_id = (SELECT id FROM storage_bin WHERE bin_code = '_VERIFY-BIN')
+      WHERE document_id = pg_temp.fx_id('t_draft')$q$,
+  '23514', '%not in the location%');
+
+DO $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, '_VERIFY-T-EMPTY', pg_temp.verify_user()
+      FROM document_type dt, branch b WHERE dt.code = 'TRF' AND b.code = 'KGL'
+    RETURNING id INTO d;
+    INSERT INTO transfer_order (document_id, from_location_id, to_location_id, customs_reference)
+    SELECT d, f.id, t.id, 'C-1' FROM location f, location t WHERE f.code = 'KGL-MAIN' AND t.code = 'RBV-BOND';
+    INSERT INTO fx VALUES ('t_empty', d);
+END $$;
+SELECT pg_temp.refuses('41o', 'a transfer with no lines was submitted',
+  $q$UPDATE document SET status = 'PENDING' WHERE id = pg_temp.fx_id('t_empty')$q$,
+  '23Z02', '%no lines%');
+SELECT pg_temp.refuses('41p', 'the Managing Director signed the 2026 chain''s approval step out of order',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('t_pend'), 3, pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('t_pend'), 3)))$q$,
+  '23Z02', '%must sign%before step%');
+SELECT pg_temp.refuses('41q', 'someone without the step''s role signed the transfer',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('t_pend'), 1, pg_temp.holder('SALES'))$q$,
+  '23Z02', '%does not hold%');
+SELECT pg_temp.accepts('41r', 'the whole chain signs a transfer in order, each in its own role',
+  $q$SELECT pg_temp.trf_at('_VERIFY-T-CHAIN', 'APPROVED')$q$);
+
+-- ---------------------------------------------------------------------
+-- 42. Dispatch at the source gate
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('42a', 'a transfer still pending was dispatched',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('ASST_WH_MANAGER') WHERE id = pg_temp.fx_id('t_pend')$q$,
+  '23Z02', '%cannot move from PENDING to POSTED%');
+SELECT pg_temp.refuses('42b', 'a transfer with only its first signature was dispatched',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('ASST_WH_MANAGER') WHERE id = pg_temp.fx_id('t_step1')$q$,
+  '23Z02', '%cannot move from PENDING to POSTED%');
+SELECT pg_temp.refuses('42c', 'the person who raised the transfer dispatched it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = created_by WHERE id = pg_temp.fx_id('t_appr')$q$,
+  '23Z02', '%person who raised it%');
+SELECT pg_temp.refuses('42d', 'the Internal Controller, who verified the transfer, dispatched it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('INTERNAL_CTRL') WHERE id = pg_temp.fx_id('t_appr')$q$,
+  '23Z02', '%signed%cannot also post%');
+SELECT pg_temp.refuses('42e', 'the Head of Inventory, who approved the transfer, dispatched it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('HEAD_INVENTORY') WHERE id = pg_temp.fx_id('t_appr')$q$,
+  '23Z02', '%signed%cannot also post%');
+SELECT pg_temp.refuses('42f', 'a dispatch named nobody',
+  $q$UPDATE document SET status = 'POSTED' WHERE id = pg_temp.fx_id('t_appr')$q$,
+  '23Z02', '%must name who posts%');
+
+-- Stock does not move for a transfer that has not been dispatched.
+DO $$
+DECLARE p UUID := pg_temp.holder('ASST_WH_MANAGER');
+BEGIN
+    INSERT INTO fx VALUES ('tt_early_out', pg_temp.trf_leg_ticket(pg_temp.fx_id('t_appr'), p, '_VERIFY-TT-EARLY-OUT', 'OUT'));
+END $$;
+SELECT pg_temp.refuses('42g', 'stock left against an approved transfer that had not been dispatched',
+  $q$SELECT pg_temp.move_leg(pg_temp.fx_id('tt_early_out'), pg_temp.holder('ASST_WH_MANAGER'), kigali_today())$q$,
+  '23Z02', '%must be posted before its stock moves%');
+
+-- The exact dispatch: out of the source location, into the source branch's transit.
+DO $$
+DECLARE
+    src_before NUMERIC := pg_temp.glass_at('KGL-MAIN');
+    tr_before  NUMERIC := pg_temp.glass_at('KGL-TRAN');
+    dst_before NUMERIC := pg_temp.glass_at('RBV-BOND');
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-R1', 20);
+    IF pg_temp.glass_at('KGL-MAIN') = src_before - 20
+       AND pg_temp.glass_at('KGL-TRAN') = tr_before + 20
+       AND pg_temp.glass_at('RBV-BOND') = dst_before THEN
+        RAISE NOTICE 'ok   42h  the exact dispatch moves 20 from the source location into source transit, and nothing reaches the destination';
+    ELSE
+        RAISE WARNING 'FAIL 42h  dispatch moved source % -> %, transit % -> %, destination % -> %',
+            src_before, pg_temp.glass_at('KGL-MAIN'), tr_before, pg_temp.glass_at('KGL-TRAN'),
+            dst_before, pg_temp.glass_at('RBV-BOND');
+    END IF;
+END $$;
+SELECT pg_temp.refuses('42i', 'a second dispatch ticket was raised for one transfer leg',
+  $q$SELECT pg_temp.trf_leg_ticket(pg_temp.fx_id('_VERIFY-T-R1'), pg_temp.holder('ASST_WH_MANAGER'), '_VERIFY-T-R1-OUT2', 'OUT')$q$,
+  '23505', '%transaction_ticket_one_transfer_leg_per_source%');
+SELECT pg_temp.refuses('42j', 'a dispatched transfer''s line was changed',
+  $q$UPDATE transfer_order_line SET quantity = 1, qty_base_uom = 1 WHERE document_id = pg_temp.fx_id('_VERIFY-T-R1')$q$,
+  '23Z02', '%POSTED%cannot change%');
+
+-- ---------------------------------------------------------------------
+-- 43. Receipt at the destination: only after dispatch, once, by someone
+--     who did not dispatch, never more than was sent; a shortfall stays
+--     in transit
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('43a', 'a receipt was raised before the transfer was dispatched',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-EARLY', pg_temp.fx_id('t_appr'))$q$,
+  '23Z02', '%not dispatched%');
+SELECT pg_temp.refuses('43b', 'a receipt was raised at the source branch instead of the destination',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-WRONG', pg_temp.fx_id('_VERIFY-T-R1'), NULL, 'KGL')$q$,
+  '23Z02', '%wrong branch%');
+
+DO $$
+BEGIN
+    INSERT INTO fx VALUES ('trr1', pg_temp.make_trr('_VERIFY-R-1', pg_temp.fx_id('_VERIFY-T-R1'), NULL, 'RBV', 25));
+END $$;
+SELECT pg_temp.refuses('43c', 'a second live receipt was raised for one transfer',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-1B', pg_temp.fx_id('_VERIFY-T-R1'))$q$,
+  '23Z02', '%already has a live receipt%');
+SELECT pg_temp.refuses('43d', 'a receipt of 25 against 20 dispatched was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.receiver() WHERE id = pg_temp.fx_id('trr1')$q$,
+  '23Z02', '%dispatched 20.000 and%receives 25.000%');
+UPDATE transfer_receipt_line SET quantity = 15, qty_base_uom = 15 WHERE document_id = pg_temp.fx_id('trr1');
+SELECT pg_temp.refuses('43e', 'the person who dispatched the transfer posted its receipt',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('ASST_WH_MANAGER') WHERE id = pg_temp.fx_id('trr1')$q$,
+  '23Z02', '%person who dispatched%');
+SELECT pg_temp.refuses('43f', 'a receipt was posted naming nobody',
+  $q$UPDATE document SET status = 'POSTED' WHERE id = pg_temp.fx_id('trr1')$q$,
+  '23Z02', '%must name who%');
+SELECT pg_temp.refuses('43g', 'a receipt bin was taken from another location',
+  $q$UPDATE transfer_receipt_line SET storage_bin_id = (SELECT id FROM storage_bin WHERE bin_code = '_VERIFY-BIN-MAIN')
+      WHERE document_id = pg_temp.fx_id('trr1')$q$,
+  '23514', '%not in the destination location%');
+SELECT pg_temp.refuses('43h', 'a receipt line served a line of another transfer',
+  $q$UPDATE transfer_receipt_line SET transfer_line_id = (SELECT id FROM transfer_order_line WHERE document_id = pg_temp.fx_id('t_appr'))
+      WHERE document_id = pg_temp.fx_id('trr1')$q$,
+  '23514', '%different transfer%');
+
+-- Posted by the receiver, the short receipt: 15 of 20 arrive, 5 stay in transit.
+DO $$
+DECLARE
+    poster UUID := pg_temp.receiver();
+    r UUID := pg_temp.fx_id('trr1');
+    a UUID; b UUID;
+BEGIN
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = r;
+    a := pg_temp.trr_leg_ticket(r, poster, '_VERIFY-R-1-OUT', 'OUT');
+    b := pg_temp.trr_leg_ticket(r, poster, '_VERIFY-R-1-IN', 'IN');
+    INSERT INTO fx VALUES ('trr1_out', a), ('trr1_in', b);
+END $$;
+SELECT pg_temp.refuses('43i', 'the receipt''s stock was recorded by someone other than the receiver',
+  $q$SELECT pg_temp.move_leg(pg_temp.fx_id('trr1_out'), pg_temp.verify_user(), kigali_today())$q$,
+  '23Z02', '%posted by someone else%');
+DO $$
+DECLARE
+    tr_before  NUMERIC := pg_temp.glass_at('KGL-TRAN');
+    dst_before NUMERIC := pg_temp.glass_at('RBV-BOND');
+    src_before NUMERIC := pg_temp.glass_at('KGL-MAIN');
+    poster UUID := pg_temp.receiver();
+    pos RECORD;
+BEGIN
+    PERFORM pg_temp.move_leg(pg_temp.fx_id('trr1_out'), poster, kigali_today());
+    PERFORM pg_temp.move_leg(pg_temp.fx_id('trr1_in'), poster, kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = poster
+     WHERE id IN (pg_temp.fx_id('trr1_out'), pg_temp.fx_id('trr1_in'));
+    IF pg_temp.glass_at('RBV-BOND') = dst_before + 15
+       AND pg_temp.glass_at('KGL-TRAN') = tr_before - 15
+       AND pg_temp.glass_at('KGL-MAIN') = src_before THEN
+        RAISE NOTICE 'ok   43j  a short receipt moves the 15 that arrived out of transit and into the destination';
+    ELSE
+        RAISE WARNING 'FAIL 43j  receipt moved destination % -> %, transit % -> %', dst_before,
+            pg_temp.glass_at('RBV-BOND'), tr_before, pg_temp.glass_at('KGL-TRAN');
+    END IF;
+    SELECT * INTO pos FROM transfer_line_position WHERE transfer_id = pg_temp.fx_id('_VERIFY-T-R1');
+    IF pos.dispatched_base = 20 AND pos.received_base = 15 AND pos.in_transit_base = 5 THEN
+        RAISE NOTICE 'ok   43k  the shortfall of 5 is a visible balance: dispatched 20, received 15, in transit 5';
+    ELSE
+        RAISE WARNING 'FAIL 43k  position reads dispatched %, received %, in transit %',
+            pos.dispatched_base, pos.received_base, pos.in_transit_base;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('43l', 'a second receipt was raised after the first was posted',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-1C', pg_temp.fx_id('_VERIFY-T-R1'))$q$,
+  '23Z02', '%already has a live receipt%');
+SELECT pg_temp.refuses('43m', 'a posted receipt''s line was changed',
+  $q$UPDATE transfer_receipt_line SET quantity = 20, qty_base_uom = 20 WHERE document_id = pg_temp.fx_id('trr1')$q$,
+  '23Z02', '%POSTED%cannot change%');
+SELECT pg_temp.refuses('43n', 'a receipt''s out-of-transit ticket was put on the destination branch''s register',
+  $q$INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+     SELECT dt.id, b.id, '_VERIFY-TT-BADBR', pg_temp.verify_user() FROM document_type dt, branch b
+      WHERE dt.code = 'TT' AND b.code = 'RBV';
+     INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id, customs_reference)
+     SELECT d.id, 'TRANSFER_OUT', 'OUT', x.transit_location_id, pg_temp.fx_id('trr1'), x.customs_reference
+       FROM document d, transfer_order x
+      WHERE d.serial_no = '_VERIFY-TT-BADBR' AND x.document_id = pg_temp.fx_id('_VERIFY-T-R1')$q$,
+  '23Z02', '%must be a receipt leg%');
+
+-- A full receipt of a second transfer leaves nothing in transit.
+DO $$
+DECLARE
+    t UUID := pg_temp.dispatch('_VERIFY-T-R2', 10);
+    pos RECORD;
+BEGIN
+    PERFORM pg_temp.receive('_VERIFY-R-2', t);
+    SELECT * INTO pos FROM transfer_line_position WHERE transfer_id = t;
+    IF pos.dispatched_base = 10 AND pos.received_base = 10 AND pos.in_transit_base = 0 THEN
+        RAISE NOTICE 'ok   43o  a full receipt, recorded by someone other than the dispatcher, leaves nothing in transit';
+    ELSE
+        RAISE WARNING 'FAIL 43o  position reads dispatched %, received %, in transit %',
+            pos.dispatched_base, pos.received_base, pos.in_transit_base;
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 44. A dispatched transfer can never read CANCELLED
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('44a', 'a dispatched transfer was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-T-R1')$q$,
+  '23Z02', '%reversing document%');
+SELECT pg_temp.refuses('44b', 'a transfer with a live receipt was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-T-R2')$q$,
+  '23Z02', '%reversing document%');
+SELECT pg_temp.refuses('44c', 'a posted receipt was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-R-2')$q$,
+  '23Z02', '%reversing document%');
+SELECT pg_temp.refuses('44d', 'a dispatch ticket was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-T-R1-OUT')$q$,
+  '23Z02', '%reversing document%');
+
+-- A draft receipt can be cancelled and another raised in its place.
+DO $$
+DECLARE t UUID := pg_temp.dispatch('_VERIFY-T-R3', 7);
+BEGIN
+    INSERT INTO fx VALUES ('trr3a', pg_temp.make_trr('_VERIFY-R-3A', t));
+END $$;
+SELECT pg_temp.accepts('44e', 'a draft receipt can be cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('trr3a')$q$);
+SELECT pg_temp.accepts('44f', 'with the first receipt cancelled, a new one is raised for the transfer',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-3B', pg_temp.fx_id('_VERIFY-T-R3'))$q$);
+
+-- Everything posted so far moved both legs of every line: the commit checks pass.
+SELECT pg_temp.accepts('44g', 'posted transfers and receipts that moved their stock pass the commit check',
+  $q$SET CONSTRAINTS document_trf_posted_moved_stock, document_trr_posted_moved_stock, stock_movement_ticket_posted,
+                     document_trf_value_kept, document_trr_value_share IMMEDIATE$q$);
+SET CONSTRAINTS document_trf_posted_moved_stock, document_trr_posted_moved_stock, stock_movement_ticket_posted,
+                document_trf_value_kept, document_trr_value_share DEFERRED;
+
+-- ---------------------------------------------------------------------
+-- 45. What must not be left half-done (these leave posted documents whose
+--     stock never moved, so they run last, ending in the commit check)
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    p UUID := pg_temp.holder('ASST_WH_MANAGER');
+    t UUID := pg_temp.trf_at('_VERIFY-T-BAD', 'APPROVED', 20);
+BEGIN
+    UPDATE document SET status = 'POSTED', posted_by = p WHERE id = t;
+    INSERT INTO fx VALUES ('t_bad', t),
+        ('t_bad_out', pg_temp.trf_leg_ticket(t, p, '_VERIFY-T-BAD-OUT', 'OUT')),
+        ('t_bad_in',  pg_temp.trf_leg_ticket(t, p, '_VERIFY-T-BAD-IN',  'IN'));
+END $$;
+SELECT pg_temp.refuses('45a', 'a short dispatch load was ticketed',
+  $q$UPDATE ticket_line SET quantity = 15, qty_base_uom = 15 WHERE ticket_id = pg_temp.fx_id('t_bad_out')$q$,
+  '23Z02', '%exactly the approved quantity%');
+SELECT pg_temp.refuses('45b', 'an over dispatch load was ticketed',
+  $q$UPDATE ticket_line SET quantity = 25, qty_base_uom = 25 WHERE ticket_id = pg_temp.fx_id('t_bad_in')$q$,
+  '23Z02', '%exactly the approved quantity%');
+SELECT pg_temp.refuses('45c', 'a dispatch ticket named a source location the transfer does not',
+  $q$INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+     SELECT dt.id, b.id, '_VERIFY-TT-BADFROM', pg_temp.verify_user() FROM document_type dt, branch b
+      WHERE dt.code = 'TT' AND b.code = 'KGL';
+     INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id, customs_reference)
+     SELECT d.id, 'TRANSFER_OUT', 'OUT', l.id, pg_temp.fx_id('t_bad'), 'C-TRF-1'
+       FROM document d, location l WHERE d.serial_no = '_VERIFY-TT-BADFROM' AND l.code = '_VERIFY-WH2'$q$,
+  '23Z02', '%must be a dispatch leg%');
+SELECT pg_temp.refuses('45d', 'a dispatch ticket put the goods somewhere other than transit',
+  $q$INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+     SELECT dt.id, b.id, '_VERIFY-TT-BADTO', pg_temp.verify_user() FROM document_type dt, branch b
+      WHERE dt.code = 'TT' AND b.code = 'KGL';
+     INSERT INTO transaction_ticket (document_id, movement_type, direction, to_location_id, source_document_id, customs_reference)
+     SELECT d.id, 'TRANSFER_IN', 'IN', l.id, pg_temp.fx_id('t_bad'), 'C-TRF-1'
+       FROM document d, location l WHERE d.serial_no = '_VERIFY-TT-BADTO' AND l.code = '_VERIFY-WH2'$q$,
+  '23Z02', '%must be a dispatch leg%');
+
+-- More than is on hand.
+DO $$
+DECLARE
+    p UUID := pg_temp.holder('ASST_WH_MANAGER');
+    t UUID := pg_temp.trf_at('_VERIFY-T-HUGE', 'APPROVED', 100000);
+BEGIN
+    UPDATE document SET status = 'POSTED', posted_by = p WHERE id = t;
+    INSERT INTO fx VALUES ('t_huge_out', pg_temp.trf_leg_ticket(t, p, '_VERIFY-T-HUGE-OUT', 'OUT'));
+END $$;
+SELECT pg_temp.refuses('45e', 'a dispatch took more stock than the source location holds',
+  $q$SELECT pg_temp.move_leg(pg_temp.fx_id('t_huge_out'), pg_temp.holder('ASST_WH_MANAGER'), kigali_today())$q$,
+  '23Z02', '%Not enough stock%');
+
+-- A receipt cannot take more out of transit than is there. The receipt's own
+-- posting guard forbids receiving more than was sent, so that guard is switched
+-- off (session_replication_role) for that one posting, to reach the ledger's own refusal.
+DO $$
+DECLARE
+    p UUID := pg_temp.receiver();
+    r UUID := pg_temp.make_trr('_VERIFY-R-4', pg_temp.dispatch('_VERIFY-T-R4', 7), NULL, 'RBV', 100000);
+BEGIN
+    SET LOCAL session_replication_role = replica;
+    UPDATE document SET status = 'POSTED', posted_by = p, posted_at = now() WHERE id = r;
+    SET LOCAL session_replication_role = origin;
+    INSERT INTO fx VALUES ('trr4_out', pg_temp.trr_leg_ticket(r, p, '_VERIFY-R-4-OUT', 'OUT'));
+END $$;
+SELECT pg_temp.refuses('45f', 'a receipt took more out of transit than transit holds',
+  $q$SELECT pg_temp.move_leg(pg_temp.fx_id('trr4_out'), pg_temp.receiver(), kigali_today())$q$,
+  '23Z02', '%Not enough stock%');
+
+-- A receipt posted by the book but whose stock never moved.
+DO $$
+DECLARE r UUID := pg_temp.make_trr('_VERIFY-R-5', pg_temp.dispatch('_VERIFY-T-R5', 7));
+BEGIN
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.receiver() WHERE id = r;
+END $$;
+
+SELECT pg_temp.refuses('45g', 'a posted transfer whose stock never moved was accepted at commit',
+  $q$SET CONSTRAINTS document_trf_posted_moved_stock IMMEDIATE$q$,
+  '23Z02', '%never completed its%leg%');
+SET CONSTRAINTS document_trf_posted_moved_stock DEFERRED;
+SELECT pg_temp.refuses('45h', 'a posted receipt whose stock never moved was accepted at commit',
+  $q$SET CONSTRAINTS document_trr_posted_moved_stock IMMEDIATE$q$,
+  '23Z02', '%never completed its%leg%');
+SET CONSTRAINTS document_trr_posted_moved_stock DEFERRED;
+
+CREATE FUNCTION pg_temp.receive_v_out_in(p_serial TEXT, p_trf UUID, p_qty NUMERIC, p_out NUMERIC, p_in NUMERIC) RETURNS UUID AS $$
+    SELECT pg_temp.finish_receipt(pg_temp.make_trr(p_serial, p_trf, NULL, 'RBV', p_qty), p_serial, p_out, p_in);
+$$ LANGUAGE sql;
+
+-- ---------------------------------------------------------------------
+-- 47. A receipt is independent of the transfer: not raised, dispatched or
+--     signed by the same person, at either end of the receipt
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-I1', 10);
+END $$;
+SELECT pg_temp.refuses('47a', 'a receipt was raised by the person who raised the transfer',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-I1A', pg_temp.fx_id('_VERIFY-T-I1'), pg_temp.verify_user())$q$,
+  '23Z02', '%cannot be raised by the person who raised transfer%');
+SELECT pg_temp.refuses('47b', 'a receipt was raised by a signer of the transfer',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-I1B', pg_temp.fx_id('_VERIFY-T-I1'), pg_temp.holder('WH_MANAGER'))$q$,
+  '23Z02', '%cannot be raised by a person who signed transfer%');
+SELECT pg_temp.refuses('47c', 'a receipt was authored by the dispatcher',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-I1C', pg_temp.fx_id('_VERIFY-T-I1'), pg_temp.holder('ASST_WH_MANAGER'))$q$,
+  '23Z02', '%cannot be raised by the person who dispatched transfer%');
+DO $$
+BEGIN
+    INSERT INTO fx VALUES ('trr_i1', pg_temp.make_trr('_VERIFY-R-I1', pg_temp.fx_id('_VERIFY-T-I1')));
+END $$;
+SELECT pg_temp.accepts('47d', 'a receipt raised by an independent receiver is accepted',
+  $q$SELECT 1 FROM document WHERE id = pg_temp.fx_id('trr_i1')$q$);
+SELECT pg_temp.refuses('47e', 'the person who raised the transfer posted its receipt',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.verify_user() WHERE id = pg_temp.fx_id('trr_i1')$q$,
+  '23Z02', '%cannot be posted by the person who raised transfer%');
+SELECT pg_temp.refuses('47f', 'a signer of the transfer posted its receipt',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('HEAD_INVENTORY') WHERE id = pg_temp.fx_id('trr_i1')$q$,
+  '23Z02', '%cannot be posted by a person who signed transfer%');
+SELECT pg_temp.refuses('47g', 'the dispatcher posted the receipt a colleague raised',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('ASST_WH_MANAGER') WHERE id = pg_temp.fx_id('trr_i1')$q$,
+  '23Z02', '%cannot be posted by the person who dispatched transfer%');
+SELECT pg_temp.accepts('47h', 'the independent receiver posts the receipt and moves its stock',
+  $q$SELECT pg_temp.finish_receipt(pg_temp.fx_id('trr_i1'), '_VERIFY-R-I1')$q$);
+
+-- ---------------------------------------------------------------------
+-- 48. A transfer creates and moves no value: what enters transit is what
+--     left the source, and a receipt takes its exact share out of transit
+-- ---------------------------------------------------------------------
+INSERT INTO storage_bin (location_id, bin_code)
+SELECT id, '_VERIFY-BIN-RBV' FROM location WHERE code = 'RBV-BOND';
+
+SELECT pg_temp.refuses_at_commit('48a', 'a dispatch whose transit value differs from its source value by a cent',
+  $q$SELECT pg_temp.dispatch_v('_VERIFY-T-V1', 10, 10000.00, 9999.99)$q$,
+  'document_trf_value_kept', '%left the source at value 10000.00 but entered transit at 9999.99%');
+SET CONSTRAINTS document_trf_value_kept DEFERRED;
+SELECT pg_temp.accepts_at_commit('48b', 'a dispatch whose transit value equals its source value',
+  $q$SELECT pg_temp.dispatch_v('_VERIFY-T-V2', 10, 12345.67, 12345.67)$q$,
+  'document_trf_value_kept');
+SET CONSTRAINTS document_trf_value_kept DEFERRED;
+
+-- 3 sheets dispatched at 100.00: one sheet carries round(100 x 1 / 3, 2) = 33.33,
+-- two carry round(100 x 2 / 3, 2) = 66.67, and the residual cents stay in transit.
+DO $$
+BEGIN
+    PERFORM pg_temp.dispatch_v('_VERIFY-T-V3', 3, 100.00, 100.00);
+    PERFORM pg_temp.dispatch_v('_VERIFY-T-V4', 3, 100.00, 100.00);
+END $$;
+SELECT pg_temp.refuses_at_commit('48c', 'a receipt took a cent too much out of transit',
+  $q$SELECT pg_temp.receive_v_out_in('_VERIFY-R-V1', pg_temp.fx_id('_VERIFY-T-V3'), 1, 33.34, 33.33)$q$,
+  'document_trr_value_share', '%takes 33.34 out of transit, but its share%is 33.33%');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+SELECT pg_temp.refuses_at_commit('48d', 'a receipt took a cent too little out of transit',
+  $q$SELECT pg_temp.receive_v_out_in('_VERIFY-R-V2', pg_temp.fx_id('_VERIFY-T-V3'), 1, 33.32, 33.32)$q$,
+  'document_trr_value_share', '%takes 33.32 out of transit, but its share%is 33.33%');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+SELECT pg_temp.refuses_at_commit('48e', 'a receipt entered the destination at a cent more than it left transit',
+  $q$SELECT pg_temp.receive_v_out_in('_VERIFY-R-V3', pg_temp.fx_id('_VERIFY-T-V3'), 1, 33.33, 33.34)$q$,
+  'document_trr_value_share', '%enters the destination at 33.34 but left transit at 33.33%');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+SELECT pg_temp.accepts_at_commit('48f', 'two of three sheets receive exactly 66.67 out of transit and into the destination',
+  $q$SELECT pg_temp.receive_v_out_in('_VERIFY-R-V4', pg_temp.fx_id('_VERIFY-T-V3'), 2, 66.67, 66.67)$q$,
+  'document_trr_value_share');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+
+-- A receipt of one transfer line split over several receipt lines (destination
+-- bins). Each line takes its share of the cost by CUMULATIVE rounding:
+--     share_i = round(v x cum_i / Q, 2) - round(v x cum_(i-1) / Q, 2)
+-- so the shares always sum exactly; per-line rounding strands or over-takes cents.
+CREATE FUNCTION pg_temp.receive_lines(p_serial TEXT, p_trf UUID, p_qtys NUMERIC[],
+                                      p_out NUMERIC[], p_in NUMERIC[]) RETURNS UUID AS $$
+DECLARE
+    r UUID;
+    i INT;
+BEGIN
+    r := pg_temp.make_trr(p_serial, p_trf, NULL, 'RBV', p_qtys[1]);
+    FOR i IN 2..array_length(p_qtys, 1) LOOP
+        INSERT INTO transfer_receipt_line (document_id, line_no, transfer_line_id, item_id, uom_id,
+                                           quantity, qty_base_uom, storage_bin_id, entered_by)
+        SELECT r, i, l.transfer_line_id, l.item_id, l.uom_id, p_qtys[i], p_qtys[i],
+               CASE WHEN i = 2 THEN (SELECT id FROM storage_bin WHERE bin_code = '_VERIFY-BIN-RBV') END,
+               pg_temp.receiver()
+          FROM transfer_receipt_line l WHERE l.document_id = r AND l.line_no = 1;
+    END LOOP;
+    RETURN pg_temp.finish_receipt(r, p_serial, NULL, NULL, p_out, p_in);
+END $$ LANGUAGE plpgsql;
+
+-- Value still in transit for a transfer: what entered transit, less what its
+-- receipt took out.
+CREATE FUNCTION pg_temp.transit_value(p_trf UUID) RETURNS NUMERIC AS $$
+    SELECT COALESCE(SUM(CASE WHEN t.source_document_id = p_trf AND t.movement_type = 'TRANSFER_IN' THEN m.value END), 0)
+         - COALESCE(SUM(CASE WHEN t.movement_type = 'TRANSFER_OUT'
+                              AND t.source_document_id IN (SELECT r.document_id FROM transfer_receipt r WHERE r.transfer_id = p_trf)
+                             THEN m.value END), 0)
+      FROM stock_movement m JOIN transaction_ticket t ON t.document_id = m.document_id;
+$$ LANGUAGE sql STABLE;
+
+SELECT pg_temp.refuses_at_commit('48g', 'a two-line receipt with each line rounded on its own (33.33 + 33.33) instead of cumulatively',
+  $q$SELECT pg_temp.receive_lines('_VERIFY-R-V5', pg_temp.fx_id('_VERIFY-T-V4'), ARRAY[1,1], ARRAY[33.33,33.33], ARRAY[33.33,33.33])$q$,
+  'document_trr_value_share', '%line 2 takes 33.33 out of transit, but its share%is 33.34%');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+SELECT pg_temp.accepts_at_commit('48h', 'a two-line bin-split receipt taking 33.33 then 33.34 (cumulative 66.67) is accepted',
+  $q$SELECT pg_temp.receive_lines('_VERIFY-R-V6', pg_temp.fx_id('_VERIFY-T-V4'), ARRAY[1,1], ARRAY[33.33,33.34], ARRAY[33.33,33.34])$q$,
+  'document_trr_value_share');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+DO $$
+DECLARE pos RECORD;
+BEGIN
+    SELECT * INTO pos FROM transfer_line_position WHERE transfer_id = pg_temp.fx_id('_VERIFY-T-V4');
+    IF pos.dispatched_base = 3 AND pos.received_base = 2 AND pos.in_transit_base = 1
+       AND pg_temp.transit_value(pg_temp.fx_id('_VERIFY-T-V4')) = 33.33 THEN
+        RAISE NOTICE 'ok   48i  the partial receipt leaves the missing sheet, and its 33.33 of cost, in transit';
+    ELSE
+        RAISE WARNING 'FAIL 48i  position reads dispatched %, received %, in transit %, transit value %',
+            pos.dispatched_base, pos.received_base, pos.in_transit_base,
+            pg_temp.transit_value(pg_temp.fx_id('_VERIFY-T-V4'));
+    END IF;
+END $$;
+
+-- 10.00 over 3 sheets received as 1 + 1 + 1: per-line rounding gives 3.33 x 3 and
+-- strands 0.01 at zero quantity forever; cumulative gives 3.33, 3.34, 3.33.
+DO $$
+BEGIN
+    PERFORM pg_temp.dispatch_v('_VERIFY-T-V5', 3, 10.00, 10.00);
+    PERFORM pg_temp.dispatch_v('_VERIFY-T-V6', 6, 1.00, 1.00);
+END $$;
+SELECT pg_temp.refuses_at_commit('48j', 'a 1+1+1 receipt of 10.00 rounded per line (3.33 x 3) was accepted',
+  $q$SELECT pg_temp.receive_lines('_VERIFY-R-V7', pg_temp.fx_id('_VERIFY-T-V5'), ARRAY[1,1,1],
+                                  ARRAY[3.33,3.33,3.33], ARRAY[3.33,3.33,3.33])$q$,
+  'document_trr_value_share', '%line 2 takes 3.33 out of transit, but its share%is 3.34%');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+SELECT pg_temp.accepts_at_commit('48k', 'a 1+1+1 receipt of 10.00 taking 3.33, 3.34, 3.33 is accepted',
+  $q$SELECT pg_temp.receive_lines('_VERIFY-R-V8', pg_temp.fx_id('_VERIFY-T-V5'), ARRAY[1,1,1],
+                                  ARRAY[3.33,3.34,3.33], ARRAY[3.33,3.34,3.33])$q$,
+  'document_trr_value_share');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+DO $$
+DECLARE pos RECORD;
+BEGIN
+    SELECT * INTO pos FROM transfer_line_position WHERE transfer_id = pg_temp.fx_id('_VERIFY-T-V5');
+    IF pos.in_transit_base = 0 AND pg_temp.transit_value(pg_temp.fx_id('_VERIFY-T-V5')) = 0 THEN
+        RAISE NOTICE 'ok   48l  the full 3-way split takes exactly 10.00 and leaves no quantity and no value in transit';
+    ELSE
+        RAISE WARNING 'FAIL 48l  after the full split: in transit % sheets, value %',
+            pos.in_transit_base, pg_temp.transit_value(pg_temp.fx_id('_VERIFY-T-V5'));
+    END IF;
+END $$;
+
+-- 1.00 over 6 sheets as six lines: per-line rounding over-takes (0.17 x 6 = 1.02).
+SELECT pg_temp.refuses_at_commit('48m', 'a six-line receipt of 1.00 rounded per line (0.17 x 6, summing 1.02) was accepted',
+  $q$SELECT pg_temp.receive_lines('_VERIFY-R-V9', pg_temp.fx_id('_VERIFY-T-V6'), ARRAY[1,1,1,1,1,1],
+                                  ARRAY[0.17,0.17,0.17,0.17,0.17,0.17], ARRAY[0.17,0.17,0.17,0.17,0.17,0.17])$q$,
+  'document_trr_value_share', '%line 2 takes 0.17 out of transit, but its share%is 0.16%');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+SELECT pg_temp.accepts_at_commit('48n', 'a six-line receipt of 1.00 taking 0.17, 0.16, 0.17, 0.17, 0.16, 0.17 is accepted',
+  $q$SELECT pg_temp.receive_lines('_VERIFY-R-V10', pg_temp.fx_id('_VERIFY-T-V6'), ARRAY[1,1,1,1,1,1],
+                                  ARRAY[0.17,0.16,0.17,0.17,0.16,0.17], ARRAY[0.17,0.16,0.17,0.17,0.16,0.17])$q$,
+  'document_trr_value_share');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+DO $$
+BEGIN
+    IF pg_temp.transit_value(pg_temp.fx_id('_VERIFY-T-V6')) = 0 THEN
+        RAISE NOTICE 'ok   48o  the six shares sum to exactly 1.00: nothing over-taken, nothing stranded';
+    ELSE
+        RAISE WARNING 'FAIL 48o  value left in transit after the full 6-way split: %',
+            pg_temp.transit_value(pg_temp.fx_id('_VERIFY-T-V6'));
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 49. Receipt lines carry their author, and the author is independent
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-E1', 10);
+    INSERT INTO fx VALUES ('trr_e1', pg_temp.make_trr('_VERIFY-R-E1', pg_temp.fx_id('_VERIFY-T-E1')));
+END $$;
+SELECT pg_temp.refuses('49a', 'the dispatcher rewrote a line of a draft receipt',
+  $q$UPDATE transfer_receipt_line SET entered_by = pg_temp.holder('ASST_WH_MANAGER') WHERE document_id = pg_temp.fx_id('trr_e1')$q$,
+  '23Z02', '%cannot be entered by the person who dispatched the transfer%');
+SELECT pg_temp.refuses('49b', 'the person who raised the transfer entered a receipt line',
+  $q$UPDATE transfer_receipt_line SET entered_by = pg_temp.verify_user() WHERE document_id = pg_temp.fx_id('trr_e1')$q$,
+  '23Z02', '%cannot be entered by the person who raised the transfer%');
+SELECT pg_temp.refuses('49c', 'a signer of the transfer entered a receipt line',
+  $q$UPDATE transfer_receipt_line SET entered_by = pg_temp.holder('HEAD_INVENTORY') WHERE document_id = pg_temp.fx_id('trr_e1')$q$,
+  '23Z02', '%cannot be entered by a person who signed the transfer%');
+SELECT pg_temp.refuses('49d', 'the dispatcher added a line to a draft receipt',
+  $q$INSERT INTO transfer_receipt_line (document_id, line_no, transfer_line_id, item_id, uom_id, quantity, qty_base_uom, entered_by)
+     SELECT l.document_id, 2, l.transfer_line_id, l.item_id, l.uom_id, 1, 1, pg_temp.holder('ASST_WH_MANAGER')
+       FROM transfer_receipt_line l WHERE l.document_id = pg_temp.fx_id('trr_e1') AND l.line_no = 1$q$,
+  '23Z02', '%cannot be entered by the person who dispatched the transfer%');
+SELECT pg_temp.accepts('49e', 'a line entered by an independent receiver is accepted',
+  $q$UPDATE transfer_receipt_line SET note = 'counted at the gate', entered_by = pg_temp.receiver()
+      WHERE document_id = pg_temp.fx_id('trr_e1')$q$);
+
+-- Even past the line guard (switched off for this one edit), posting judges every line.
+ALTER TABLE transfer_receipt_line DISABLE TRIGGER transfer_receipt_line_content;
+UPDATE transfer_receipt_line SET entered_by = pg_temp.holder('ASST_WH_MANAGER')
+ WHERE document_id = pg_temp.fx_id('trr_e1');
+ALTER TABLE transfer_receipt_line ENABLE TRIGGER transfer_receipt_line_content;
+SELECT pg_temp.refuses('49f', 'a receipt was posted carrying a line the dispatcher entered',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.receiver() WHERE id = pg_temp.fx_id('trr_e1')$q$,
+  '23Z02', '%was entered by someone who raised, dispatched or signed transfer%');
+UPDATE transfer_receipt_line SET entered_by = pg_temp.receiver() WHERE document_id = pg_temp.fx_id('trr_e1');
+SELECT pg_temp.accepts('49g', 'with every line independently entered, the receipt posts and moves its stock',
+  $q$SELECT pg_temp.finish_receipt(pg_temp.fx_id('trr_e1'), '_VERIFY-R-E1')$q$);
+
+-- ---------------------------------------------------------------------
+-- 50. A movement never carries a negative value; zero is allowed
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('50a', 'a movement with a negative value was accepted',
+  $q$SELECT pg_temp.dispatch_v('_VERIFY-T-N1', 2, -1.00, -1.00)$q$,
+  '23514', '%stock_movement_value_not_negative%');
+SELECT pg_temp.accepts_at_commit('50b', 'zero-cost stock may move at zero value on both legs',
+  $q$SELECT pg_temp.dispatch_v('_VERIFY-T-N2', 2, 0.00, 0.00)$q$,
+  'document_trf_value_kept');
+SET CONSTRAINTS document_trf_value_kept DEFERRED;
+
+-- ---------------------------------------------------------------------
+-- 46. The chain switch for transfers is a row, and a document finishes
+--     under its chain. Skipped once the date passes.
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    old_def UUID; new_def UUID; d UUID; bound UUID;
+BEGIN
+    IF kigali_today() >= DATE '2027-01-01' THEN
+        RAISE NOTICE 'ok   46   (skipped: the 2027 chain is already in force)';
+        RETURN;
+    END IF;
+    SELECT wd.id INTO old_def FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
+     WHERE dt.code = 'TRF' AND wd.basis = 'POLICY_2026';
+    SELECT wd.id INTO new_def FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
+     WHERE dt.code = 'TRF' AND wd.basis = 'RESTRUCTURE_2027';
+
+    UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = old_def;
+    UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = new_def;
+
+    d := pg_temp.trf_at('_VERIFY-T-2027', 'PENDING');
+    SELECT workflow_definition_id INTO bound FROM document WHERE id = d;
+    IF bound = new_def THEN
+        RAISE NOTICE 'ok   46a  once the switch date arrives a new transfer binds to the 2027 chain';
+    ELSE
+        RAISE WARNING 'FAIL 46a  a new transfer bound to % instead of the 2027 chain', bound;
+    END IF;
+
+    BEGIN
+        PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d));
+        UPDATE document SET status = 'APPROVED' WHERE id = d;
+        RAISE NOTICE 'ok   46b  the 2027 chain (WH Manager, Managing Director, Internal Controller) signs and approves';
+    EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'FAIL 46b  the 2027 chain could not sign: %', SQLERRM;
+    END;
+
+    SELECT workflow_definition_id INTO bound FROM document WHERE id = pg_temp.fx_id('t_step1');
+    IF bound = old_def THEN
+        BEGIN
+            PERFORM pg_temp.sign(pg_temp.fx_id('t_step1'), 2, pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('t_step1'), 2)));
+            RAISE NOTICE 'ok   46c  an open transfer finishes under the 2026 chain it began with (Head of Inventory)';
+        EXCEPTION WHEN OTHERS THEN
+            RAISE WARNING 'FAIL 46c  an open transfer could not finish under its own chain: %', SQLERRM;
+        END;
+    ELSE
+        RAISE WARNING 'FAIL 46c  an open transfer moved to another chain';
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------
 -- 38. The chain switch for the delivery authorization is a row, and the

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Transfers</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · TRF-007</p>
+      <h1 class="page-title">Transfers</h1>
+      <p class="page-sub">Stock moving between branches. It leaves <span th:text="${currentBranch?.name}">this branch</span> into transit when the warehouse dispatches an approved transfer, and enters the destination when it is received. What does not arrive stays in transit.</p>
+    </div>
+    <a th:href="@{/transfers/new}" class="btn btn-primary-action" sec:authorize="hasAuthority('transfer.create')">
+      <i class="bi bi-plus-lg"></i> New transfer
+    </a>
+  </div>
+
+  <!-- The source gate's worklist: approved and not yet dispatched. -->
+  <section class="hb-card hb-card-body mb-3" sec:authorize="hasAuthority('transfer.dispatch')" th:if="${canDispatch}">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Ready to dispatch</h2>
+          <p class="card-sub">Approved transfers leaving this branch, not yet sent</p>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table hb-table compact mb-0">
+        <thead>
+          <tr><th scope="col">Transfer</th><th scope="col">To</th><th scope="col" class="num">Lines</th><th scope="col"><span class="visually-hidden">Dispatch</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="t : ${ready}">
+            <td><a class="doc-link" th:href="@{'/transfers/' + ${t.id()}}" th:text="${t.serialNo()}">TRF-KGL-2026-0001</a>
+                <span th:replace="~{fragments/ui :: chip(${t.displayState()})}"></span></td>
+            <td><span th:text="${t.toBranchName()}">Rubavu</span> · <span class="mono" th:text="${t.toCode()}">RBV-BOND</span></td>
+            <td class="num" th:text="${t.lineCount()}">2</td>
+            <td class="text-end">
+              <a th:href="@{'/transfers/' + ${t.id()} + '/dispatch'}" class="btn btn-sm btn-primary-action">
+                <i class="bi bi-truck"></i> Dispatch
+              </a>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(ready)}">
+            <td colspan="4">
+              <div th:replace="~{fragments/ui :: emptyState('bi-box-arrow-up-right', 'Nothing approved and waiting', 'A transfer appears here once its last signature is in.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- The destination's worklist: dispatched to this branch, not yet received. -->
+  <section class="hb-card hb-card-body mb-3" sec:authorize="hasAuthority('transfer.receive')" th:if="${canReceive}">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Awaiting receipt</h2>
+          <p class="card-sub">Dispatched to this branch, no receipt yet</p>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table hb-table compact mb-0">
+        <thead>
+          <tr><th scope="col">Transfer</th><th scope="col">From</th><th scope="col">Dispatched</th><th scope="col" class="num">Lines</th><th scope="col"><span class="visually-hidden">Receive</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="t : ${awaiting}">
+            <td><a class="doc-link" th:href="@{'/transfers/' + ${t.id()}}" th:text="${t.serialNo()}">TRF-KGL-2026-0001</a>
+                <span th:replace="~{fragments/ui :: chip(${t.displayState()})}"></span></td>
+            <td><span th:text="${t.fromBranchName()}">Gahanga</span> · <span class="mono" th:text="${t.fromCode()}">KGL-MAIN</span></td>
+            <td class="mono small" th:text="${t.dispatchedAt() != null} ? ${#temporals.format(t.dispatchedAt(), 'dd MMM HH:mm')} : '—'">30 Sep 11:00</td>
+            <td class="num" th:text="${t.lineCount()}">2</td>
+            <td class="text-end">
+              <a th:href="@{/transfers/receipts/new(transfer=${t.id()})}" class="btn btn-sm btn-primary-action">
+                <i class="bi bi-box-arrow-in-down"></i> Receive
+              </a>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(awaiting)}">
+            <td colspan="5">
+              <div th:replace="~{fragments/ui :: emptyState('bi-box-arrow-in-down', 'Nothing on its way here', 'Transfers dispatched to this branch appear here until they are received.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/transfers}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3">
+        <label for="status" class="form-label small fw-semibold" style="color: var(--color-heading)">State</label>
+        <select id="status" name="status" class="form-select">
+          <option value="">All states</option>
+          <option th:each="s : ${statuses}" th:value="${s}" th:text="${#strings.replace(s, '_', ' ')}"
+                  th:selected="${status != null and status == s}">PENDING</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-4 d-flex flex-column justify-content-end pb-1">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="awaitingMe" name="awaitingMe"
+                 value="true" th:checked="${awaitingMe}">
+          <label class="form-check-label small" for="awaitingMe">Awaiting my signature</label>
+        </div>
+      </div>
+      <div class="col-12 col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/transfers}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Serial</th>
+            <th scope="col">Date</th>
+            <th scope="col">From</th>
+            <th scope="col">To</th>
+            <th scope="col" class="num">Lines</th>
+            <th scope="col">Raised by</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="t : ${transfers}">
+            <td><a class="doc-link" th:href="@{'/transfers/' + ${t.id()}}" th:text="${t.serialNo()}">TRF-KGL-2026-0001</a></td>
+            <td class="mono" th:text="${#temporals.format(t.documentDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
+            <td class="mono" th:text="${t.fromCode()}">KGL-MAIN</td>
+            <td>
+              <span th:text="${t.toBranchName()}">Rubavu</span> · <span class="mono" th:text="${t.toCode()}">RBV-BOND</span>
+              <span th:if="${t.bonded()}" class="ms-1"><span th:replace="~{fragments/ui :: chip('BONDED')}"></span></span>
+            </td>
+            <td class="num" th:text="${t.lineCount()}">3</td>
+            <td th:text="${t.createdByName()}">Name</td>
+            <td>
+              <span th:replace="~{fragments/ui :: chip(${t.displayState()})}"></span>
+              <span class="d-block small text-body-secondary" th:if="${t.awaitingRole() != null}">
+                awaiting <span th:text="${t.awaitingRole()}">Head of Inventory</span>
+              </span>
+              <span class="d-block small fw-semibold" th:if="${t.awaitingMe()}" style="color: var(--color-warning)">your signature</span>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(transfers)}">
+            <td colspan="7">
+              <div th:replace="~{fragments/ui :: emptyState('bi-arrow-left-right', 'No transfers match', 'Clear the filters, or raise the first transfer.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

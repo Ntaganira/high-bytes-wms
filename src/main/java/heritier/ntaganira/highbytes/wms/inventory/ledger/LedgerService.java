@@ -144,6 +144,10 @@ public class LedgerService {
             throw new ControlRefusedException("A stock movement carries a positive quantity in the item's base unit.");
         }
         boolean in = m.direction() == MovementRequest.Direction.IN;
+        if (m.value() != null && m.value().signum() < 0) {
+            throw new ControlRefusedException("A stock movement cannot carry a negative value. Zero is allowed for stock "
+                    + "that cost nothing; less than zero is not stock.");
+        }
         if (in && (m.value() == null || m.value().signum() < 0)) {
             throw new ControlRefusedException("A receipt into stock carries its value, which cannot be negative.");
         }
@@ -186,9 +190,18 @@ public class LedgerService {
                 throw new ControlRefusedException(shortage(m, row.quantity(), quantity));
             }
             newQuantity = row.quantity().subtract(quantity);
-            value = newQuantity.signum() == 0
-                    ? row.totalValue()
-                    : row.totalValue().multiply(quantity).divide(row.quantity(), 2, RoundingMode.HALF_UP);
+            if (m.value() != null) {
+                // Issued at a stated value (issueAt): it cannot exceed what the place carries.
+                value = m.value().setScale(2, RoundingMode.HALF_UP);
+                if (value.compareTo(row.totalValue()) > 0) {
+                    throw new ControlRefusedException("The stock leaving is valued at " + value.toPlainString()
+                            + " but the place carries only " + row.totalValue().toPlainString() + ".");
+                }
+            } else {
+                value = newQuantity.signum() == 0
+                        ? row.totalValue()
+                        : row.totalValue().multiply(quantity).divide(row.quantity(), 2, RoundingMode.HALF_UP);
+            }
             newTotal = row.totalValue().subtract(value);
         }
         BigDecimal unitCost = value.divide(quantity, 4, RoundingMode.HALF_UP);
