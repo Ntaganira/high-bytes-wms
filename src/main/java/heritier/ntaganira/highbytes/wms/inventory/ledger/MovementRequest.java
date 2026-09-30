@@ -50,4 +50,22 @@ public record MovementRequest(
         return new MovementRequest(ticketId, ticketLineId, branchId, itemId, locationId, storageBinId,
                 Direction.OUT, quantityBase, null);
     }
+
+    /**
+     * An issue at a stated value instead of the average: the stock leaves at
+     * the cost it is known to carry (a consignment leaving transit at its own
+     * dispatch cost). The balance's total value falls by exactly {@code value}
+     * and its average is recomputed from what is left.
+     *
+     * <p><strong>Only for a document whose value a database trigger pins.</strong> Today that is the transfer
+     * receipt, whose out-of-transit value the database recomputes from the transfer's own dispatch and refuses
+     * if it differs. A module with no such trigger must use {@link #issue}, which values at the ledger's average,
+     * because a caller that names the value of an issue can otherwise move cost wherever it likes.
+     */
+    public static MovementRequest issueAt(UUID ticketId, UUID ticketLineId, UUID branchId, UUID itemId,
+                                          UUID locationId, UUID storageBinId, BigDecimal quantityBase,
+                                          BigDecimal value) {
+        return new MovementRequest(ticketId, ticketLineId, branchId, itemId, locationId, storageBinId,
+                Direction.OUT, quantityBase, value);
+    }
 }

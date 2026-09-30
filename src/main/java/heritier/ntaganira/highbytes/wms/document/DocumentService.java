@@ -311,7 +311,7 @@ public class DocumentService {
                     ? d.serialNo() + " is already posted."
                     : d.serialNo() + " is " + d.status() + "; only an approved document is posted.");
         }
-        String right = d.kind().right("post");
+        String right = d.kind().postRight();
         if (!CurrentUser.holdsAt(right, d.branchId())) {
             return StepCheck.no(null, "Posting needs the " + right + " right at " + d.branchName() + ".");
         }
@@ -535,7 +535,7 @@ public class DocumentService {
     @Transactional
     public DocumentHeader beginPost(UUID id) {
         DocumentHeader d = lock(id);
-        requireRight(d, d.kind().right("post"), "Post");
+        requireRight(d, d.kind().postRight(), "Post");
         if ("POSTED".equals(d.status())) {
             throw refused(d, "Post", d.serialNo() + " is already posted. Posting twice would move the stock twice.");
         }

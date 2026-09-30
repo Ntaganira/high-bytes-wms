@@ -68,7 +68,7 @@
           <i class="bi bi-arrow-left-right"></i> Transfers
           <span class="side-badge transit" th:if="${navCounts?.transfersInTransit > 0}"
                 th:text="${navCounts.transfersInTransit}"
-                th:attr="aria-label='|' + ${navCounts.transfersInTransit} + ' in transit|'">0</span>
+                th:attr="aria-label='|' + ${navCounts.transfersInTransit} + ' awaiting dispatch or receipt|'">0</span>
         </a>
 
         <a th:href="@{/cutting}" class="side-link" sec:authorize="hasAuthority('cutting.view')"

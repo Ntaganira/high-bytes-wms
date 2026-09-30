@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${trr.serialNo}">Transfer receipt</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${trr})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · TRANSFER RECEIPT</p>
+      <h1 class="page-title">Receipt of <a class="doc-link" th:href="@{'/transfers/' + ${trr.transferId}}" th:text="${trr.transferSerial}">TRF-KGL-2026-0001</a></h1>
+      <p class="page-sub">
+        From <span th:text="${trr.transferBranchName}">Gahanga</span>, dispatched by
+        <span th:text="${trr.dispatchedByName}">Name</span>
+        <span th:if="${trr.dispatchedAt != null}" th:text="'on ' + ${#temporals.format(trr.dispatchedAt, 'dd MMM yyyy HH:mm')}">on 30 Sep 11:00</span>,
+        into <span class="mono" th:text="${trr.toCode}">RBV-BOND</span>.
+      </p>
+    </div>
+    <div class="d-flex gap-2">
+      <a th:if="${actions.canEdit}" sec:authorize="hasAuthority('transfer.receive')"
+         th:href="@{'/transfers/receipts/' + ${trr.id} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit what arrived
+      </a>
+    </div>
+  </div>
+
+  <div class="alert alert-secondary d-flex align-items-start gap-2" role="status" th:if="${trr.status == 'CANCELLED'}">
+    <i class="bi bi-x-circle-fill"></i>
+    <div>
+      <strong>Cancelled</strong>
+      by <span th:text="${trr.cancelledByName}">Name</span>
+      on <span th:text="${#temporals.format(trr.cancelledAt, 'dd MMM yyyy HH:mm')}">30 Sep 10:00</span>.
+      Reason: <span th:text="${trr.cancelReason}">Reason</span>. The transfer is free to be received again.
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-xl-8">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-ol" aria-hidden="true"></i>
+            <h2 class="card-title">What arrived</h2>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Item</th>
+                <th scope="col" class="num">Dispatched</th>
+                <th scope="col" class="num">Arrived</th>
+                <th scope="col">Unit</th>
+                <th scope="col" class="num">Short</th>
+                <th scope="col">Into bin</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="l : ${lines}">
+                <td class="mono"><span th:text="${l.lineNo()}">1</span>
+                    <span class="d-block small text-body-secondary" th:text="'transfer line ' + ${l.transferLineNo()}">transfer line 1</span></td>
+                <td><span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                    <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                    <span class="d-block small text-body-secondary" th:if="${l.note()}" th:text="${l.note()}">note</span></td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(l.dispatchedQuantity(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(l.quantity(), 1, 'COMMA', 3, 'POINT')}">98.000</td>
+                <td class="mono" th:text="${l.uomCode()}">SHEET</td>
+                <td class="num mono">
+                  <span th:if="${l.shortfall().signum() == 0}">—</span>
+                  <span th:if="${l.shortfall().signum() > 0}" style="color: var(--color-warning)"
+                        th:text="${#numbers.formatDecimal(l.shortfall(), 1, 'COMMA', 3, 'POINT')}">2.000</span>
+                </td>
+                <td class="mono" th:text="${l.binCode()} ?: '—'">A1</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="small text-body-secondary mt-2 mb-0">
+          A transfer line missing here received nothing. Whatever was dispatched and is not listed in full stays in
+          the source branch's transit location, left in transit until a loss or damage report clears it.
+        </p>
+        <p class="small mt-2 mb-0" th:if="${trr.note}"><strong>Note:</strong> <span th:text="${trr.note}">note</span></p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${posting != null}">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-journal-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">In the ledger</h2>
+              <p class="card-sub">
+                Posted by <span th:text="${trr.postedByName}">Name</span>
+                <span th:if="${trr.postedAt != null}" th:text="'on ' + ${#temporals.format(trr.postedAt, 'dd MMM yyyy HH:mm')}">on 30 Sep 14:00</span>
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Ticket</th><th scope="col">Leg</th><th scope="col">Item</th><th scope="col">Location</th>
+                <th scope="col" class="num">Quantity</th><th scope="col" class="num">Unit cost</th><th scope="col" class="num">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="m : ${posting.movements()}">
+                <td class="mono" th:text="${m.ticketSerial()}">TT-RBV-2026-0001</td>
+                <td class="small" th:text="${m.direction() == 'OUT'} ? 'out of transit' : 'into stock'">out of transit</td>
+                <td class="mono" th:text="${m.itemCode()}">GL-CF-6</td>
+                <td class="mono"><span th:text="${m.locationCode()}">RBV-BOND</span><span th:if="${m.binCode() != null}" th:text="' / ' + ${m.binCode()}"> / A1</span></td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.quantityBase(), 1, 'COMMA', 3, 'POINT')}">98.000</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.unitCost(), 1, 'COMMA', 4, 'POINT')}">8,869.5650</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">869,217.39</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning" aria-hidden="true"></i>
+            <h2 class="card-title">The destination gate</h2>
+          </div>
+        </div>
+
+        <form th:if="${actions.canPost}" sec:authorize="hasAuthority('transfer.receive')"
+              th:action="@{'/transfers/receipts/' + ${trr.id} + '/post'}" method="post" class="mb-3">
+          <p class="small">Confirming records these quantities as arrived: they leave transit and enter
+            <span class="mono" th:text="${trr.toCode}">RBV-BOND</span>, at cost, in one step. It cannot be undone.</p>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="confirmReceipt" name="confirm" value="true" required>
+            <label class="form-check-label small" for="confirmReceipt">What is listed is what I counted off the vehicle.</label>
+          </div>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-box-arrow-in-down"></i> Confirm receipt</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.postReason}" th:text="${actions.postReason}">Reason</p>
+
+        <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('transfer.receive')">
+          <summary class="small fw-semibold">Cancel this receipt</summary>
+          <form th:action="@{'/transfers/receipts/' + ${trr.id} + '/cancel'}" method="post" class="mt-2">
+            <label for="cancelReason" class="form-label small">Reason (required). A new receipt can then replace it.</label>
+            <input id="cancelReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400"
+                   required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-slash-circle"></i> Cancel receipt</button>
+          </form>
+        </details>
+        <p class="small text-body-secondary" th:if="${actions.cancelReason}" th:text="${actions.cancelReason}">Reason</p>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canPost and !actions.canCancel and !actions.canEdit
+                    and actions.postReason == null and actions.cancelReason == null}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <h2 class="card-title">History</h2>
+          </div>
+        </div>
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Changes to this receipt will be listed here.')}"></div>
+        </th:block>
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -35,8 +35,18 @@ public record ReleaseGate(
         String dnSerial,
         LocalDateTime deliveredAt,
         String deliveredBy,
-        String note
+        String note,
+        String kind
 ) {
+
+    /** A delivery authorization's gate: the wording is about loading and delivery. */
+    public ReleaseGate(String state, String daoSerial, List<Waiting> waiting, String releasedBy,
+                       LocalDateTime releasedAt, UUID dnId, String dnSerial, LocalDateTime deliveredAt,
+                       String deliveredBy, String note) {
+        this(state, daoSerial, waiting, releasedBy, releasedAt, dnId, dnSerial, deliveredAt, deliveredBy, note, "DAO");
+    }
+
+    public String getKind() { return kind; }
 
     /**
      * An unsigned step. {@code hoursWaiting} is null for a step not yet

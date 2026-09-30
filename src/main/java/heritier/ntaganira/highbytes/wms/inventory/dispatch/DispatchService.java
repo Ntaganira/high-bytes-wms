@@ -144,9 +144,11 @@ public class DispatchService {
     private final DocumentService documents;
     private final DispatchLookupService lookups;
     private final BranchService branches;
+    private final GateSteps gateSteps;
 
     public DispatchService(JdbcClient jdbc, DocumentService documents, DispatchLookupService lookups,
-                           BranchService branches) {
+                           BranchService branches, GateSteps gateSteps) {
+        this.gateSteps = gateSteps;
         this.jdbc = jdbc;
         this.documents = documents;
         this.lookups = lookups;
@@ -266,61 +268,8 @@ public class DispatchService {
         }
 
         // DRAFT or PENDING: every unsigned step is named, with who can sign it and how long it has waited.
-        Map<Integer, Integer> escalation = new HashMap<>();
-        jdbc.sql("""
-                SELECT ws.sequence_no, ws.escalate_after_hours FROM workflow_step ws
-                  JOIN document d ON d.workflow_definition_id = ws.workflow_definition_id WHERE d.id = :id
-                """).param("id", h.id(), Types.OTHER)
-                .query((rs, n) -> {
-                    int hours = rs.getInt("escalate_after_hours");
-                    escalation.put(rs.getInt("sequence_no"), rs.wasNull() ? null : hours);
-                    return null;
-                }).list();
-
-        Set<UUID> signers = chain.stream().map(ChainStep::actorUserId).filter(java.util.Objects::nonNull)
-                .collect(Collectors.toSet());
-        LocalDateTime since = h.submittedAt();
-        List<ReleaseGate.Waiting> waiting = new ArrayList<>();
-        boolean currentTaken = false;
-        for (ChainStep step : chain) {
-            if (step.decision() != null) {
-                if (step.decidedAt() != null) since = step.decidedAt();
-                continue;
-            }
-            boolean current = !currentTaken && "PENDING".equals(status);
-            if (current) currentTaken = true;
-            boolean first = step.sequenceNo() == chain.get(0).sequenceNo();
-            List<String> holders = holdersOf(step, h, signers, first);
-            Long hours = current && since != null ? Duration.between(since, now).toHours() : null;
-            Integer limit = escalation.get(step.sequenceNo());
-            waiting.add(new ReleaseGate.Waiting(step.sequenceNo(), step.actionLabel(), step.roleName(), holders,
-                    hours, limit, hours != null && limit != null && hours > limit, current));
-        }
+        var waiting = gateSteps.waiting(h.id(), h.branchId(), h.createdBy(), status, h.submittedAt(), chain, now);
         return new ReleaseGate("BLOCKED", h.serialNo(), waiting, null, null, null, null, null, null, null);
-    }
-
-    /** Who at this branch could sign the step today: holds its role, has not signed, and did not raise it unless it is step 1. */
-    private List<String> holdersOf(ChainStep step, DaoHeader h, Set<UUID> signers, boolean first) {
-        record Person(UUID id, String name) {}
-        return jdbc.sql("""
-                SELECT DISTINCT u.id, u.full_name
-                  FROM user_role ur
-                  JOIN app_user u ON u.id = ur.user_id AND u.is_active
-                  JOIN role r     ON r.id = ur.role_id AND r.is_active
-                 WHERE ur.role_id = :role AND ur.revoked_at IS NULL
-                   AND ur.valid_from <= kigali_today()
-                   AND (ur.valid_to IS NULL OR ur.valid_to >= kigali_today())
-                   AND (ur.branch_id IS NULL OR ur.branch_id = :branch)
-                 ORDER BY u.full_name
-                """)
-                .param("role", step.roleId(), Types.OTHER)
-                .param("branch", h.branchId(), Types.OTHER)
-                .query((rs, n) -> new Person(rs.getObject("id", UUID.class), rs.getString("full_name")))
-                .list().stream()
-                .filter(p -> !signers.contains(p.id()))
-                .filter(p -> first || !p.id().equals(h.createdBy()))
-                .map(Person::name)
-                .toList();
     }
 
     /** The authorization as its form holds it, for editing or for raising a corrected copy. */
