@@ -60,7 +60,11 @@ public class GlobalModelAdvice {
                                         WHERE r.transfer_id = x.id AND rd.status <> 'CANCELLED')))
                                                                                           AS transfers_in_transit,
               COUNT(*) FILTER (WHERE dt.code = 'CNT' AND d.status IN ('DRAFT','PENDING')) AS counts_open,
-              COUNT(*) FILTER (WHERE dt.code = 'VR'  AND d.status <> 'POSTED')          AS variances_open,
+              -- Lines that differ from the book on counts verified but not yet posted. A count still being counted
+              -- or verified adds nothing: even a number would tell a counter where the book disagrees.
+              (SELECT COUNT(*) FROM stock_count_line l JOIN document c ON c.id = l.document_id
+                WHERE c.branch_id = :branchId AND c.status IN ('PENDING', 'APPROVED')
+                  AND l.variance_qty <> 0 AND count_book_visible(c.id))              AS variances_open,
               0                                                                          AS delivery_notes_overdue
               FROM document d
               JOIN document_type dt ON dt.id = d.document_type_id

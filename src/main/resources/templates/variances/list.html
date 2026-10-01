@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Variances</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">REPORTS · INVENTORY VARIANCE REPORT · VR-010</p>
+    <h1 class="page-title">Variances</h1>
+    <p class="page-sub">What counts at <span th:text="${currentBranch?.name}">this branch</span> found against the
+      book, line by line. A count appears here once its verification is signed: before that its book is on no page.</p>
+  </div>
+
+  <ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+      <a class="nav-link" th:classappend="${state == 'open'} ? 'active'" th:href="@{/variances(state='open')}">Awaiting posting</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" th:classappend="${state == 'posted'} ? 'active'" th:href="@{/variances(state='posted')}">Posted</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" th:classappend="${state == 'all'} ? 'active'" th:href="@{/variances(state='all')}">All</a>
+    </li>
+  </ul>
+
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+      <section class="hb-card hb-card-body">
+        <div class="small text-body-secondary">Shortages (RWF)</div>
+        <div class="fs-5 mono" th:text="${#numbers.formatDecimal(shortage, 1, 'COMMA', 2, 'POINT')}">-3,000.00</div>
+      </section>
+    </div>
+    <div class="col-6 col-md-3">
+      <section class="hb-card hb-card-body">
+        <div class="small text-body-secondary">Surpluses (RWF)</div>
+        <div class="fs-5 mono" th:text="${#numbers.formatDecimal(surplus, 1, 'COMMA', 2, 'POINT')}">2,000.00</div>
+      </section>
+    </div>
+  </div>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Count</th>
+            <th scope="col">Date</th>
+            <th scope="col">Location</th>
+            <th scope="col">Line</th>
+            <th scope="col">Item</th>
+            <th scope="col">Bin</th>
+            <th scope="col" class="num">Book</th>
+            <th scope="col" class="num">Found</th>
+            <th scope="col" class="num">Variance</th>
+            <th scope="col" class="num">Value (RWF)</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="r : ${rows}">
+            <td><a class="doc-link mono" th:href="@{'/counts/' + ${r.countId()}}" th:text="${r.serialNo()}">CNT-KGL-2026-0001</a></td>
+            <td class="mono" th:text="${#temporals.format(r.documentDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
+            <td class="mono" th:text="${r.locationCode()}">KGL-MAIN</td>
+            <td class="mono" th:text="${r.lineNo()}">1</td>
+            <td>
+              <span class="mono" th:text="${r.itemCode()}">GL-CF-6</span>
+              <span class="d-block small text-body-secondary" th:text="${r.itemDescription()}">Clear float</span>
+              <span class="d-block small" th:if="${r.recountDiffers()}" style="color: var(--color-warning)">recount differed from first count</span>
+            </td>
+            <td class="mono" th:text="${r.binCode()} ?: 'no bin'">A1</td>
+            <td class="num mono" th:text="${#numbers.formatDecimal(r.bookQty(), 1, 'COMMA', 3, 'POINT')}">10.000</td>
+            <td class="num mono" th:text="${#numbers.formatDecimal(r.finalQty(), 1, 'COMMA', 3, 'POINT')}">7.000</td>
+            <td class="num mono">
+              <span th:text="${#numbers.formatDecimal(r.varianceQty(), 1, 'COMMA', 3, 'POINT')}">-3.000</span>
+              <span class="small text-body-secondary" th:text="${r.baseUomCode()}">SHEET</span>
+            </td>
+            <td class="num mono">
+              <span th:text="${#numbers.formatDecimal(r.value(), 1, 'COMMA', 2, 'POINT')}">-3,000.00</span>
+              <span class="d-block small text-body-secondary" th:unless="${r.valuePosted()}">estimate</span>
+            </td>
+            <td><span th:replace="~{fragments/ui :: chip(${r.status()})}"></span></td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(rows)}">
+            <td colspan="11">
+              <div th:replace="~{fragments/ui :: emptyState('bi-graph-up-arrow', 'No variances here', 'Counts that agreed with the book, or whose verification is not yet signed, do not appear.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

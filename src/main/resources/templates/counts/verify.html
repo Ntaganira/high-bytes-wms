@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="'Verify ' + ${cnt.serialNo}">Verification sheet</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${cnt})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">STOCK COUNTS · VERIFICATION COUNT · CSH-012</p>
+      <h1 class="page-title">Recount <span class="mono" th:text="${cnt.locationCode}">KGL-MAIN</span></h1>
+      <p class="page-sub">Neither the book nor the first count is on this page: recount what is there, in each item's
+        base unit. The system chose the lines marked <strong>chosen</strong> when the count was submitted: every line
+        whose first count differs from the book, and a random sample of the rest. Recount every chosen line; you may
+        recount any other. Where you recount, your count is the one the adjustment uses.
+        <span th:text="${progress.verified()} + ' of ' + ${progress.toVerify()} + ' chosen lines recounted so far.'">1 of 3 chosen lines recounted so far.</span></p>
+    </div>
+    <a th:href="@{'/counts/' + ${cnt.id}}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Back to the count</a>
+  </div>
+
+  <form id="verify-form" th:action="@{'/counts/' + ${cnt.id} + '/verify'}" th:object="${form}" method="post">
+    <section class="hb-card hb-card-body mb-3">
+      <div class="table-responsive">
+        <table class="table hb-table compact align-middle mb-2">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col" style="min-width: 14rem">Item</th>
+              <th scope="col">Bin</th>
+              <th scope="col">Unit</th>
+              <th scope="col">To recount</th>
+              <th scope="col">Recount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="l, st : ${lines}">
+              <td class="mono" th:text="${l.lineNo()}">1</td>
+              <td>
+                <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                <span class="d-block small text-body-secondary" th:if="${l.verifiedByName()}"
+                      th:text="'by ' + ${l.verifiedByName()}">by Name</span>
+              </td>
+              <td class="mono" th:text="${l.place()}">A1</td>
+              <td class="mono" th:text="${l.baseUomCode()}">SHEET</td>
+              <td>
+                <span class="fw-semibold" th:if="${l.verifyRequired()}" style="color: var(--color-warning)">chosen</span>
+                <span class="text-body-secondary small" th:unless="${l.verifyRequired()}">optional</span>
+              </td>
+              <td>
+                <input type="hidden" th:field="*{lines[__${st.index}__].lineId}">
+                <input type="hidden" th:field="*{lines[__${st.index}__].was}">
+                <input th:field="*{lines[__${st.index}__].quantity}" type="number" min="0"
+                       th:attr="step=${l.uomDecimals() == 0} ? '1' : '0.001', aria-label='Recount, line ' + ${l.lineNo()}"
+                       class="form-control form-control-sm mono" style="max-width: 8rem" inputmode="decimal">
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <button type="submit" class="btn btn-primary-action"><i class="bi bi-save"></i> Save recount</button>
+      <span class="small text-body-secondary ms-2">Then sign the verification step on the count's page.</span>
+    </section>
+  </form>
+
+</div>
+</body>
+</html>

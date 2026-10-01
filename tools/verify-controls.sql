@@ -33,6 +33,8 @@ SET CONSTRAINTS document_trf_value_kept DEFERRED;
 SET CONSTRAINTS document_trr_value_share DEFERRED;
 SET CONSTRAINTS document_dmg_posted_moved_stock DEFERRED;
 SET CONSTRAINTS document_dmg_value_rule DEFERRED;
+SET CONSTRAINTS document_cnt_posted_moved_stock DEFERRED;
+SET CONSTRAINTS document_cnt_value_rule DEFERRED;
 
 INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
 VALUES ('_verify', 'Verification Fixture', 'x', TRUE, FALSE);
@@ -1340,25 +1342,34 @@ SELECT pg_temp.refuses('31b', 'a posted transaction ticket was cancelled',
       WHERE id = pg_temp.fx_id('tt_ok')$q$,
   '23Z02', '%corrected by a reversing document%');
 
--- A count sheet moves no stock itself: raised, signed by its whole chain,
--- approved and posted, it can still be cancelled. (This was a delivery
--- authorization until V12 made a DAO permanently unpostable.)
+-- A document of a type that moves no stock: raised, signed by its whole
+-- chain, approved and posted, it can still be cancelled. No such type is
+-- postable any more (V12 made a DAO unpostable; V15 made the count sheet a
+-- stock-moving document, so a posted count is refused in check 58), so a
+-- fixture type with a two-step chain stands in, rolled back with the rest.
 DO $$
-DECLARE d UUID;
+DECLARE d UUID; t UUID; wd UUID;
 BEGIN
+    INSERT INTO document_type (code, name, moves_stock) VALUES ('_VFY', 'Verification non-stock type', FALSE)
+    RETURNING id INTO t;
+    INSERT INTO workflow_definition (document_type_id, version, effective_from, basis)
+    VALUES (t, 1, DATE '2026-01-01', 'POLICY_2026') RETURNING id INTO wd;
+    INSERT INTO workflow_step (workflow_definition_id, sequence_no, required_role_id, action_label)
+    SELECT wd, v.seq, r.id, v.act
+      FROM (VALUES (1, 'WH_MANAGER', 'PREPARE'), (2, 'FINANCE', 'APPROVE')) AS v(seq, role_code, act)
+      JOIN role r ON r.code = v.role_code;
     INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
-    SELECT dt.id, b.id, '_VERIFY-CNT-31', pg_temp.verify_user()
-      FROM document_type dt, branch b WHERE dt.code = 'CNT' AND b.code = 'KGL'
+    SELECT t, b.id, '_VERIFY-NONSTOCK-31', pg_temp.verify_user() FROM branch b WHERE b.code = 'KGL'
     RETURNING id INTO d;
     UPDATE document SET status = 'PENDING' WHERE id = d;
     PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d));
     UPDATE document SET status = 'APPROVED' WHERE id = d;
     UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('SALES') WHERE id = d;
-    INSERT INTO fx VALUES ('cnt_posted', d);
+    INSERT INTO fx VALUES ('nonstock_posted', d);
 END $$;
-SELECT pg_temp.accepts('31c', 'a posted document of a type that moves no stock (a count sheet) can still be cancelled',
+SELECT pg_temp.accepts('31c', 'a posted document of a type that moves no stock can still be cancelled',
   $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
-      WHERE id = pg_temp.fx_id('cnt_posted')$q$);
+      WHERE id = pg_temp.fx_id('nonstock_posted')$q$);
 
 -- =====================================================================
 -- Delivery Authorization and Delivery Note (V12). As for Goods Received,
@@ -1910,9 +1921,12 @@ SELECT pg_temp.refuses('39a', 'a ticket sourced from an approved delivery author
      SELECT pg_temp.fx_id('_VERIFY-TT-S1'), 'DELIVERY', 'OUT', l.id, pg_temp.fx_id('d_gate')
        FROM location l WHERE l.code = 'KGL-MAIN'$q$,
   '23Z02', '%answers only to a goods received note%');
-SELECT pg_temp.refuses('39b', 'a ticket sourced from a count sheet was accepted',
+-- (A count sheet was the example here until V15 made a count's ADJUSTMENT a
+-- ticket the ledger handles; check 59 covers those. The posted document of
+-- check 31's non-stock fixture type stands in for any other source.)
+SELECT pg_temp.refuses('39b', 'a ticket sourced from a document type the ledger does not handle was accepted',
   $q$INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id)
-     SELECT pg_temp.fx_id('_VERIFY-TT-S2'), 'ADJUSTMENT', 'OUT', l.id, pg_temp.fx_id('cnt_posted')
+     SELECT pg_temp.fx_id('_VERIFY-TT-S2'), 'ADJUSTMENT', 'OUT', l.id, pg_temp.fx_id('nonstock_posted')
        FROM location l WHERE l.code = 'KGL-MAIN'$q$,
   '23Z02', '%answers only to a goods received note%');
 SELECT pg_temp.refuses('39c', 'a ticket with no source document was accepted',
@@ -3831,6 +3845,673 @@ SELECT pg_temp.refuses('57i', 'a return of that delivery named a different custo
   $q$SELECT pg_temp.make_dmg('_VERIFY-C-CUS2', 'CUSTOMER_RETURN', 1, p_dn => pg_temp.fx_id('_VERIFY-D-CUS-DN'),
                              p_customs => 'C-OTHER')$q$,
   '23514', '%moved under customs reference C-DAO-1%');
+
+-- =====================================================================
+-- Stock counts (V15): the blind count, the freeze, the verification
+-- count and the adjustment. Every refusal must carry SQLSTATE 23Z02 (a
+-- workflow or document control) or 23514 (a malformed count) with the
+-- reason named. Counts run at their own locations so that the freeze they
+-- impose touches nothing the earlier checks lean on.
+-- =====================================================================
+
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT b.id, v.code, v.name, 'WAREHOUSE'
+  FROM branch b,
+       (VALUES ('_VERIFY-CNT',  'Verification count store'),
+               ('_VERIFY-CNT2', 'Verification cycle-count store'),
+               ('_VERIFY-CNT3', 'Verification no-variance store'),
+               ('_VERIFY-CNT4', 'Verification value store'),
+               ('_VERIFY-CNT5', 'Verification unrecounted store')) AS v(code, name)
+ WHERE b.code = 'KGL';
+INSERT INTO storage_bin (location_id, bin_code)
+SELECT id, '_VERIFY-CBIN' FROM location WHERE code = '_VERIFY-CNT';
+INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
+VALUES ('_verify_fin2', 'Verification Second Finance Officer', 'x', TRUE, FALSE);
+SELECT pg_temp.grant_role('_verify_fin2', 'FINANCE');
+
+-- The Finance officer who posts counts: Finance signs the chain's APPROVE
+-- step, so the poster is a second one.
+CREATE FUNCTION pg_temp.fin2() RETURNS UUID AS $$
+    SELECT id FROM app_user WHERE username = '_verify_fin2';
+$$ LANGUAGE sql;
+
+-- The role that signs a count's VERIFY step, and so takes its verification count.
+CREATE FUNCTION pg_temp.verify_role(p_doc UUID) RETURNS TEXT AS $$
+    SELECT r.code FROM workflow_step ws JOIN document d ON d.workflow_definition_id = ws.workflow_definition_id
+      JOIN role r ON r.id = ws.required_role_id
+     WHERE d.id = p_doc AND ws.action_label = 'VERIFY' ORDER BY ws.sequence_no LIMIT 1;
+$$ LANGUAGE sql;
+
+-- Stock into a location through a real receipt: p_qty of an item (glass by
+-- default) at 1000 a unit, unbinned or into a bin.
+CREATE FUNCTION pg_temp.stock_into(p_serial TEXT, p_loc TEXT, p_qty NUMERIC, p_bin TEXT DEFAULT NULL,
+                                   p_item TEXT DEFAULT '_VERIFY-GLASS') RETURNS VOID AS $$
+DECLARE
+    fin UUID := pg_temp.holder('FINANCE');
+    g   UUID;
+    tt  UUID;
+BEGIN
+    g := pg_temp.make_grn(p_serial, NULL, 'KGL', p_loc);
+    UPDATE goods_received_line SET item_id = (SELECT id FROM item WHERE item_code = p_item),
+           quantity = p_qty, qty_base_uom = p_qty,
+           storage_bin_id = (SELECT id FROM storage_bin WHERE bin_code = p_bin)
+     WHERE document_id = g;
+    UPDATE document SET status = 'PENDING' WHERE id = g;
+    PERFORM pg_temp.sign_upto(g, pg_temp.steps_in(g));
+    UPDATE document SET status = 'APPROVED' WHERE id = g;
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = g;
+    tt := pg_temp.make_ticket(g, fin, p_serial || '-TT');
+    PERFORM pg_temp.move_ticket(tt, fin, kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = tt;
+END $$ LANGUAGE plpgsql;
+
+-- A count opened by the Warehouse Manager holder (who signs PREPARE).
+CREATE FUNCTION pg_temp.make_cnt(p_serial TEXT, p_loc TEXT, p_scope TEXT DEFAULT 'FULL',
+                                 p_customs TEXT DEFAULT NULL, p_branch TEXT DEFAULT NULL) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, COALESCE((SELECT id FROM branch WHERE code = p_branch), l.branch_id), p_serial,
+           pg_temp.holder('WH_MANAGER')
+      FROM document_type dt, location l WHERE dt.code = 'CNT' AND l.code = p_loc
+    RETURNING id INTO d;
+    INSERT INTO stock_count (document_id, location_id, scope, customs_reference)
+    SELECT d, l.id, p_scope, p_customs FROM location l WHERE l.code = p_loc;
+    INSERT INTO fx VALUES (p_serial, d);
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- The first count of every line, by the Warehouse Manager holder: the book,
+-- plus p_delta on line p_line.
+CREATE FUNCTION pg_temp.count_all(p_cnt UUID, p_delta NUMERIC DEFAULT 0, p_line INT DEFAULT 1) RETURNS VOID AS $$
+    UPDATE stock_count_line
+       SET counted_qty = book_qty + CASE WHEN line_no = p_line THEN p_delta ELSE 0 END,
+           counted_by = pg_temp.holder('WH_MANAGER')
+     WHERE document_id = p_cnt;
+$$ LANGUAGE sql;
+
+-- The verification count of every line chosen for it, by the holder of the
+-- VERIFY step's role, at the first count.
+CREATE FUNCTION pg_temp.verify_all(p_cnt UUID) RETURNS VOID AS $$
+    UPDATE stock_count_line
+       SET verified_qty = counted_qty, verified_by = pg_temp.holder(pg_temp.verify_role(p_cnt))
+     WHERE document_id = p_cnt AND verify_required;
+$$ LANGUAGE sql;
+
+-- A counted count taken to a state: PENDING (submitted, step 1 signed),
+-- VERIFIED (the verification counted and signed) or APPROVED.
+CREATE FUNCTION pg_temp.cnt_at(p_cnt UUID, p_state TEXT) RETURNS UUID AS $$
+DECLARE n INT;
+BEGIN
+    UPDATE document SET status = 'PENDING' WHERE id = p_cnt;
+    PERFORM pg_temp.sign_upto(p_cnt, 1);
+    IF p_state = 'PENDING' THEN RETURN p_cnt; END IF;
+    PERFORM pg_temp.verify_all(p_cnt);
+    FOR n IN 2..pg_temp.steps_in(p_cnt) LOOP
+        PERFORM pg_temp.sign(p_cnt, n, pg_temp.holder(pg_temp.step_role(p_cnt, n)));
+        EXIT WHEN p_state = 'VERIFIED'
+              AND (SELECT action_label FROM workflow_step WHERE id = pg_temp.step_id(p_cnt, n)) = 'VERIFY';
+    END LOOP;
+    IF p_state = 'VERIFIED' THEN RETURN p_cnt; END IF;
+    UPDATE document SET status = 'APPROVED' WHERE id = p_cnt;
+    RETURN p_cnt;
+END $$ LANGUAGE plpgsql;
+
+-- Post a count as the second Finance officer: ADJUSTMENT OUT for the
+-- shortages, ADJUSTMENT IN for the surpluses (at the line's unit cost, or
+-- at p_in_value), each ticket posted. p_skip_moves writes the tickets but
+-- no movements.
+CREATE FUNCTION pg_temp.post_cnt(p_cnt UUID, p_serial TEXT, p_in_value NUMERIC DEFAULT NULL,
+                                 p_skip_moves BOOLEAN DEFAULT FALSE) RETURNS VOID AS $$
+DECLARE
+    poster UUID := pg_temp.fin2();
+    h   RECORD;
+    t   UUID;
+    dir TEXT;
+BEGIN
+    SELECT c.location_id, c.customs_reference, d.branch_id INTO h
+      FROM stock_count c JOIN document d ON d.id = c.document_id WHERE c.document_id = p_cnt;
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = p_cnt;
+    FOREACH dir IN ARRAY ARRAY['OUT', 'IN'] LOOP
+        CONTINUE WHEN NOT EXISTS (SELECT 1 FROM stock_count_line
+                                   WHERE document_id = p_cnt
+                                     AND CASE dir WHEN 'IN' THEN variance_qty > 0 ELSE variance_qty < 0 END);
+        INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+        SELECT dt.id, h.branch_id, p_serial || '-' || dir, poster FROM document_type dt WHERE dt.code = 'TT'
+        RETURNING id INTO t;
+        INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, to_location_id,
+                                        source_document_id, customs_reference)
+        VALUES (t, 'ADJUSTMENT', dir, CASE WHEN dir = 'OUT' THEN h.location_id END,
+                CASE WHEN dir = 'IN' THEN h.location_id END, p_cnt, h.customs_reference);
+        INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+        SELECT t, l.line_no, l.item_id, abs(l.variance_qty), i.base_uom_id, abs(l.variance_qty), l.storage_bin_id
+          FROM stock_count_line l JOIN item i ON i.id = l.item_id
+         WHERE l.document_id = p_cnt AND CASE dir WHEN 'IN' THEN l.variance_qty > 0 ELSE l.variance_qty < 0 END;
+        IF NOT p_skip_moves THEN
+            INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, storage_bin_id,
+                                        direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                        running_balance, business_date, posted_by)
+            SELECT tl.id, t, h.branch_id, tl.item_id, h.location_id, tl.storage_bin_id, dir, tl.qty_base_uom,
+                   CASE dir WHEN 'IN' THEN tl.qty_base_uom ELSE -tl.qty_base_uom END, l.unit_cost,
+                   CASE WHEN dir = 'IN' AND p_in_value IS NOT NULL THEN p_in_value
+                        ELSE round(tl.qty_base_uom * l.unit_cost, 2) END,
+                   0, kigali_today(), poster
+              FROM ticket_line tl JOIN stock_count_line l ON l.document_id = p_cnt AND l.line_no = tl.line_no
+             WHERE tl.ticket_id = t
+             ORDER BY tl.line_no;
+        END IF;
+        UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = t;
+    END LOOP;
+END $$ LANGUAGE plpgsql;
+
+-- Stock of an item at a location (and bin, or every bin when p_all), from the ledger.
+CREATE FUNCTION pg_temp.held(p_loc TEXT, p_bin TEXT DEFAULT NULL, p_item TEXT DEFAULT '_VERIFY-GLASS') RETURNS NUMERIC AS $$
+    SELECT COALESCE(SUM(m.signed_quantity), 0)
+      FROM stock_movement m JOIN location l ON l.id = m.location_id JOIN item i ON i.id = m.item_id
+     WHERE l.code = p_loc AND i.item_code = p_item
+       AND m.storage_bin_id IS NOT DISTINCT FROM (SELECT id FROM storage_bin WHERE bin_code = p_bin);
+$$ LANGUAGE sql;
+
+-- _VERIFY-CNT holds 10 sheets unbinned and 5 in bin _VERIFY-CBIN, at 1000
+-- a sheet; _VERIFY-CNT2 holds 4 glass sheets; _VERIFY-CNT3 holds 3;
+-- _VERIFY-CNT4 holds 6 in its only place; _VERIFY-CNT5 holds 3.
+SELECT pg_temp.stock_into('_VERIFY-C-IN1', '_VERIFY-CNT', 10);
+SELECT pg_temp.stock_into('_VERIFY-C-IN2', '_VERIFY-CNT', 5, '_VERIFY-CBIN');
+SELECT pg_temp.stock_into('_VERIFY-C-IN3', '_VERIFY-CNT2', 4);
+SELECT pg_temp.stock_into('_VERIFY-C-IN4', '_VERIFY-CNT3', 3);
+SELECT pg_temp.stock_into('_VERIFY-C-IN5', '_VERIFY-CNT4', 6);
+SELECT pg_temp.stock_into('_VERIFY-C-IN6', '_VERIFY-CNT5', 3);
+
+-- ---------------------------------------------------------------------
+-- 58. The count rights sit on the roles whose steps they serve; a count
+--     is a stock-moving document now
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    bad TEXT;
+    msg TEXT;
+BEGIN
+    SELECT string_agg(v.role_code || ' has {' || COALESCE(have.perms, '') || '} expected {' || v.want || '}', '; ')
+      INTO bad
+      FROM (VALUES
+            ('WH_MANAGER',    'count.create,count.enter,count.view'),
+            ('INTERNAL_CTRL', 'count.verify,count.view'),
+            ('FINANCE',       'count.approve,count.post,count.view')
+           ) AS v(role_code, want)
+      LEFT JOIN LATERAL (
+            SELECT string_agg(p.code, ',' ORDER BY p.code) AS perms
+              FROM role r JOIN role_permission rp ON rp.role_id = r.id
+              JOIN permission p ON p.id = rp.permission_id AND p.module = 'count'
+             WHERE r.code = v.role_code) have ON TRUE
+     WHERE have.perms IS DISTINCT FROM v.want;
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   58a  count rights sit on the roles whose steps they serve';
+    ELSE
+        RAISE WARNING 'FAIL 58a  %', bad;
+    END IF;
+
+    SELECT string_agg(r.code || ' signs ' || ws.action_label || ' without ' || need.code, '; ')
+      INTO bad
+      FROM workflow_step ws
+      JOIN workflow_definition wd ON wd.id = ws.workflow_definition_id
+      JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'CNT'
+      JOIN role r ON r.id = ws.required_role_id
+      CROSS JOIN LATERAL (SELECT 'count.' || CASE ws.action_label WHEN 'PREPARE' THEN 'create'
+                                                                  ELSE lower(ws.action_label) END AS code) need
+     WHERE NOT EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.id = rp.permission_id
+                        WHERE rp.role_id = r.id AND p.code = need.code);
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   58b  every count chain signer carries the right its step needs';
+    ELSE
+        RAISE WARNING 'FAIL 58b  %', bad;
+    END IF;
+
+    -- Of the policy's roles. A runtime role may carry either right: the
+    -- segregation rules judge it as the side of the one role that does.
+    SELECT string_agg(r.code || ':' || p.code, ',' ORDER BY r.code) INTO bad
+      FROM role r JOIN role_permission rp ON rp.role_id = r.id JOIN permission p ON p.id = rp.permission_id
+     WHERE role_is_policy_defined(r.id)
+       AND ((p.code = 'count.post' AND r.code <> 'FINANCE') OR (p.code = 'count.enter' AND r.code <> 'WH_MANAGER'));
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   58c  of the policy''s roles only Finance posts a count and only the Warehouse Manager enters one';
+    ELSE
+        RAISE WARNING 'FAIL 58c  %', bad;
+    END IF;
+
+    IF (SELECT moves_stock FROM document_type WHERE code = 'CNT') THEN
+        RAISE NOTICE 'ok   58d  a count is a stock-moving document: once posted it is never cancelled';
+    ELSE
+        RAISE WARNING 'FAIL 58d  CNT is not marked as moving stock';
+    END IF;
+
+    msg := access_conflict_anywhere();
+    IF msg IS NULL THEN
+        RAISE NOTICE 'ok   58e  nobody, and no role, is left in conflict';
+    ELSE
+        RAISE WARNING 'FAIL 58e  %', msg;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('58f', 'the Internal Controller was given count.post',
+  $q$INSERT INTO role_permission (role_id, permission_id)
+     SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'count.post'$q$,
+  '23Z01');
+SELECT pg_temp.refuses('58g', 'the Internal Controller was given count.enter',
+  $q$INSERT INTO role_permission (role_id, permission_id)
+     SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'count.enter'$q$,
+  '23Z01');
+
+-- ---------------------------------------------------------------------
+-- 59. A count opens at one location where stock is kept, one at a time;
+--     the database writes its sheet and its book
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('59a', 'a count of a transit location was accepted',
+  $q$SELECT pg_temp.make_cnt('_VERIFY-K-TRAN', 'KGL-TRAN')$q$,
+  '23514', '%counted where it is kept%');
+SELECT pg_temp.refuses('59b', 'a count at Gahanga named a Rubavu location',
+  $q$SELECT pg_temp.make_cnt('_VERIFY-K-WRONGBR', 'RBV-BOND', 'FULL', 'C-1', 'KGL')$q$,
+  '23514', '%not at the branch%');
+SELECT pg_temp.refuses('59c', 'a count of bonded stock without a customs reference was accepted',
+  $q$SELECT pg_temp.make_cnt('_VERIFY-K-BOND', 'RBV-BOND')$q$,
+  '23514', '%customs reference%');
+SELECT pg_temp.refuses('59d', 'a blank customs reference was accepted',
+  $q$SELECT pg_temp.make_cnt('_VERIFY-K-BLANK', 'RBV-BOND', 'FULL', '   ')$q$,
+  '23514', '%cnt_customs_reference_not_blank%');
+
+DO $$
+DECLARE
+    d   UUID := pg_temp.make_cnt('_VERIFY-K-FULL', '_VERIFY-CNT');
+    got TEXT;
+BEGIN
+    SELECT string_agg(COALESCE(sb.bin_code, 'unbinned') || '=' || l.book_qty::text || '@' || l.unit_cost::text
+                      || CASE WHEN l.on_sheet THEN '' ELSE '(found)' END, ', ' ORDER BY l.line_no)
+      INTO got
+      FROM stock_count_line l LEFT JOIN storage_bin sb ON sb.id = l.storage_bin_id
+     WHERE l.document_id = d;
+    IF got = 'unbinned=10.000@1000.0000, _VERIFY-CBIN=5.000@1000.0000' THEN
+        RAISE NOTICE 'ok   59e  a full count''s sheet lists every place holding stock, with the ledger''s book and cost';
+    ELSE
+        RAISE WARNING 'FAIL 59e  the sheet reads %', got;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('59f', 'a second count of a location already being counted was accepted',
+  $q$SELECT pg_temp.make_cnt('_VERIFY-K-TWICE', '_VERIFY-CNT', 'PARTIAL')$q$,
+  '23Z02', '%already counting it%');
+SELECT pg_temp.refuses('59g', 'a count''s location was changed',
+  $q$UPDATE stock_count SET location_id = (SELECT id FROM location WHERE code = '_VERIFY-CNT2')
+      WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL')$q$,
+  '23Z02', '%fixed when it is opened%');
+DO $$
+DECLARE b NUMERIC;
+BEGIN
+    INSERT INTO stock_count_line (document_id, line_no, item_id, book_qty, book_value, unit_cost, booked_at)
+    SELECT pg_temp.fx_id('_VERIFY-K-FULL'), 3, id, 999, 999, 1, now() - interval '1 day'
+      FROM item WHERE item_code = '_VERIFY-OTHER';
+    SELECT book_qty INTO b FROM stock_count_line WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 3;
+    IF b = 0 THEN
+        RAISE NOTICE 'ok   59h  a book quantity supplied with a line is replaced by the ledger''s (999 became 0)';
+    ELSE
+        RAISE WARNING 'FAIL 59h  the line kept a supplied book of %', b;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('59i', 'a line''s book was changed',
+  $q$UPDATE stock_count_line SET book_qty = 7 WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 1$q$,
+  '23Z02', '%fixed when it is added%');
+SELECT pg_temp.refuses('59j', 'a line whose place holds stock was removed',
+  $q$DELETE FROM stock_count_line WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 1$q$,
+  '23Z02', '%cannot be removed%');
+SELECT pg_temp.accepts('59k', 'a found line at a place holding nothing can be removed while counting',
+  $q$DELETE FROM stock_count_line WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 3$q$);
+SELECT pg_temp.refuses('59l', 'a line named a bin of another location',
+  $q$INSERT INTO stock_count_line (document_id, line_no, item_id, storage_bin_id)
+     SELECT pg_temp.fx_id('_VERIFY-K-FULL'), 4, i.id, sb.id FROM item i, storage_bin sb
+      WHERE i.item_code = '_VERIFY-GLASS' AND sb.bin_code = '_VERIFY-BIN'$q$,
+  '23514', '%is not in the location%');
+SELECT pg_temp.refuses('59m', 'a line started out verified',
+  $q$INSERT INTO stock_count_line (document_id, line_no, item_id, verified_qty, verified_by)
+     SELECT pg_temp.fx_id('_VERIFY-K-FULL'), 5, i.id, 1, pg_temp.holder('INTERNAL_CTRL')
+       FROM item i WHERE i.item_code = '_VERIFY-OTHER'$q$,
+  '23Z02', '%starts with no verification%');
+DO $$
+DECLARE
+    d UUID := pg_temp.fx_id('_VERIFY-K-FULL');
+    n INT;
+BEGIN
+    n := count_add_places(d, (SELECT id FROM item WHERE item_code = '_VERIFY-OTHER'), FALSE);
+    IF n = 0 AND NOT EXISTS (SELECT 1 FROM stock_count_line l JOIN item i ON i.id = l.item_id
+                              WHERE l.document_id = d AND i.item_code = '_VERIFY-OTHER') THEN
+        RAISE NOTICE 'ok   59n  an item a counter found brings onto the sheet only the places the book holds it at';
+    ELSE
+        RAISE WARNING 'FAIL 59n  % line(s) written for an item the location does not hold', n;
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 60. The freeze: nothing counted moves until the verification is signed
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('60a', 'stock was received into a location under a full count',
+  $q$SELECT pg_temp.stock_into('_VERIFY-C-FRZ1', '_VERIFY-CNT', 1)$q$,
+  '23Z02', '%is being counted%');
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-PART', '_VERIFY-CNT2', 'PARTIAL');
+BEGIN
+    PERFORM count_add_places(d, (SELECT id FROM item WHERE item_code = '_VERIFY-GLASS'));
+END $$;
+SELECT pg_temp.refuses('60b', 'an item on a cycle count''s sheet was received into its location',
+  $q$SELECT pg_temp.stock_into('_VERIFY-C-FRZ2', '_VERIFY-CNT2', 1)$q$,
+  '23Z02', '%is being counted%');
+SELECT pg_temp.accepts('60c', 'an item not on a cycle count''s sheet still moves at that location',
+  $q$SELECT pg_temp.stock_into('_VERIFY-C-FRZ3', '_VERIFY-CNT2', 2, NULL, '_VERIFY-OTHER')$q$);
+DO $$
+BEGIN
+    PERFORM pg_temp.count_all(pg_temp.fx_id('_VERIFY-K-FULL'), -2, 1);
+    PERFORM pg_temp.cnt_at(pg_temp.fx_id('_VERIFY-K-FULL'), 'PENDING');
+END $$;
+SELECT pg_temp.refuses('60d', 'stock was received into a counted location after submission, before the verification',
+  $q$SELECT pg_temp.stock_into('_VERIFY-C-FRZ4', '_VERIFY-CNT', 1)$q$,
+  '23Z02', '%is being counted%');
+SELECT pg_temp.accepts('60e', 'cancelling a cycle count lifts its freeze',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-K-PART')$q$);
+SELECT pg_temp.accepts('60f', 'the item moves again once the count is cancelled',
+  $q$SELECT pg_temp.stock_into('_VERIFY-C-FRZ5', '_VERIFY-CNT2', 1)$q$);
+
+-- ---------------------------------------------------------------------
+-- 61. The first count closes at submission; the verification count is
+--     independent, blind, and covers every variance
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-UNC', '_VERIFY-CNT3');
+BEGIN
+    NULL;
+END $$;
+SELECT pg_temp.refuses('61a', 'a count with an uncounted line was submitted',
+  $q$UPDATE document SET status = 'PENDING' WHERE id = pg_temp.fx_id('_VERIFY-K-UNC')$q$,
+  '23Z02', '%has not been counted%');
+SELECT pg_temp.refuses('61b', 'a verification count was entered while still counting',
+  $q$UPDATE stock_count_line SET verified_qty = 3, verified_by = pg_temp.holder('INTERNAL_CTRL')
+      WHERE document_id = pg_temp.fx_id('_VERIFY-K-UNC')$q$,
+  '23Z02', '%is DRAFT: the verification count%');
+SELECT pg_temp.accepts('61c', 'the cancelled count''s location can be counted afresh',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-K-UNC')$q$);
+
+DO $$
+DECLARE
+    d    UUID := pg_temp.fx_id('_VERIFY-K-FULL');
+    req  TEXT;
+BEGIN
+    SELECT string_agg(line_no::text || ':' || verify_required::text, ',' ORDER BY line_no) INTO req
+      FROM stock_count_line WHERE document_id = d;
+    -- line 1 differs (8 counted, 10 on the book), line 2 agrees and is the
+    -- one agreeing line, so the sample takes it.
+    IF req = '1:true,2:true' THEN
+        RAISE NOTICE 'ok   61d  submission chose every line that differs from the book, and sampled one that agrees';
+    ELSE
+        RAISE WARNING 'FAIL 61d  lines chosen for verification: %', req;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('61e', 'a first count was changed after submission',
+  $q$UPDATE stock_count_line SET counted_qty = 10 WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 1$q$,
+  '23Z02', '%PENDING, so its first count cannot change%');
+SELECT pg_temp.refuses('61f', 'someone not holding the verification step''s role took the verification count',
+  $q$UPDATE stock_count_line SET verified_qty = 8, verified_by = pg_temp.holder('FINANCE')
+      WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 1$q$,
+  '23Z02', '%does not hold%');
+SELECT pg_temp.refuses('61g', 'the verification step was signed with a chosen line not recounted',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('_VERIFY-K-FULL'), 2, pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('_VERIFY-K-FULL'), 2)))$q$,
+  '23Z02', '%not been recounted%');
+
+-- Whoever took part in the first count takes no verification count, of
+-- any line. Line 1's counter here is given as the verification step's role
+-- holder, which the application never does; line 2 is counted by someone
+-- else, and that counter still may not recount it.
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-SELF', '_VERIFY-CNT3');
+BEGIN
+    UPDATE stock_count_line SET counted_qty = 3, counted_by = pg_temp.holder(pg_temp.verify_role(d))
+     WHERE document_id = d;
+    INSERT INTO stock_count_line (document_id, line_no, item_id, counted_qty, counted_by)
+    SELECT d, 2, id, 1, pg_temp.verify_user() FROM item WHERE item_code = '_VERIFY-OTHER';
+    PERFORM pg_temp.cnt_at(d, 'PENDING');
+END $$;
+SELECT pg_temp.refuses('61h', 'someone who counted one line of a count recounted another',
+  $q$UPDATE stock_count_line SET verified_qty = 1, verified_by = pg_temp.holder(pg_temp.verify_role(document_id))
+      WHERE document_id = pg_temp.fx_id('_VERIFY-K-SELF') AND line_no = 2$q$,
+  '23Z02', '%took part in the first count%');
+SELECT pg_temp.accepts('61i', 'a count awaiting its verification can still be cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-K-SELF')$q$);
+
+-- The verification count prevails: line 1 was first counted 8, the
+-- Internal Controller finds 7, so 7 is what the count says and the
+-- variance is 7 - 10 = -3.
+DO $$
+DECLARE
+    d  UUID := pg_temp.fx_id('_VERIFY-K-FULL');
+    r  RECORD;
+BEGIN
+    UPDATE stock_count_line SET verified_qty = CASE line_no WHEN 1 THEN 7 ELSE counted_qty END,
+           verified_by = pg_temp.holder(pg_temp.verify_role(d))
+     WHERE document_id = d AND verify_required;
+    SELECT final_qty, variance_qty, verified_at IS NOT NULL AS stamped INTO r
+      FROM stock_count_line WHERE document_id = d AND line_no = 1;
+    IF r.final_qty = 7 AND r.variance_qty = -3 AND r.stamped THEN
+        RAISE NOTICE 'ok   61j  the verification count prevails over the first count, stamped by the database';
+    ELSE
+        RAISE WARNING 'FAIL 61j  final %, variance %, stamped %', r.final_qty, r.variance_qty, r.stamped;
+    END IF;
+    IF NOT count_book_visible(d) THEN
+        RAISE NOTICE 'ok   61k  the book stays unread while the verification count is open';
+    ELSE
+        RAISE WARNING 'FAIL 61k  the book is readable before the verification is signed';
+    END IF;
+    PERFORM pg_temp.sign(d, 2, pg_temp.holder(pg_temp.step_role(d, 2)));
+    IF count_book_visible(d) THEN
+        RAISE NOTICE 'ok   61l  the book is read once the verification is signed';
+    ELSE
+        RAISE WARNING 'FAIL 61l  the book is still hidden after the verification';
+    END IF;
+END $$;
+SELECT pg_temp.refuses('61m', 'a verification count was changed after the verification was signed',
+  $q$UPDATE stock_count_line SET verified_qty = 10 WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 1$q$,
+  '23Z02', '%fixed once the verification is signed%');
+SELECT pg_temp.accepts('61n', 'the freeze lifts once the verification is signed',
+  $q$SELECT pg_temp.stock_into('_VERIFY-C-FRZ6', '_VERIFY-CNT', 1)$q$);
+
+-- Approval refuses an unverified variance whatever the chain: the signature
+-- guard is switched off for this test so the approval guard is reached.
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-NOVER', '_VERIFY-CNT5');
+BEGIN
+    PERFORM pg_temp.count_all(d, 1, 1);
+    PERFORM pg_temp.cnt_at(d, 'PENDING');
+END $$;
+ALTER TABLE document_approval DISABLE TRIGGER document_approval_verification_counted;
+DO $$
+DECLARE d UUID := pg_temp.fx_id('_VERIFY-K-NOVER');
+BEGIN
+    PERFORM pg_temp.sign(d, 2, pg_temp.holder(pg_temp.step_role(d, 2)));
+    PERFORM pg_temp.sign(d, 3, pg_temp.holder(pg_temp.step_role(d, 3)));
+END $$;
+ALTER TABLE document_approval ENABLE TRIGGER document_approval_verification_counted;
+SELECT pg_temp.refuses('61o', 'a count was approved with a variance nobody recounted',
+  $q$UPDATE document SET status = 'APPROVED' WHERE id = pg_temp.fx_id('_VERIFY-K-NOVER')$q$,
+  '23Z02', '%never approved on one person''s count%');
+SELECT pg_temp.refuses('61p', 'a count whose verification is signed was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-K-NOVER')$q$,
+  '23Z02', '%verification count is signed%');
+DO $$
+BEGIN
+    IF NOT count_book_visible(pg_temp.fx_id('_VERIFY-K-UNC')) THEN
+        RAISE NOTICE 'ok   61q  a count cancelled while counting never shows its book';
+    ELSE
+        RAISE WARNING 'FAIL 61q  a count cancelled while counting shows its book';
+    END IF;
+END $$;
+
+-- Whoever took part in the first count signs no step after the first,
+-- approving or rejecting: no segregation rule pairs the Warehouse Manager
+-- with Finance, so the second Finance officer counts line 1 here as a
+-- holder of both would.
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-JUDGE', '_VERIFY-CNT2');
+BEGIN
+    PERFORM pg_temp.count_all(d, -1, 1);
+    UPDATE stock_count_line SET counted_by = pg_temp.fin2() WHERE document_id = d AND line_no = 1;
+    PERFORM pg_temp.cnt_at(d, 'VERIFIED');
+END $$;
+SELECT pg_temp.refuses('61r', 'a Finance officer who counted a line approved the count',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('_VERIFY-K-JUDGE'), 3, pg_temp.fin2())$q$,
+  '23Z02', '%took part in the first count%');
+SELECT pg_temp.refuses('61s', 'a Finance officer who counted a line rejected the count',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('_VERIFY-K-JUDGE'), 3, pg_temp.fin2(), 'REJECTED')$q$,
+  '23Z02', '%took part in the first count%');
+SELECT pg_temp.accepts('61t', 'a Finance officer who took no part in the count rejects it',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('_VERIFY-K-JUDGE'), 3, pg_temp.holder('FINANCE'), 'REJECTED')$q$);
+UPDATE document SET status = 'REJECTED' WHERE id = pg_temp.fx_id('_VERIFY-K-JUDGE');
+
+-- ---------------------------------------------------------------------
+-- 62. Posting: by a second Finance officer independent of everything on
+--     the count; exactly the variance, each way at its own value
+-- ---------------------------------------------------------------------
+
+-- A hand-made adjustment ticket of a count: one direction, at a location,
+-- with one line naming a count line and a quantity (none when p_qty is NULL).
+CREATE FUNCTION pg_temp.cnt_ticket(p_cnt UUID, p_serial TEXT, p_dir TEXT, p_loc TEXT,
+                                   p_line INT DEFAULT NULL, p_qty NUMERIC DEFAULT NULL) RETURNS UUID AS $$
+DECLARE
+    t   UUID;
+    loc UUID := (SELECT id FROM location WHERE code = p_loc);
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, d.branch_id, p_serial, pg_temp.fin2()
+      FROM document_type dt, document d WHERE dt.code = 'TT' AND d.id = p_cnt
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, to_location_id,
+                                    source_document_id, customs_reference)
+    SELECT t, 'ADJUSTMENT', p_dir, CASE WHEN p_dir = 'OUT' THEN loc END, CASE WHEN p_dir = 'IN' THEN loc END,
+           p_cnt, c.customs_reference
+      FROM stock_count c WHERE c.document_id = p_cnt;
+    IF p_qty IS NOT NULL THEN
+        INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+        SELECT t, l.line_no, l.item_id, p_qty, i.base_uom_id, p_qty, l.storage_bin_id
+          FROM stock_count_line l JOIN item i ON i.id = l.item_id
+         WHERE l.document_id = p_cnt AND l.line_no = p_line;
+    END IF;
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+DO $$
+DECLARE d UUID := pg_temp.fx_id('_VERIFY-K-FULL');
+BEGIN
+    PERFORM pg_temp.sign(d, 3, pg_temp.holder(pg_temp.step_role(d, 3)));
+    UPDATE document SET status = 'APPROVED' WHERE id = d;
+END $$;
+SELECT pg_temp.refuses('62a', 'the Finance officer who approved the count posted it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = pg_temp.fx_id('_VERIFY-K-FULL')$q$,
+  '23Z02', '%signed%cannot also post%');
+SELECT pg_temp.refuses('62b', 'the person who raised (and counted) the count posted it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = created_by WHERE id = pg_temp.fx_id('_VERIFY-K-FULL')$q$,
+  '23Z02', '%cannot be posted by the person who%');
+SELECT pg_temp.refuses('62c', 'an adjustment ticket brought a shortage in instead of taking it out',
+  $q$SELECT pg_temp.cnt_ticket(pg_temp.fx_id('_VERIFY-K-FULL'), '_VERIFY-K-WRONG-TT', 'IN', '_VERIFY-CNT', 1, 3)$q$,
+  '23Z02', '%the wrong way%');
+SELECT pg_temp.refuses('62d', 'an adjustment ticket named another location',
+  $q$SELECT pg_temp.cnt_ticket(pg_temp.fx_id('_VERIFY-K-FULL'), '_VERIFY-K-LOC-TT', 'OUT', 'KGL-MAIN')$q$,
+  '23Z02', '%must be an ADJUSTMENT of count%');
+SELECT pg_temp.refuses('62e', 'an adjustment moved more than the variance',
+  $q$SELECT pg_temp.cnt_ticket(pg_temp.fx_id('_VERIFY-K-FULL'), '_VERIFY-K-QTY-TT', 'OUT', '_VERIFY-CNT', 1, 4)$q$,
+  '23Z02', '%differs from line 1 of count%');
+SELECT pg_temp.refuses('62f', 'an agreeing line was adjusted',
+  $q$SELECT pg_temp.cnt_ticket(pg_temp.fx_id('_VERIFY-K-FULL'), '_VERIFY-K-ZERO-TT', 'OUT', '_VERIFY-CNT', 2, 1)$q$,
+  '23Z02', '%not adjusted at all%');
+SELECT pg_temp.accepts_at_commit('62g', 'the approved count, posted by a second Finance officer, adjusts the ledger',
+  $q$SELECT pg_temp.post_cnt(pg_temp.fx_id('_VERIFY-K-FULL'), '_VERIFY-K-FULL-P')$q$,
+  'document_cnt_posted_moved_stock, document_cnt_value_rule');
+SET CONSTRAINTS document_cnt_posted_moved_stock, document_cnt_value_rule DEFERRED;
+DO $$
+BEGIN
+    -- 10 unbinned were on the book when counted; 7 were found; 1 more
+    -- arrived after the verification (61n). The -3 applies to the counted
+    -- book, so 8 remain. The bin agreed and is untouched.
+    IF pg_temp.held('_VERIFY-CNT') = 8 AND pg_temp.held('_VERIFY-CNT', '_VERIFY-CBIN') = 5 THEN
+        RAISE NOTICE 'ok   62h  the posting took 3 sheets out of the short place and left the agreeing bin alone';
+    ELSE
+        RAISE WARNING 'FAIL 62h  unbinned %, bin %', pg_temp.held('_VERIFY-CNT'), pg_temp.held('_VERIFY-CNT', '_VERIFY-CBIN');
+    END IF;
+END $$;
+SELECT pg_temp.refuses('62i', 'a posted count was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-K-FULL')$q$,
+  '23Z02', '%reversing document%');
+SELECT pg_temp.refuses('62j', 'a posted count''s line was changed',
+  $q$UPDATE stock_count_line SET note = 'changed' WHERE document_id = pg_temp.fx_id('_VERIFY-K-FULL') AND line_no = 1$q$,
+  '23Z02', '%POSTED, so its first count cannot change%');
+
+-- Whoever counted or verified a line does not post the count.
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-CTR', '_VERIFY-CNT3');
+BEGIN
+    UPDATE stock_count_line SET counted_qty = book_qty, counted_by = pg_temp.fin2() WHERE document_id = d;
+    PERFORM pg_temp.cnt_at(d, 'APPROVED');
+END $$;
+SELECT pg_temp.refuses('62k', 'the person who counted a line posted the count',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.fin2() WHERE id = pg_temp.fx_id('_VERIFY-K-CTR')$q$,
+  '23Z02', '%who counted line 1%');
+SELECT pg_temp.refuses('62l', 'the person who verified a line posted the count',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder(pg_temp.verify_role(id)) WHERE id = pg_temp.fx_id('_VERIFY-K-CTR')$q$,
+  '23Z02', '%who verified line 1%');
+SELECT pg_temp.refuses('62m', 'an approved count was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('_VERIFY-K-CTR')$q$,
+  '23Z02', '%verification count is signed%');
+
+-- A count that agrees with the book everywhere posts with no ticket and
+-- moves nothing.
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-EXACT', '_VERIFY-CNT2');
+BEGIN
+    PERFORM pg_temp.count_all(d);
+    PERFORM pg_temp.cnt_at(d, 'APPROVED');
+END $$;
+SELECT pg_temp.accepts_at_commit('62n', 'a count with no variance posts with no adjustment',
+  $q$SELECT pg_temp.post_cnt(pg_temp.fx_id('_VERIFY-K-EXACT'), '_VERIFY-K-EXACT-P')$q$,
+  'document_cnt_posted_moved_stock');
+SET CONSTRAINTS document_cnt_posted_moved_stock DEFERRED;
+
+-- _VERIFY-CNT4 holds 6 at 1000: a count finding 8 brings 2 in at 2000.00,
+-- and at no other value.
+DO $$
+DECLARE d UUID := pg_temp.make_cnt('_VERIFY-K-SURP', '_VERIFY-CNT4');
+BEGIN
+    PERFORM pg_temp.count_all(d, 2, 1);
+    PERFORM pg_temp.cnt_at(d, 'APPROVED');
+END $$;
+SELECT pg_temp.refuses('62o', 'stock moved against a count approved but not posted',
+  $q$SELECT pg_temp.move_leg(pg_temp.cnt_ticket(pg_temp.fx_id('_VERIFY-K-SURP'), '_VERIFY-K-EARLY-TT', 'IN', '_VERIFY-CNT4', 1, 2),
+                             pg_temp.fin2(), kigali_today(), 2000)$q$,
+  '23Z02', '%must be posted before its stock moves%');
+SELECT pg_temp.refuses_at_commit('62p', 'a surplus was brought in at a value chosen when posting (2500.00 instead of 2000.00)',
+  $q$SELECT pg_temp.post_cnt(pg_temp.fx_id('_VERIFY-K-SURP'), '_VERIFY-K-SURP-BAD', 2500.00)$q$,
+  'document_cnt_value_rule', '%worth 2000.00%');
+SET CONSTRAINTS document_cnt_value_rule DEFERRED;
+SELECT pg_temp.refuses_at_commit('62q', 'a count was posted without adjusting the ledger',
+  $q$SELECT pg_temp.post_cnt(pg_temp.fx_id('_VERIFY-K-SURP'), '_VERIFY-K-SURP-NOMOVE', NULL, TRUE)$q$,
+  'document_cnt_posted_moved_stock', '%never adjusted the ledger%');
+SET CONSTRAINTS document_cnt_posted_moved_stock DEFERRED;
+SELECT pg_temp.accepts_at_commit('62r', 'the surplus enters at its line''s unit cost, 2 x 1000.00',
+  $q$SELECT pg_temp.post_cnt(pg_temp.fx_id('_VERIFY-K-SURP'), '_VERIFY-K-SURP-P')$q$,
+  'document_cnt_value_rule');
+SET CONSTRAINTS document_cnt_value_rule DEFERRED;
+DO $$
+BEGIN
+    IF pg_temp.held('_VERIFY-CNT4') = 8 THEN
+        RAISE NOTICE 'ok   62s  after the count the place holds what was found: 8';
+    ELSE
+        RAISE WARNING 'FAIL 62s  the place holds %', pg_temp.held('_VERIFY-CNT4');
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------
 -- 46. The chain switch for transfers is a row, and a document finishes

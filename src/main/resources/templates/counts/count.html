@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="'Count ' + ${cnt.serialNo}">Counting sheet</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${cnt})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">STOCK COUNTS · COUNTING SHEET · CSH-012</p>
+      <h1 class="page-title">Count <span class="mono" th:text="${cnt.locationCode}">KGL-MAIN</span></h1>
+      <p class="page-sub">The book is not on this page: count what is there, in each item's base unit, and enter 0
+        where you find nothing. Save as often as you like; only the lines you change are saved, so several people can
+        count one sheet. <span th:text="${progress.counted()} + ' of ' + ${progress.lines()} + ' lines counted so far.'">3 of 12 lines counted so far.</span></p>
+    </div>
+    <a th:href="@{'/counts/' + ${cnt.id}}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Back to the count</a>
+  </div>
+
+  <form id="count-form" th:action="@{'/counts/' + ${cnt.id} + '/count'}" th:object="${form}" method="post">
+    <section class="hb-card hb-card-body mb-3">
+      <div class="table-responsive">
+        <table class="table hb-table compact align-middle mb-2">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col" style="min-width: 14rem">Item</th>
+              <th scope="col">Bin</th>
+              <th scope="col">Unit</th>
+              <th scope="col">Counted</th>
+              <th scope="col" style="min-width: 12rem">Note</th>
+              <th scope="col"><span class="visually-hidden">Remove</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="l, st : ${lines}">
+              <td class="mono" th:text="${l.lineNo()}">1</td>
+              <td>
+                <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                <span class="d-block small text-body-secondary" th:unless="${l.onSheet()}">added as found</span>
+                <span class="d-block small text-body-secondary" th:if="${l.countedByName()}"
+                      th:text="'by ' + ${l.countedByName()}">by Name</span>
+              </td>
+              <td class="mono" th:text="${l.place()}">A1</td>
+              <td class="mono" th:text="${l.baseUomCode()}">SHEET</td>
+              <td>
+                <input type="hidden" th:field="*{lines[__${st.index}__].lineId}">
+                <input type="hidden" th:field="*{lines[__${st.index}__].was}">
+                <input type="hidden" th:field="*{lines[__${st.index}__].noteWas}">
+                <input th:field="*{lines[__${st.index}__].quantity}" type="number" min="0"
+                       th:attr="step=${l.uomDecimals() == 0} ? '1' : '0.001', aria-label='Counted, line ' + ${l.lineNo()}"
+                       class="form-control form-control-sm mono" style="max-width: 8rem" inputmode="decimal">
+              </td>
+              <td>
+                <input th:field="*{lines[__${st.index}__].note}" maxlength="240" class="form-control form-control-sm"
+                       th:attr="aria-label='Note, line ' + ${l.lineNo()}" autocomplete="off">
+              </td>
+              <td class="text-end">
+                <button type="submit" class="btn btn-sm btn-outline-danger" th:unless="${l.onSheet()}"
+                        th:attr="formaction=@{'/counts/' + ${cnt.id} + '/lines/' + ${l.id()} + '/remove'},aria-label='Remove line ' + ${l.lineNo()}">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(lines)}">
+              <td colspan="7" class="small text-body-secondary">The location holds nothing on the book. Add below whatever you find.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <button type="submit" class="btn btn-primary-action"><i class="bi bi-save"></i> Save counts</button>
+    </section>
+  </form>
+
+  <section class="hb-card hb-card-body">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-plus-square" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Stock found where the sheet lists nothing</h2>
+          <p class="card-sub">An item, or a bin, the sheet does not show. It is weighed against its own book, so stock in the wrong bin shows as a surplus here and a shortage where the book has it. An item the sheet does not cover brings every place the book holds it at here onto the sheet, to be counted too</p>
+        </div>
+      </div>
+    </div>
+    <form th:action="@{'/counts/' + ${cnt.id} + '/lines'}" th:object="${found}" method="post">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-4">
+          <label for="foundItem" class="form-label small fw-semibold" style="color: var(--color-heading)">Item</label>
+          <select id="foundItem" th:field="*{itemId}" class="form-select form-select-sm" required>
+            <option value="">— item —</option>
+            <option th:each="i : ${items}" th:value="${i.id()}" th:text="${i.label()} + ' (' + ${i.baseUomCode()} + ')'">GL-CF-6</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-2">
+          <label for="foundBin" class="form-label small fw-semibold" style="color: var(--color-heading)">Bin</label>
+          <select id="foundBin" th:field="*{binId}" class="form-select form-select-sm">
+            <option value="">no bin</option>
+            <option th:each="b : ${bins}" th:value="${b.id()}" th:text="${b.label()}">A1</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-2">
+          <label for="foundQty" class="form-label small fw-semibold" style="color: var(--color-heading)">Counted</label>
+          <input id="foundQty" th:field="*{quantity}" type="number" min="0" step="0.001" class="form-control form-control-sm mono" required>
+        </div>
+        <div class="col-12 col-md-3">
+          <label for="foundNote" class="form-label small fw-semibold" style="color: var(--color-heading)">Note</label>
+          <input id="foundNote" th:field="*{note}" maxlength="240" class="form-control form-control-sm" autocomplete="off">
+        </div>
+        <div class="col-12 col-md-1">
+          <button type="submit" class="btn btn-sm btn-primary w-100">Add</button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+</div>
+</body>
+</html>

@@ -100,8 +100,9 @@
      th:classappend="${gate.state == 'RELEASED'} ? 'bi-unlock-fill' : (${gate.state == 'DELIVERED' or gate.state == 'DISPATCHED'} ? 'bi-truck' : (${gate.state == 'IN_TRANSIT'} ? 'bi-exclamation-triangle-fill' : (${gate.state == 'RECEIVED' or gate.state == 'POSTED'} ? 'bi-check-circle-fill' : (${gate.state == 'WRITTEN_OFF'} ? 'bi-exclamation-triangle-fill' : 'bi-shield-exclamation'))))"></i>
   <div>
     <th:block th:if="${gate.state == 'BLOCKED'}">
-      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Do not dispatch' : (${gate.kind == 'DMG'} ? 'Do not post' : 'Do not load')">Do not load</strong>
+      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Do not dispatch' : (${gate.kind == 'DMG' or gate.kind == 'CNT'} ? 'Do not post' : 'Do not load')">Do not load</strong>
       <span><span class="serial" th:text="${gate.daoSerial}">DAO-KGL-2026-0001</span>
+            <span th:if="${gate.kind == 'CNT'}">is not fully approved. No stock is adjusted until every signature is present: the Internal Controller's verification, then Finance's approval.</span>
             <span th:if="${gate.kind == 'DMG'}">is not fully approved. No stock is written off, brought back or released until every signature is present, the Managing Director's last.</span>
             <span th:if="${gate.kind == 'DAO'}">is not fully signed. No stock leaves the premises until every signature is present, the Internal Controller's release last.</span>
             <span th:if="${gate.kind == 'TRF'}">is not fully approved. No stock leaves the source branch until every signature is present, the Internal Controller's verification last.</span></span>
@@ -120,7 +121,7 @@
       </ul>
     </th:block>
     <th:block th:if="${gate.state == 'RELEASED'}">
-      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Approved: ready to dispatch' : (${gate.kind == 'DMG'} ? 'Approved: ready for Finance to post' : 'Released: ready to load')">Released: ready to load</strong>
+      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Approved: ready to dispatch' : (${gate.kind == 'DMG'} ? 'Approved: ready for Finance to post' : (${gate.kind == 'CNT'} ? 'Approved: ready for a second Finance officer to post' : 'Released: ready to load'))">Released: ready to load</strong>
       <span><span th:text="${gate.kind == 'DAO'} ? 'Released by' : 'Approved by'">Released by</span> <strong th:text="${gate.releasedBy}">Name</strong>
             <span th:text="'at ' + ${#temporals.format(gate.releasedAt, 'dd MMM yyyy HH:mm')}">at 30 Sep 10:00</span>.
             <th:block th:if="${gate.dnSerial != null}">Load recorded on <span class="serial" th:text="${gate.dnSerial}">DN-KGL-2026-0001</span>, not yet posted at the gate.</th:block></span>
@@ -148,7 +149,7 @@
       <strong class="gate-title">Received in full</strong>
       <span>Everything dispatched has been received at the destination.</span>
     </th:block>
-    <!-- Return and damage reports only: posted, or written off in full on a transfer. -->
+    <!-- Return and damage reports and stock counts: posted; or, for a transfer, written off in full. -->
     <th:block th:if="${gate.state == 'POSTED'}">
       <strong class="gate-title">Posted to the ledger</strong>
       <span><span class="serial" th:text="${gate.daoSerial}">DMG-KGL-2026-0001</span> moved its stock at
@@ -160,9 +161,9 @@
       <span>Nothing of this consignment arrived: all of it was written off as lost in transit.</span>
     </th:block>
     <th:block th:if="${gate.state == 'VOID'}">
-      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Do not dispatch' : (${gate.kind == 'DMG'} ? 'Do not post' : 'Do not load')">Do not load</strong>
+      <strong class="gate-title" th:text="${gate.kind == 'TRF'} ? 'Do not dispatch' : (${gate.kind == 'DMG' or gate.kind == 'CNT'} ? 'Do not post' : 'Do not load')">Do not load</strong>
       <span><span class="serial" th:text="${gate.daoSerial}">DAO</span> is <span th:text="${gate.note}">cancelled</span>.
-            Nothing may <span th:text="${gate.kind == 'TRF'} ? 'leave' : (${gate.kind == 'DMG'} ? 'move' : 'load')">load</span> against it.</span>
+            Nothing may <span th:text="${gate.kind == 'TRF'} ? 'leave' : (${gate.kind == 'DMG' or gate.kind == 'CNT'} ? 'move' : 'load')">load</span> against it.</span>
     </th:block>
   </div>
 </div>

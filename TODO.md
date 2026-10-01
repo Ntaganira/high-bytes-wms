@@ -105,8 +105,30 @@ shape, so it is worth building carefully.
 - [ ] A report's own signers are not judged against what it is about: the Internal Controller who released a
       transfer or an authorization may verify its loss or return. Kept as is for the assurance role; a
       conscious choice, not an oversight
-- [ ] Counts + Variances — blind entry (book quantity absent from the page,
-      not hidden), adjustment tickets
+- [x] Counts + Variances — one CNT per location, full or cycle (V15, `inventory/count/`). The database writes the
+      sheet and each line's book from the ledger; the book is on no page, list, badge or audit entry until the
+      verification is signed. Submission closes the first count and the database chooses the recount: every line
+      that differs from the book and a random one in ten of the rest. The Internal Controller recounts blind to
+      the book and the first count, and the recount prevails. Nothing counted moves from opening until the
+      verification is signed. Finance approves; a second Finance officer posts ADJUSTMENT tickets (shortages at
+      average cost, surpluses at the line's stored cost, checked at commit). `/variances` is the VR-010 report.
+      Dashboard inventory accuracy now reads posted counts (90 days)
+- [x] Counts, from the control review: which lines were chosen for the recount (and how many) reach nobody but
+      the verifier until it is signed, and no refusal on the count's trail names one; a count whose verification
+      is signed is never cancelled; whoever counted signs no step but the first, approving or rejecting, and
+      takes no verification count; whoever verified signs only the verification; a found item brings its places
+      on the book onto the sheet, so a found line's book is nothing and removing it says nothing about the book
+- [ ] Counts, left for later: no reversal of a posted count; quantities in the base unit only; a cycle count
+      blocks any other count at its location, even of other items; `stock_balance.last_counted_at` is not set
+      (only `LedgerService` writes `stock_balance`); the VR document type is unused (the count carries its own
+      variance); the cut-off list (documents not yet posted at the location) advises, it does not refuse
+- [ ] Counts: a full count freezes its location until the verification is signed, so a slow verification
+      holds up the warehouse there. No escalation beyond the chain's `escalate_after_hours` (none is set for CNT)
+- [ ] Counts: once a verified count is rejected its book stays readable, so the next count of that location is
+      not blind to the old book. Rejection is an independent signer's decision, and the random sample is what
+      catches a counter who copies the book; the client may want the next count opened by someone else
+- [ ] Counts: the trail and the count's view show that a line was added as found, which tells the verifier the
+      book held nothing at that place. Kept: knowing a surplus place's book was nothing anchors no recount
 - [ ] Daily Close — reconcile and lock, with the Quartz job
 - [ ] Admin screens — workflow editor, branches, audit log viewer
 - [ ] Access review for the Internal Controller: who holds what, read-only,
@@ -147,8 +169,8 @@ shape, so it is worth building carefully.
       Assistant WH Manager, the Head of Inventory and the three 2027 roles). They are policy roles, so they
       get the view and action permissions of the documents they sign in the
       migration that builds each document
-- [ ] `DashboardService.kpis()` returns a placeholder for inventory accuracy
-      until count lines exist
+- [x] `DashboardService.kpis()` reads inventory accuracy from posted counts
+      (V15); it shows "—" until a count is posted at the branch
 - [ ] `spring.jpa.hibernate.ddl-auto: validate` with zero `@Entity` classes —
       harmless today, but the first entity must match the schema exactly
 
@@ -179,6 +201,16 @@ shape, so it is worth building carefully.
 - [ ] **Off-cut identity** — item code per remnant, or remnant pool per
       parent? Blocks cutting.
 - [ ] Tolerance thresholds: count variance, damage, write-off approval
+- [ ] **Who posts a count's adjustment.** Finance approves the count, so a second Finance officer posts it
+      (V15, `count.post`). A branch with one Finance officer needs cover from another branch. Confirm
+- [ ] The verification sample: every differing line plus one in ten of the rest (V15, `count_sample_share`)
+- [ ] Whether counters lose `stock.view` while a count is open: the book is absent from the count pages, but
+      stock figures elsewhere (the dashboard, the stock screens once built) stay readable
+- [ ] **A count is never cancelled once its verification is signed** (V15): it is posted, or rejected by a
+      signer who took no part in it. Stricter than the other documents, which their creator may cancel until
+      posted. Confirm
+- [ ] No segregation rule pairs the Warehouse Manager with Finance, so one person may hold both. V15 keeps
+      such a person from approving or rejecting a count they counted; should the pair be blocked outright?
 - [ ] **Returns against 2026 authorizations need a second Warehouse Manager.** The 2026 chain has a
       Warehouse Manager verify every authorization, and nobody who signed one takes back what it let out,
       so the return is raised by another Warehouse Manager or one covering from another branch. The 2027

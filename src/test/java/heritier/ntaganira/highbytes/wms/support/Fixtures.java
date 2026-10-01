@@ -153,6 +153,23 @@ public class Fixtures {
         return id;
     }
 
+    /**
+     * A warehouse location of the test's own at a branch, returning its code. A count freezes what it counts at
+     * its location, so a count test counts a location no other test moves stock through.
+     */
+    public String newLocation(String branchCode) {
+        String code = ("T-" + UUID.randomUUID().toString().substring(0, 8)).toUpperCase();
+        jdbc.sql("""
+                INSERT INTO location (branch_id, code, name, location_type)
+                VALUES (:branch, :code, :name, 'WAREHOUSE')
+                """)
+                .param("branch", branch(branchCode), Types.OTHER)
+                .param("code", code)
+                .param("name", "Test store " + code)
+                .update();
+        return code;
+    }
+
     public UUID bin(String locationCode, String binCode) {
         UUID id = UUID.randomUUID();
         jdbc.sql("INSERT INTO storage_bin (id, location_id, bin_code) VALUES (:id, :location, :code)")
