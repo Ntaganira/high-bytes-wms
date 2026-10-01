@@ -51,7 +51,7 @@ import java.util.UUID;
 public class TransferController {
 
     private static final List<String> STATES =
-            List.of("DRAFT", "PENDING", "APPROVED", "DISPATCHED", "IN_TRANSIT", "RECEIVED", "REJECTED", "CANCELLED");
+            List.of("DRAFT", "PENDING", "APPROVED", "DISPATCHED", "IN_TRANSIT", "RECEIVED", "WRITTEN_OFF", "REJECTED", "CANCELLED");
 
     private final TransferService transfers;
     private final TransferLookupService lookups;
@@ -156,6 +156,7 @@ public class TransferController {
         model.addAttribute("gate", detail.gate());
         model.addAttribute("actions", detail.actions());
         model.addAttribute("receipts", detail.receipts());
+        model.addAttribute("losses", detail.losses());
         model.addAttribute("posting", detail.posting());
         model.addAttribute("history", audit.historyOf("document", id, 40));
         return "transfers/view";

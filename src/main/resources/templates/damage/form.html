@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New ' + ${#strings.toLowerCase(kind.title)} : 'Edit ' + ${dmg.serialNo}">Report</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · RETURNS &amp; DAMAGE · DMG-009</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New ' + ${#strings.toLowerCase(kind.title)} : 'Edit ' + ${dmg.serialNo}">New write-off</h1>
+    <p class="page-sub">
+      <strong th:text="${kind.title}">Write-off</strong>:
+      <span th:text="${kind.summary}">Summary</span>
+      <th:block th:if="${form.new}">
+        Saved as a draft at this branch, dated today (Kigali time) and bound to the approval chain in force today.
+        No stock moves until every signature is in and Finance posts it.
+      </th:block>
+    </p>
+  </div>
+
+  <form id="dmg-form" th:action="${form.new} ? @{/damage} : @{'/damage/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <input type="hidden" th:field="*{version}">
+    <input type="hidden" th:field="*{kind}">
+    <input type="hidden" th:field="*{transferId}">
+    <input type="hidden" th:field="*{deliveryNoteId}">
+
+    <div th:if="${#fields.hasGlobalErrors()}" class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+      <i class="bi bi-exclamation-octagon-fill"></i>
+      <div><p th:each="e : ${#fields.globalErrors()}" th:text="${e}" class="mb-0"></p></div>
+    </div>
+
+    <div class="row g-3">
+
+      <div class="col-12 col-xl-8">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+              <h2 class="card-title">What happened</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+
+            <!-- Where the stock is: a write-off and a release choose it; a loss and a return are fixed by what they are about. -->
+            <div class="col-12 col-md-6" th:if="${kind.name() == 'WRITE_OFF' or kind.name() == 'QUARANTINE_RELEASE'}">
+              <label for="fromLocationId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                <span th:text="${kind.name() == 'WRITE_OFF'} ? 'Written off from' : 'Released from quarantine'">Written off from</span>
+                <span class="text-danger">*</span>
+              </label>
+              <select id="fromLocationId" th:field="*{fromLocationId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('fromLocationId')} ? 'is-invalid'"
+                      th:attr="hx-post=@{/damage/lines/refresh}"
+                      hx-include="#dmg-form" hx-target="#dmg-lines" hx-swap="outerHTML" hx-trigger="change">
+                <option value="">— choose —</option>
+                <option th:each="l : ${sources}" th:value="${l.id()}" th:text="${l.label()}">KGL-MAIN — Gahanga main store</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('fromLocationId')}" th:errors="*{fromLocationId}">error</div>
+            </div>
+
+            <div class="col-12 col-md-6" th:if="${kind.name() == 'QUARANTINE_RELEASE'}">
+              <label for="toLocationId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Released to <span class="text-danger">*</span>
+              </label>
+              <select id="toLocationId" th:field="*{toLocationId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('toLocationId')} ? 'is-invalid'"
+                      th:attr="hx-post=@{/damage/lines/refresh}"
+                      hx-include="#dmg-form" hx-target="#dmg-lines" hx-swap="outerHTML" hx-trigger="change">
+                <option value="">— choose —</option>
+                <option th:each="l : ${destinations}" th:value="${l.id()}" th:text="${l.label()}">KGL-MAIN — Gahanga main store</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('toLocationId')}" th:errors="*{toLocationId}">error</div>
+              <div class="form-text">Only a sellable warehouse or bonded location: releasing into any other would hide stock that cannot be sold.</div>
+            </div>
+
+            <div class="col-12" th:if="${kind.name() == 'TRANSIT_LOSS' and subject != null}">
+              <div class="alert alert-secondary small mb-0" role="note">
+                Written off against transfer
+                <a class="doc-link mono" th:href="@{'/transfers/' + ${subject.id()}}" th:text="${subject.serialNo()}">TRF-KGL-2026-0001</a>
+                to <span th:text="${subject.detail()}">Rubavu · RBV-BOND</span>, out of the transit location it is held in,
+                at the cost this consignment was dispatched at. Received and written off together never exceed what was dispatched.
+              </div>
+            </div>
+
+            <div class="col-12" th:if="${kind.name() == 'CUSTOMER_RETURN' and subject != null}">
+              <div class="alert alert-secondary small mb-0" role="note">
+                Goods returned against delivery note
+                <a class="doc-link mono" th:href="@{'/delivery-notes/' + ${subject.id()}}" th:text="${subject.serialNo()}">DN-KGL-2026-0001</a>
+                for <span th:text="${subject.detail()}">Customer</span>, received into this branch's quarantine location at the
+                cost the goods left with. Never more than was delivered, less what has already come back.
+              </div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="reasonCode" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Reason code <span class="text-danger">*</span>
+              </label>
+              <select id="reasonCode" th:field="*{reasonCode}" class="form-select"
+                      th:classappend="${#fields.hasErrors('reasonCode')} ? 'is-invalid'">
+                <option th:each="c : ${reasonCodes}" th:value="${c.code()}" th:text="${c.label()}">Damaged</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('reasonCode')}" th:errors="*{reasonCode}">error</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="customsReference" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Customs reference <span class="text-danger" th:if="${bondedHere or inheritedCustoms != null}">*</span>
+              </label>
+              <input id="customsReference" th:field="*{customsReference}" class="form-control mono"
+                     th:readonly="${inheritedCustoms != null}"
+                     th:classappend="${#fields.hasErrors('customsReference')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('customsReference')}" th:errors="*{customsReference}">error</div>
+              <div class="form-text" th:if="${inheritedCustoms == null}">Required when a location or the branch is bonded: duty-suspended goods are accountable to Customs.</div>
+              <div class="form-text" th:if="${inheritedCustoms != null}">
+                Taken from <span class="mono" th:text="${subject != null ? subject.serialNo() : ''}">TRF-KGL-2026-0001</span>:
+                the goods moved under this reference, so the report carries it too.
+              </div>
+            </div>
+
+            <div class="col-12">
+              <label for="reason" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Say what happened <span class="text-danger">*</span>
+              </label>
+              <textarea id="reason" th:field="*{reason}" rows="3" maxlength="400" class="form-control"
+                        th:classappend="${#fields.hasErrors('reason')} ? 'is-invalid'"></textarea>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('reason')}" th:errors="*{reason}">error</div>
+              <div class="form-text">The signers read this before they sign. Be specific: what, how much, how it was found.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-sticky" aria-hidden="true"></i>
+              <h2 class="card-title">Reference and notes</h2>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="reference" class="form-label small fw-semibold" style="color: var(--color-heading)">Reference</label>
+            <input id="reference" th:field="*{reference}" class="form-control"
+                   th:classappend="${#fields.hasErrors('reference')} ? 'is-invalid'" autocomplete="off">
+            <div class="invalid-feedback" th:if="${#fields.hasErrors('reference')}" th:errors="*{reference}">error</div>
+          </div>
+          <label for="notes" class="form-label small fw-semibold" style="color: var(--color-heading)">Notes</label>
+          <textarea id="notes" th:field="*{notes}" rows="3" class="form-control"
+                    th:classappend="${#fields.hasErrors('notes')} ? 'is-invalid'"></textarea>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('notes')}" th:errors="*{notes}">error</div>
+        </section>
+      </div>
+
+      <div class="col-12">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-list-ol" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">Lines</h2>
+                <p class="card-sub" th:if="${kind.name() == 'WRITE_OFF'}">Exactly what is written off, at average cost. Stock on hand is shown beside the rows.</p>
+                <p class="card-sub" th:if="${kind.name() == 'QUARANTINE_RELEASE'}">Exactly what moves out of quarantine. It arrives at the value it leaves with.</p>
+                <p class="card-sub" th:if="${kind.name() == 'TRANSIT_LOSS'}">Prefilled with what remains in transit. Lower a quantity for what is still expected; set 0 to leave a line out.</p>
+                <p class="card-sub" th:if="${kind.name() == 'CUSTOMER_RETURN'}">Prefilled with what could still come back. Lower a quantity for what the customer really returned; set 0 to leave a line out.</p>
+              </div>
+            </div>
+          </div>
+
+          <div th:if="${#fields.hasErrors('lines')}" class="alert alert-danger small" role="alert">
+            <p th:each="e : ${#fields.errors('lines')}" th:text="${e}" class="mb-0"></p>
+          </div>
+
+          <div id="dmg-lines" th:fragment="lines" th:object="${form}">
+
+            <!-- A write-off and a release: rows of item, quantity, unit, bins. -->
+            <th:block th:if="${kind.name() == 'WRITE_OFF' or kind.name() == 'QUARANTINE_RELEASE'}">
+              <div class="table-responsive">
+                <table class="table hb-table compact align-middle mb-2">
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col" style="min-width: 16rem">Item</th>
+                      <th scope="col">Quantity</th>
+                      <th scope="col">Unit</th>
+                      <th scope="col">From bin</th>
+                      <th scope="col" th:if="${kind.name() == 'QUARANTINE_RELEASE'}">To bin</th>
+                      <th scope="col" style="min-width: 10rem">Note</th>
+                      <th scope="col"><span class="visually-hidden">Remove</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr th:each="line, st : *{lines}">
+                      <td class="mono" th:text="${st.count}">1</td>
+                      <td>
+                        <select th:field="*{lines[__${st.index}__].itemId}" class="form-select form-select-sm"
+                                th:attr="aria-label='Item, line ' + ${st.count}">
+                          <option value="">— item —</option>
+                          <option th:each="i : ${items}" th:value="${i.id()}" th:text="${i.label()}">GL-CF-6</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input th:field="*{lines[__${st.index}__].quantity}" type="number" step="0.001" min="0.001"
+                               class="form-control form-control-sm mono" style="min-width: 6rem"
+                               th:classappend="${#fields.hasErrors('lines[__${st.index}__].quantity')} ? 'is-invalid'"
+                               th:attr="aria-label='Quantity, line ' + ${st.count}">
+                        <div class="invalid-feedback" th:if="${#fields.hasErrors('lines[__${st.index}__].quantity')}"
+                             th:errors="*{lines[__${st.index}__].quantity}">error</div>
+                      </td>
+                      <td>
+                        <select th:field="*{lines[__${st.index}__].uomId}" class="form-select form-select-sm"
+                                th:attr="aria-label='Unit, line ' + ${st.count}">
+                          <option value="">— unit —</option>
+                          <option th:each="u : ${units}" th:value="${u.id()}" th:text="${u.code()}">SHEET</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select th:field="*{lines[__${st.index}__].storageBinId}" class="form-select form-select-sm"
+                                th:attr="aria-label='From bin, line ' + ${st.count}">
+                          <option value="">— none —</option>
+                          <option th:each="b : ${fromBins}" th:value="${b.id()}" th:text="${b.label()}">A1-02</option>
+                        </select>
+                      </td>
+                      <td th:if="${kind.name() == 'QUARANTINE_RELEASE'}">
+                        <select th:field="*{lines[__${st.index}__].toStorageBinId}" class="form-select form-select-sm"
+                                th:attr="aria-label='To bin, line ' + ${st.count}">
+                          <option value="">— none —</option>
+                          <option th:each="b : ${toBins}" th:value="${b.id()}" th:text="${b.label()}">A1-02</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input th:field="*{lines[__${st.index}__].note}" class="form-control form-control-sm"
+                               th:attr="aria-label='Note, line ' + ${st.count}" autocomplete="off">
+                      </td>
+                      <td>
+                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                th:attr="hx-post=@{'/damage/lines/remove/' + ${st.index}},aria-label='Remove line ' + ${st.count}"
+                                hx-include="#dmg-form" hx-target="#dmg-lines" hx-swap="outerHTML"
+                                th:disabled="${#lists.size(form.lines) le 1}">
+                          <i class="bi bi-x-lg"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-primary mb-3"
+                      th:attr="hx-post=@{/damage/lines/add}"
+                      hx-include="#dmg-form" hx-target="#dmg-lines" hx-swap="outerHTML">
+                <i class="bi bi-plus-lg"></i> Add line
+              </button>
+
+              <div th:if="${form.fromLocationId != null}">
+                <h3 class="h6" style="color: var(--color-heading)">On hand at the location now</h3>
+                <div class="table-responsive">
+                  <table class="table hb-table compact mb-0">
+                    <thead>
+                      <tr><th scope="col">Item</th><th scope="col">Bin</th><th scope="col" class="num">Quantity</th><th scope="col" class="num">Value (RWF)</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr th:each="s : ${stock}">
+                        <td><span class="mono" th:text="${s.itemCode()}">GL-CF-6</span>
+                            <span class="small text-body-secondary" th:text="${s.itemDescription()}">Clear float</span></td>
+                        <td class="mono small" th:text="${s.binCode()} ?: 'no bin'">A1</td>
+                        <td class="num mono"><span th:text="${#numbers.formatDecimal(s.quantity(), 1, 'COMMA', 3, 'POINT')}">120.000</span>
+                            <span class="small text-body-secondary" th:text="${s.baseUomCode()}">SHEET</span></td>
+                        <td class="num mono" th:text="${#numbers.formatDecimal(s.value(), 1, 'COMMA', 2, 'POINT')}">1,064,347.83</td>
+                      </tr>
+                      <tr th:if="${#lists.isEmpty(stock)}">
+                        <td colspan="4" class="small text-body-secondary">Nothing is on hand at this location.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </th:block>
+
+            <!-- A loss in transit: a row per transfer line. -->
+            <th:block th:if="${kind.name() == 'TRANSIT_LOSS'}">
+              <div class="table-responsive">
+                <table class="table hb-table compact align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">Transfer line</th>
+                      <th scope="col">Item</th>
+                      <th scope="col" class="num">Dispatched</th>
+                      <th scope="col" class="num">Received</th>
+                      <th scope="col" class="num">Written off</th>
+                      <th scope="col" class="num">In transit</th>
+                      <th scope="col">Lost (<span>line unit</span>)</th>
+                      <th scope="col" style="min-width: 10rem">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr th:each="line, st : *{lines}" th:with="info=${lossInfo.get(line.transferLineId)}">
+                      <td class="mono">
+                        <span th:text="${info != null} ? ${info.lineNo()} : '?'">1</span>
+                        <input type="hidden" th:field="*{lines[__${st.index}__].transferLineId}">
+                      </td>
+                      <td th:if="${info != null}">
+                        <span class="mono" th:text="${info.itemCode()}">GL-CF-6</span>
+                        <span class="d-block small text-body-secondary" th:text="${info.itemDescription()}">Clear float</span>
+                      </td>
+                      <td th:unless="${info != null}">—</td>
+                      <td class="num mono" th:text="${info != null} ? ${#numbers.formatDecimal(info.dispatched(), 1, 'COMMA', 3, 'POINT')} : '—'">100.000</td>
+                      <td class="num mono" th:text="${info != null} ? ${#numbers.formatDecimal(info.receivedBase(), 1, 'COMMA', 3, 'POINT')} : '—'">98.000</td>
+                      <td class="num mono" th:text="${info != null} ? ${#numbers.formatDecimal(info.writtenOffBase(), 1, 'COMMA', 3, 'POINT')} : '—'">0.000</td>
+                      <td class="num mono fw-semibold" th:text="${info != null} ? ${#numbers.formatDecimal(info.remainingBase(), 1, 'COMMA', 3, 'POINT')} : '—'">2.000</td>
+                      <td>
+                        <div class="input-group input-group-sm" style="min-width: 10rem">
+                          <input th:field="*{lines[__${st.index}__].quantity}" type="number" step="0.001" min="0"
+                                 class="form-control mono"
+                                 th:classappend="${#fields.hasErrors('lines[__${st.index}__].quantity')} ? 'is-invalid'"
+                                 th:attr="aria-label='Quantity lost, line ' + ${st.count}">
+                          <span class="input-group-text mono" th:text="${info != null} ? ${info.uomCode()} : ''">SHEET</span>
+                        </div>
+                        <div class="text-danger small" th:if="${#fields.hasErrors('lines[__${st.index}__].quantity')}"
+                             th:errors="*{lines[__${st.index}__].quantity}">error</div>
+                      </td>
+                      <td>
+                        <input th:field="*{lines[__${st.index}__].note}" class="form-control form-control-sm"
+                               th:attr="aria-label='Note, line ' + ${st.count}" autocomplete="off">
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </th:block>
+
+            <!-- A customer return: a row per delivery note line. -->
+            <th:block th:if="${kind.name() == 'CUSTOMER_RETURN'}">
+              <div class="table-responsive">
+                <table class="table hb-table compact align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">Delivery line</th>
+                      <th scope="col">Item</th>
+                      <th scope="col" class="num">Delivered</th>
+                      <th scope="col" class="num">Already returned</th>
+                      <th scope="col" class="num">Could come back</th>
+                      <th scope="col">Returned (<span>line unit</span>)</th>
+                      <th scope="col">Into bin</th>
+                      <th scope="col" style="min-width: 10rem">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr th:each="line, st : *{lines}" th:with="info=${returnInfo.get(line.deliveryNoteLineId)}">
+                      <td class="mono">
+                        <span th:text="${info != null} ? ${info.lineNo()} : '?'">1</span>
+                        <input type="hidden" th:field="*{lines[__${st.index}__].deliveryNoteLineId}">
+                      </td>
+                      <td th:if="${info != null}">
+                        <span class="mono" th:text="${info.itemCode()}">GL-CF-6</span>
+                        <span class="d-block small text-body-secondary" th:text="${info.itemDescription()}">Clear float</span>
+                      </td>
+                      <td th:unless="${info != null}">—</td>
+                      <td class="num mono" th:text="${info != null} ? ${#numbers.formatDecimal(info.delivered(), 1, 'COMMA', 3, 'POINT')} : '—'">100.000</td>
+                      <td class="num mono" th:text="${info != null} ? ${#numbers.formatDecimal(info.returnedBase(), 1, 'COMMA', 3, 'POINT')} : '—'">0.000</td>
+                      <td class="num mono fw-semibold" th:text="${info != null} ? ${#numbers.formatDecimal(info.returnableBase(), 1, 'COMMA', 3, 'POINT')} : '—'">100.000</td>
+                      <td>
+                        <div class="input-group input-group-sm" style="min-width: 10rem">
+                          <input th:field="*{lines[__${st.index}__].quantity}" type="number" step="0.001" min="0"
+                                 class="form-control mono"
+                                 th:classappend="${#fields.hasErrors('lines[__${st.index}__].quantity')} ? 'is-invalid'"
+                                 th:attr="aria-label='Quantity returned, line ' + ${st.count}">
+                          <span class="input-group-text mono" th:text="${info != null} ? ${info.uomCode()} : ''">SHEET</span>
+                        </div>
+                        <div class="text-danger small" th:if="${#fields.hasErrors('lines[__${st.index}__].quantity')}"
+                             th:errors="*{lines[__${st.index}__].quantity}">error</div>
+                      </td>
+                      <td>
+                        <select th:field="*{lines[__${st.index}__].toStorageBinId}" class="form-select form-select-sm"
+                                th:attr="aria-label='Quarantine bin, line ' + ${st.count}">
+                          <option value="">— none —</option>
+                          <option th:each="b : ${toBins}" th:value="${b.id()}" th:text="${b.label()}">Q1</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input th:field="*{lines[__${st.index}__].note}" class="form-control form-control-sm"
+                               th:attr="aria-label='Note, line ' + ${st.count}" autocomplete="off">
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </th:block>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Save draft' : 'Save changes'">Save draft</span>
+      </button>
+      <a th:href="${form.new} ? @{/damage} : @{'/damage/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+
+  </form>
+
+</div>
+</body>
+</html>

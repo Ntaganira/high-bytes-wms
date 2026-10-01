@@ -31,6 +31,8 @@ SET CONSTRAINTS document_trf_posted_moved_stock DEFERRED;
 SET CONSTRAINTS document_trr_posted_moved_stock DEFERRED;
 SET CONSTRAINTS document_trf_value_kept DEFERRED;
 SET CONSTRAINTS document_trr_value_share DEFERRED;
+SET CONSTRAINTS document_dmg_posted_moved_stock DEFERRED;
+SET CONSTRAINTS document_dmg_value_rule DEFERRED;
 
 INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
 VALUES ('_verify', 'Verification Fixture', 'x', TRUE, FALSE);
@@ -1279,7 +1281,7 @@ BEGIN
     INSERT INTO fx VALUES ('g_d1', g), ('tt_d1', pg_temp.make_ticket(g, fin, '_VERIFY-TT-D1'));
 END $$;
 SELECT pg_temp.refuses('28a', 'a movement dated in the past, on an open day, was accepted',
-  $q$SELECT pg_temp.move_ticket(pg_temp.fx_id('tt_d1'), pg_temp.holder('FINANCE'), kigali_today() - 2)$q$,
+  $q$SELECT pg_temp.move_ticket(pg_temp.fx_id('tt_d1'), pg_temp.holder('FINANCE'), kigali_today() - 5)$q$,
   '23Z02', '%dated the day it is recorded%');
 SELECT pg_temp.refuses('28b', 'a movement dated in the future was accepted',
   $q$SELECT pg_temp.move_ticket(pg_temp.fx_id('tt_d1'), pg_temp.holder('FINANCE'), kigali_today() + 1)$q$,
@@ -1392,10 +1394,11 @@ END $$ LANGUAGE plpgsql;
 
 -- An authorization taken to a state: DRAFT, PENDING, STEP1 (one signature),
 -- NORELEASE (every step but the last signed, still PENDING) or APPROVED.
-CREATE FUNCTION pg_temp.dao_at(p_serial TEXT, p_state TEXT, p_qty NUMERIC DEFAULT 40) RETURNS UUID AS $$
+CREATE FUNCTION pg_temp.dao_at(p_serial TEXT, p_state TEXT, p_qty NUMERIC DEFAULT 40,
+                               p_customs TEXT DEFAULT NULL) RETURNS UUID AS $$
 DECLARE d UUID;
 BEGIN
-    d := pg_temp.make_dao(p_serial, p_qty);
+    d := pg_temp.make_dao(p_serial, p_qty, p_customs => p_customs);
     IF p_state = 'DRAFT' THEN RETURN d; END IF;
     UPDATE document SET status = 'PENDING' WHERE id = d;
     IF p_state = 'PENDING' THEN RETURN d; END IF;
@@ -2171,7 +2174,8 @@ CREATE FUNCTION pg_temp.move_leg(p_ticket UUID, p_poster UUID, p_date DATE, p_va
       FROM ticket_line tl
       JOIN transaction_ticket t ON t.document_id = tl.ticket_id
       JOIN document d ON d.id = t.document_id
-     WHERE tl.ticket_id = p_ticket;
+     WHERE tl.ticket_id = p_ticket
+     ORDER BY tl.line_no;
 $$ LANGUAGE sql;
 
 -- The whole dispatch: approved transfer, posted by the Assistant WH Manager
@@ -2989,6 +2993,844 @@ SELECT pg_temp.accepts_at_commit('50b', 'zero-cost stock may move at zero value 
   $q$SELECT pg_temp.dispatch_v('_VERIFY-T-N2', 2, 0.00, 0.00)$q$,
   'document_trf_value_kept');
 SET CONSTRAINTS document_trf_value_kept DEFERRED;
+
+-- =====================================================================
+-- Returns and damage (V14): four kinds of report, each end to end. As
+-- before, every refusal must carry SQLSTATE 23Z02 (a workflow or document
+-- control) or 23514 (a malformed report) with the reason named.
+-- =====================================================================
+
+INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
+VALUES ('_verify_dmg', 'Verification Report Writer', 'x', TRUE, FALSE),
+       -- Posts returns: the Finance holder signs the 2026 authorization's
+       -- PREPARE step, and nobody who signed an authorization takes back
+       -- what it let out.
+       ('_verify_ret_post', 'Verification Return Poster', 'x', TRUE, FALSE),
+       -- Draws up a delivery note and nothing else.
+       ('_verify_loader', 'Verification Loader', 'x', TRUE, FALSE);
+INSERT INTO location (branch_id, code, name, location_type, is_sellable)
+SELECT id, '_VERIFY-NOSELL', 'Verification non-sellable warehouse', 'WAREHOUSE', FALSE FROM branch WHERE code = 'KGL';
+
+CREATE FUNCTION pg_temp.dmg_creator() RETURNS UUID AS $$
+    SELECT id FROM app_user WHERE username = '_verify_dmg';
+$$ LANGUAGE sql;
+
+CREATE FUNCTION pg_temp.return_poster() RETURNS UUID AS $$
+    SELECT id FROM app_user WHERE username = '_verify_ret_post';
+$$ LANGUAGE sql;
+
+-- A draft report of one kind with one glass line. Branch is worked out from what
+-- the report is about unless overridden (for the wrong-branch checks).
+CREATE FUNCTION pg_temp.make_dmg(p_serial TEXT, p_kind TEXT, p_qty NUMERIC,
+                                 p_from TEXT DEFAULT NULL, p_to TEXT DEFAULT NULL,
+                                 p_transfer UUID DEFAULT NULL, p_dn UUID DEFAULT NULL,
+                                 p_creator UUID DEFAULT NULL, p_branch TEXT DEFAULT NULL,
+                                 p_customs TEXT DEFAULT NULL, p_bin TEXT DEFAULT NULL,
+                                 p_to_bin TEXT DEFAULT NULL) RETURNS UUID AS $$
+DECLARE
+    d UUID;
+    v_branch UUID;
+BEGIN
+    v_branch := COALESCE((SELECT id FROM branch WHERE code = p_branch),
+                         CASE WHEN p_transfer IS NOT NULL THEN (SELECT branch_id FROM document WHERE id = p_transfer)
+                              WHEN p_dn IS NOT NULL THEN (SELECT branch_id FROM document WHERE id = p_dn)
+                              ELSE (SELECT branch_id FROM location WHERE code = p_from) END);
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, v_branch, p_serial, COALESCE(p_creator, pg_temp.dmg_creator())
+      FROM document_type dt WHERE dt.code = 'DMG'
+    RETURNING id INTO d;
+    INSERT INTO damage_report (document_id, kind, reason_code, reason, from_location_id, to_location_id,
+                               transfer_id, delivery_note_id, customs_reference)
+    VALUES (d, p_kind,
+            CASE p_kind WHEN 'TRANSIT_LOSS' THEN 'LOST_IN_TRANSIT' WHEN 'CUSTOMER_RETURN' THEN 'CUSTOMER_RETURN'
+                        WHEN 'QUARANTINE_RELEASE' THEN 'INSPECTION_PASSED' ELSE 'DAMAGED' END,
+            'Verification',
+            (SELECT id FROM location WHERE code = p_from), (SELECT id FROM location WHERE code = p_to),
+            p_transfer, p_dn, p_customs);
+    INSERT INTO damage_report_line (document_id, line_no, item_id, uom_id, quantity, qty_base_uom,
+                                    storage_bin_id, to_storage_bin_id, transfer_line_id, delivery_note_line_id, entered_by)
+    SELECT d, 1, i.id, u.id, p_qty, p_qty,
+           (SELECT id FROM storage_bin WHERE bin_code = p_bin),
+           (SELECT id FROM storage_bin WHERE bin_code = p_to_bin),
+           (SELECT tl.id FROM transfer_order_line tl WHERE tl.document_id = p_transfer AND tl.line_no = 1),
+           (SELECT nl.id FROM delivery_note_line nl WHERE nl.document_id = p_dn AND nl.line_no = 1),
+           COALESCE(p_creator, pg_temp.dmg_creator())
+      FROM item i, uom u WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET';
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- A report taken to a state: DRAFT, PENDING, STEP1 or APPROVED.
+CREATE FUNCTION pg_temp.dmg_at(p_dmg UUID, p_state TEXT) RETURNS UUID AS $$
+BEGIN
+    IF p_state = 'DRAFT' THEN RETURN p_dmg; END IF;
+    UPDATE document SET status = 'PENDING' WHERE id = p_dmg;
+    IF p_state = 'PENDING' THEN RETURN p_dmg; END IF;
+    IF p_state = 'STEP1' THEN PERFORM pg_temp.sign_upto(p_dmg, 1); RETURN p_dmg; END IF;
+    PERFORM pg_temp.sign_upto(p_dmg, pg_temp.steps_in(p_dmg));
+    UPDATE document SET status = 'APPROVED' WHERE id = p_dmg;
+    RETURN p_dmg;
+END $$ LANGUAGE plpgsql;
+
+-- One ticket of a report: a write-off or loss is DAMAGE out; a return is RETURN
+-- in; a release is TRANSFER_OUT (leg 'OUT') and TRANSFER_IN (leg 'IN').
+CREATE FUNCTION pg_temp.dmg_ticket(p_dmg UUID, p_poster UUID, p_serial TEXT, p_leg TEXT DEFAULT NULL) RETURNS UUID AS $$
+DECLARE
+    t UUID;
+    h RECORD;
+    dir TEXT;
+    mtype TEXT;
+BEGIN
+    SELECT r.kind, r.from_location_id, r.to_location_id, r.customs_reference INTO h
+      FROM damage_report r WHERE r.document_id = p_dmg;
+    dir := CASE WHEN h.kind = 'CUSTOMER_RETURN' THEN 'IN'
+                WHEN h.kind = 'QUARANTINE_RELEASE' THEN p_leg ELSE 'OUT' END;
+    mtype := CASE WHEN h.kind = 'CUSTOMER_RETURN' THEN 'RETURN'
+                  WHEN h.kind = 'QUARANTINE_RELEASE' THEN CASE dir WHEN 'OUT' THEN 'TRANSFER_OUT' ELSE 'TRANSFER_IN' END
+                  ELSE 'DAMAGE' END;
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, d.branch_id, p_serial, p_poster
+      FROM document_type dt, document d WHERE dt.code = 'TT' AND d.id = p_dmg
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, to_location_id,
+                                    source_document_id, customs_reference)
+    VALUES (t, mtype, dir, CASE WHEN dir = 'OUT' THEN h.from_location_id END,
+            CASE WHEN dir = 'IN' THEN h.to_location_id END, p_dmg, h.customs_reference);
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+    SELECT t, l.line_no, l.item_id, l.quantity, l.uom_id, l.qty_base_uom,
+           CASE WHEN dir = 'OUT' THEN l.storage_bin_id ELSE l.to_storage_bin_id END
+      FROM damage_report_line l WHERE l.document_id = p_dmg;
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+-- Post a report (by the Finance holder, who is in no step), write its ticket(s)
+-- and movements, post the tickets. p_values are the movement values of the
+-- leaving/returning leg, by line_no; p_in_values the arriving leg of a release.
+CREATE FUNCTION pg_temp.post_dmg(p_dmg UUID, p_serial TEXT, p_values NUMERIC[] DEFAULT NULL,
+                                 p_in_values NUMERIC[] DEFAULT NULL) RETURNS UUID AS $$
+DECLARE
+    kind TEXT;
+    poster UUID;
+    a UUID; b UUID;
+BEGIN
+    SELECT r.kind INTO kind FROM damage_report r WHERE r.document_id = p_dmg;
+    poster := CASE WHEN kind = 'CUSTOMER_RETURN' THEN pg_temp.return_poster() ELSE pg_temp.holder('FINANCE') END;
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = p_dmg;
+    IF kind = 'QUARANTINE_RELEASE' THEN
+        a := pg_temp.dmg_ticket(p_dmg, poster, p_serial || '-OUT', 'OUT');
+        b := pg_temp.dmg_ticket(p_dmg, poster, p_serial || '-IN', 'IN');
+        PERFORM pg_temp.move_leg(a, poster, kigali_today(), NULL, p_values);
+        PERFORM pg_temp.move_leg(b, poster, kigali_today(), NULL, COALESCE(p_in_values, p_values));
+        UPDATE document SET status = 'POSTED', posted_by = poster WHERE id IN (a, b);
+    ELSE
+        a := pg_temp.dmg_ticket(p_dmg, poster, p_serial || '-T');
+        PERFORM pg_temp.move_leg(a, poster, kigali_today(), NULL, p_values);
+        UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = a;
+    END IF;
+    INSERT INTO fx VALUES (p_serial, p_dmg);
+    RETURN p_dmg;
+END $$ LANGUAGE plpgsql;
+
+-- A delivery at a stated value: approved authorization, note posted by a signer of
+-- it, ticket, the OUT movement at p_value, ticket posted. Returns the note.
+CREATE FUNCTION pg_temp.move_out_v(p_ticket UUID, p_poster UUID, p_date DATE, p_value NUMERIC) RETURNS VOID AS $$
+    INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, storage_bin_id,
+                                direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                running_balance, business_date, posted_by)
+    SELECT tl.id, d.id, d.branch_id, tl.item_id, t.from_location_id, tl.storage_bin_id,
+           'OUT', tl.qty_base_uom, -tl.qty_base_uom, 1000, p_value, 0, p_date, p_poster
+      FROM ticket_line tl
+      JOIN transaction_ticket t ON t.document_id = tl.ticket_id
+      JOIN document d ON d.id = t.document_id
+     WHERE tl.ticket_id = p_ticket;
+$$ LANGUAGE sql;
+
+CREATE FUNCTION pg_temp.deliver_v(p_serial TEXT, p_qty NUMERIC, p_value NUMERIC,
+                                  p_customs TEXT DEFAULT NULL, p_dn_creator UUID DEFAULT NULL) RETURNS UUID AS $$
+DECLARE
+    dao UUID; dn UUID; tt UUID; poster UUID;
+BEGIN
+    dao    := pg_temp.dao_at(p_serial, 'APPROVED', p_qty, p_customs);
+    poster := pg_temp.gate_poster(dao);
+    dn     := pg_temp.make_dn(p_serial || '-DN', dao, p_dn_creator);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = dn;
+    tt     := pg_temp.make_dn_ticket(dn, poster, p_serial || '-TT');
+    PERFORM pg_temp.move_out_v(tt, poster, kigali_today(), p_value);
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = tt;
+    INSERT INTO fx VALUES (p_serial || '-DN', dn), (p_serial, dao);
+    RETURN dn;
+END $$ LANGUAGE plpgsql;
+
+-- Value still in transit for a transfer, counting losses as well as receipts.
+CREATE FUNCTION pg_temp.transit_value2(p_trf UUID) RETURNS NUMERIC AS $$
+    SELECT COALESCE(SUM(CASE WHEN t.source_document_id = p_trf AND t.movement_type = 'TRANSFER_IN' THEN m.value END), 0)
+         - COALESCE(SUM(CASE WHEN t.movement_type = 'TRANSFER_OUT'
+                              AND t.source_document_id IN (SELECT r.document_id FROM transfer_receipt r WHERE r.transfer_id = p_trf)
+                             THEN m.value END), 0)
+         - COALESCE(SUM(CASE WHEN t.movement_type = 'DAMAGE'
+                              AND t.source_document_id IN (SELECT r.document_id FROM damage_report r WHERE r.transfer_id = p_trf)
+                             THEN m.value END), 0)
+      FROM stock_movement m JOIN transaction_ticket t ON t.document_id = m.document_id;
+$$ LANGUAGE sql STABLE;
+
+-- A write-off taken all the way to the ledger; used to prove the stock guard.
+CREATE FUNCTION pg_temp.wo_to_ledger(p_serial TEXT, p_qty NUMERIC, p_loc TEXT) RETURNS UUID AS $$
+    SELECT pg_temp.post_dmg(pg_temp.dmg_at(pg_temp.make_dmg(p_serial, 'WRITE_OFF', p_qty, p_loc), 'APPROVED'), p_serial || '-P');
+$$ LANGUAGE sql;
+
+-- ---------------------------------------------------------------------
+-- 51. The damage rights sit on the roles whose steps they serve, and
+--     nobody is left in conflict
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE
+    bad TEXT;
+    msg TEXT;
+BEGIN
+    SELECT string_agg(v.role_code || ' has {' || COALESCE(have.perms, '') || '} expected {' || v.want || '}', '; ')
+      INTO bad
+      FROM (VALUES
+            ('WH_MANAGER',    'damage.create,damage.view'),
+            ('INTERNAL_CTRL', 'damage.verify,damage.view'),
+            ('MANAGING_DIR',  'damage.approve,damage.view'),
+            ('FINANCE',       'damage.post,damage.view')
+           ) AS v(role_code, want)
+      LEFT JOIN LATERAL (
+            SELECT string_agg(p.code, ',' ORDER BY p.code) AS perms
+              FROM role r JOIN role_permission rp ON rp.role_id = r.id
+              JOIN permission p ON p.id = rp.permission_id AND p.module = 'damage'
+             WHERE r.code = v.role_code) have ON TRUE
+     WHERE have.perms IS DISTINCT FROM v.want;
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   51a  damage rights sit on the roles whose steps they serve';
+    ELSE
+        RAISE WARNING 'FAIL 51a  %', bad;
+    END IF;
+
+    SELECT string_agg(r.code || ' signs ' || ws.action_label || ' without ' || need.code, '; ')
+      INTO bad
+      FROM workflow_step ws
+      JOIN workflow_definition wd ON wd.id = ws.workflow_definition_id
+      JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'DMG'
+      JOIN role r ON r.id = ws.required_role_id
+      CROSS JOIN LATERAL (SELECT CASE ws.action_label
+                                   WHEN 'PREPARE' THEN 'damage.create'
+                                   WHEN 'VERIFY'  THEN 'damage.verify'
+                                   WHEN 'APPROVE' THEN 'damage.approve' END AS code) need
+     WHERE NOT EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.id = rp.permission_id
+                        WHERE rp.role_id = r.id AND p.code = need.code);
+    IF bad IS NULL THEN
+        RAISE NOTICE 'ok   51b  every damage chain signer carries the right its step needs';
+    ELSE
+        RAISE WARNING 'FAIL 51b  %', bad;
+    END IF;
+
+    SELECT string_agg(r.code, ',' ORDER BY r.code) INTO bad
+      FROM role r JOIN role_permission rp ON rp.role_id = r.id JOIN permission p ON p.id = rp.permission_id
+     WHERE p.code = 'damage.post';
+    IF bad = 'FINANCE' THEN
+        RAISE NOTICE 'ok   51c  only Finance, who signs no step, carries damage.post';
+    ELSE
+        RAISE WARNING 'FAIL 51c  damage.post is carried by %', bad;
+    END IF;
+
+    msg := access_conflict_anywhere();
+    IF msg IS NULL THEN
+        RAISE NOTICE 'ok   51d  nobody, and no role, is left in conflict';
+    ELSE
+        RAISE WARNING 'FAIL 51d  %', msg;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('51e', 'the Internal Controller was given damage.post',
+  $q$INSERT INTO role_permission (role_id, permission_id)
+     SELECT r.id, p.id FROM role r, permission p WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'damage.post'$q$,
+  '23Z01');
+SELECT pg_temp.refuses('51f', 'Finance and the Internal Controller were held by one person',
+  $q$INSERT INTO user_role (user_id, role_id, assigned_by)
+     SELECT pg_temp.holder('FINANCE'), r.id, pg_temp.verify_user() FROM role r WHERE r.code = 'INTERNAL_CTRL'$q$,
+  '23Z01');
+
+-- ---------------------------------------------------------------------
+-- 52. The report: one kind, its shape, its locations, frozen at submission
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('52a', 'a write-off from a transit location was accepted',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-W-TRAN', 'WRITE_OFF', 1, 'KGL-TRAN')$q$,
+  '23514', '%warehouse, bonded or quarantine%');
+SELECT pg_temp.refuses('52b', 'a write-off at Gahanga named a Rubavu location',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-W-WRONGBR', 'WRITE_OFF', 1, 'KGL-MAIN', NULL, NULL, NULL, NULL, 'RBV')$q$,
+  '23514', '%not at the branch%');
+SELECT pg_temp.refuses('52c', 'a write-off of bonded stock without a customs reference was accepted',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-W-BOND', 'WRITE_OFF', 1, 'RBV-BOND')$q$,
+  '23514', '%customs reference%');
+SELECT pg_temp.refuses('52d', 'a blank customs reference was accepted',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-W-BLANK', 'WRITE_OFF', 1, 'RBV-BOND', NULL, NULL, NULL, NULL, NULL, '  ')$q$,
+  '23514', '%dmg_customs_reference_not_blank%');
+SELECT pg_temp.accepts('52e', 'a bonded write-off with its customs reference is accepted as a draft',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-W-BONDOK', 'WRITE_OFF', 1, 'RBV-BOND', NULL, NULL, NULL, NULL, NULL, 'C-DMG-1')$q$);
+
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('w_draft', pg_temp.make_dmg('_VERIFY-W-DRAFT', 'WRITE_OFF', 2, 'KGL-MAIN')),
+        ('w_pend',  pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-W-PEND', 'WRITE_OFF', 2, 'KGL-MAIN'), 'PENDING')),
+        ('w_step1', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-W-STEP1', 'WRITE_OFF', 2, 'KGL-MAIN'), 'STEP1')),
+        ('w_appr',  pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-W-APPR', 'WRITE_OFF', 2, 'KGL-MAIN'), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses('52f', 'a report''s kind was changed',
+  $q$UPDATE damage_report SET kind = 'CUSTOMER_RETURN' WHERE document_id = pg_temp.fx_id('w_draft')$q$,
+  '23Z02', '%are fixed when it is created%');
+SELECT pg_temp.refuses('52g', 'a write-off named a transfer',
+  $q$UPDATE damage_report SET transfer_id = (SELECT document_id FROM transfer_order LIMIT 1) WHERE document_id = pg_temp.fx_id('w_draft')$q$,
+  '23Z02', '%are fixed when it is created%');
+SELECT pg_temp.refuses('52h', 'a write-off line named a transfer line',
+  $q$UPDATE damage_report_line SET transfer_line_id = (SELECT id FROM transfer_order_line LIMIT 1) WHERE document_id = pg_temp.fx_id('w_draft')$q$,
+  '23514', '%names a transfer line%');
+SELECT pg_temp.refuses('52i', 'a submitted report''s header was edited',
+  $q$UPDATE damage_report SET reason = 'CHANGED' WHERE document_id = pg_temp.fx_id('w_pend')$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.refuses('52j', 'a line was added after submission',
+  $q$INSERT INTO damage_report_line (document_id, line_no, item_id, uom_id, quantity, qty_base_uom, entered_by)
+     SELECT pg_temp.fx_id('w_pend'), 2, i.id, u.id, 1, 1, pg_temp.dmg_creator() FROM item i, uom u
+      WHERE i.item_code = '_VERIFY-GLASS' AND u.code = 'SHEET'$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.refuses('52k', 'a line was changed after approval',
+  $q$UPDATE damage_report_line SET quantity = 50, qty_base_uom = 50 WHERE document_id = pg_temp.fx_id('w_appr')$q$,
+  '23Z02', '%APPROVED%cannot change%');
+SELECT pg_temp.refuses('52l', 'a line was deleted after submission',
+  $q$DELETE FROM damage_report_line WHERE document_id = pg_temp.fx_id('w_pend')$q$,
+  '23Z02', '%PENDING%cannot change%');
+SELECT pg_temp.accepts('52m', 'a draft report is still editable',
+  $q$UPDATE damage_report_line SET quantity = 3, qty_base_uom = 3 WHERE document_id = pg_temp.fx_id('w_draft')$q$);
+SELECT pg_temp.refuses('52n', 'a base quantity that does not follow from the entered one was accepted',
+  $q$UPDATE damage_report_line SET qty_base_uom = 999 WHERE document_id = pg_temp.fx_id('w_draft')$q$,
+  '23514', '%base unit%');
+DO $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, '_VERIFY-W-EMPTY', pg_temp.dmg_creator() FROM document_type dt, branch b
+     WHERE dt.code = 'DMG' AND b.code = 'KGL' RETURNING id INTO d;
+    INSERT INTO damage_report (document_id, kind, reason_code, reason, from_location_id)
+    SELECT d, 'WRITE_OFF', 'DAMAGED', 'x', id FROM location WHERE code = 'KGL-MAIN';
+    INSERT INTO fx VALUES ('w_empty', d);
+END $$;
+SELECT pg_temp.refuses('52o', 'a report with no lines was submitted',
+  $q$UPDATE document SET status = 'PENDING' WHERE id = pg_temp.fx_id('w_empty')$q$,
+  '23Z02', '%no lines%');
+SELECT pg_temp.refuses('52p', 'a release into a non-sellable location was accepted',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-Q-NOSELL', 'QUARANTINE_RELEASE', 1, 'KGL-QUAR', '_VERIFY-NOSELL')$q$,
+  '23514', '%not sellable stock%');
+SELECT pg_temp.refuses('52q', 'a release out of a warehouse instead of quarantine was accepted',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-Q-NOTQ', 'QUARANTINE_RELEASE', 1, 'KGL-MAIN', '_VERIFY-WH2')$q$,
+  '23514', '%released FROM quarantine%');
+SELECT pg_temp.refuses('52r', 'a release into another branch was accepted',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-Q-OTHERBR', 'QUARANTINE_RELEASE', 1, 'KGL-QUAR', 'RBV-BOND', NULL, NULL, NULL, NULL, 'C-1')$q$,
+  '23514', '%not at the branch%');
+SELECT pg_temp.refuses('52s', 'the third step signed before the first',
+  $q$SELECT pg_temp.sign(pg_temp.fx_id('w_pend'), 3, pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('w_pend'), 3)))$q$,
+  '23Z02', '%must sign%before step%');
+SELECT pg_temp.accepts('52t', 'the whole chain signs a report in order, each in its own role',
+  $q$SELECT pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-W-CHAIN', 'WRITE_OFF', 1, 'KGL-MAIN'), 'APPROVED')$q$);
+
+-- ---------------------------------------------------------------------
+-- 53. Write-off, end to end
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('53a', 'a write-off still pending was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = pg_temp.fx_id('w_pend')$q$,
+  '23Z02', '%cannot move from PENDING to POSTED%');
+SELECT pg_temp.refuses('53b', 'a write-off with only its first signature was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = pg_temp.fx_id('w_step1')$q$,
+  '23Z02', '%cannot move from PENDING to POSTED%');
+SELECT pg_temp.refuses('53c', 'the person who raised the write-off posted it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = created_by WHERE id = pg_temp.fx_id('w_appr')$q$,
+  '23Z02', '%person who raised it%');
+SELECT pg_temp.refuses('53d', 'the Internal Controller, who verified the write-off, posted it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('INTERNAL_CTRL') WHERE id = pg_temp.fx_id('w_appr')$q$,
+  '23Z02', '%signed%cannot also post%');
+SELECT pg_temp.refuses('53e', 'the Managing Director, who approved the write-off, posted it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('MANAGING_DIR') WHERE id = pg_temp.fx_id('w_appr')$q$,
+  '23Z02', '%signed%cannot also post%');
+DO $$
+DECLARE before_q NUMERIC := pg_temp.glass_at('KGL-MAIN');
+BEGIN
+    PERFORM pg_temp.post_dmg(pg_temp.fx_id('w_appr'), '_VERIFY-W-APPR-POSTED');
+    IF pg_temp.glass_at('KGL-MAIN') = before_q - 2 THEN
+        RAISE NOTICE 'ok   53f  the approved write-off, posted by Finance, takes 2 sheets out of the location';
+    ELSE
+        RAISE WARNING 'FAIL 53f  stock moved from % to %', before_q, pg_temp.glass_at('KGL-MAIN');
+    END IF;
+END $$;
+SELECT pg_temp.refuses('53g', 'a posted write-off was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('w_appr')$q$,
+  '23Z02', '%reversing document%');
+SELECT pg_temp.refuses('53h', 'a write-off took more than the location holds',
+  $q$SELECT pg_temp.wo_to_ledger('_VERIFY-W-HUGE', 100000, 'KGL-MAIN')$q$,
+  '23Z02', '%Not enough stock%');
+SELECT pg_temp.refuses('53i', 'a posted write-off''s line was changed',
+  $q$UPDATE damage_report_line SET quantity = 1, qty_base_uom = 1 WHERE document_id = pg_temp.fx_id('w_appr')$q$,
+  '23Z02', '%POSTED%cannot change%');
+SELECT pg_temp.accepts('53j', 'a draft report can be cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('w_draft')$q$);
+
+-- ---------------------------------------------------------------------
+-- 54. Transit loss: one consumption rule, one value rule, and the people
+--     who sent or received the goods stay out
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-L1', 20);
+    PERFORM pg_temp.dispatch('_VERIFY-T-L2', 20);
+    PERFORM pg_temp.receive('_VERIFY-R-L2', pg_temp.fx_id('_VERIFY-T-L2'), 15);
+END $$;
+SELECT pg_temp.refuses('54a', 'a transit loss was raised by the person who raised the transfer',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-X1', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L2'), NULL, pg_temp.verify_user())$q$,
+  '23Z02', '%cannot be raised by the person who raised transfer%');
+SELECT pg_temp.refuses('54b', 'a transit loss was raised by the dispatcher',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-X2', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L2'), NULL, pg_temp.holder('ASST_WH_MANAGER'))$q$,
+  '23Z02', '%the person who dispatched transfer%');
+SELECT pg_temp.refuses('54c', 'a transit loss was raised by a signer of the transfer',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-X3', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L2'), NULL, pg_temp.holder('HEAD_INVENTORY'))$q$,
+  '23Z02', '%a person who signed transfer%');
+SELECT pg_temp.refuses('54d', 'a transit loss was raised by the person who received the goods',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-X4', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L2'), NULL, pg_temp.receiver())$q$,
+  '23Z02', '%the person who received transfer%');
+SELECT pg_temp.refuses('54e', 'a transit loss was raised at the destination branch',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-X5', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L2'), NULL, NULL, 'RBV')$q$,
+  '23Z02', '%wrong branch%');
+
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('l_over',  pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-L-OVER', 'TRANSIT_LOSS', 6, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L2')), 'APPROVED')),
+        ('l_party', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-L-PARTY', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L2')), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses('54f', 'the dispatcher posted the transit loss',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('ASST_WH_MANAGER') WHERE id = pg_temp.fx_id('l_party')$q$,
+  '23Z02', '%cannot be posted by the person who dispatched transfer%');
+SELECT pg_temp.refuses('54g', 'the person who received the goods posted the transit loss',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.receiver() WHERE id = pg_temp.fx_id('l_party')$q$,
+  '23Z02', '%cannot be posted by the person who received transfer%');
+SELECT pg_temp.refuses('54h', 'a loss of 6 was posted when only 5 remain in transit',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = pg_temp.fx_id('l_over')$q$,
+  '23Z02', '%only 5.000 remains in transit%');
+
+-- The remainder of a partly received transfer, written off: transit ends at zero.
+DO $$
+DECLARE
+    tr_before NUMERIC := pg_temp.glass_at('KGL-TRAN');
+BEGIN
+    PERFORM pg_temp.post_dmg(pg_temp.fx_id('l_party'), '_VERIFY-L-PARTY-P');
+    IF pg_temp.glass_at('KGL-TRAN') = tr_before - 5 THEN
+        RAISE NOTICE 'ok   54i  the exact remainder (5 of 20, after 15 received) is written off out of transit';
+    ELSE
+        RAISE WARNING 'FAIL 54i  transit moved from % to %', tr_before, pg_temp.glass_at('KGL-TRAN');
+    END IF;
+END $$;
+DO $$
+DECLARE pos RECORD;
+BEGIN
+    SELECT * INTO pos FROM transfer_line_position WHERE transfer_id = pg_temp.fx_id('_VERIFY-T-L2');
+    IF pos.dispatched_base = 20 AND pos.received_base = 15 AND pos.written_off_base = 5 AND pos.in_transit_base = 0
+       AND pg_temp.transit_value2(pg_temp.fx_id('_VERIFY-T-L2')) = 0 THEN
+        RAISE NOTICE 'ok   54j  a receipt followed by a loss of the remainder leaves transit at zero quantity and zero value';
+    ELSE
+        RAISE WARNING 'FAIL 54j  position reads dispatched %, received %, written off %, in transit %, value %',
+            pos.dispatched_base, pos.received_base, pos.written_off_base, pos.in_transit_base,
+            pg_temp.transit_value2(pg_temp.fx_id('_VERIFY-T-L2'));
+    END IF;
+END $$;
+
+-- A total loss with no receipt at all, and a later receipt refused.
+DO $$
+BEGIN
+    INSERT INTO fx VALUES ('l_total', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-L-TOTAL', 'TRANSIT_LOSS', 20, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L1')), 'APPROVED'));
+    INSERT INTO fx VALUES ('trr_late', pg_temp.make_trr('_VERIFY-R-LATE', pg_temp.fx_id('_VERIFY-T-L1')));
+END $$;
+SELECT pg_temp.accepts('54k', 'a consignment that never arrived is written off in total, with no receipt at all',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('l_total'), '_VERIFY-L-TOTAL-P')$q$);
+DO $$
+DECLARE pos RECORD;
+BEGIN
+    SELECT * INTO pos FROM transfer_line_position WHERE transfer_id = pg_temp.fx_id('_VERIFY-T-L1');
+    IF pos.received_base = 0 AND pos.written_off_base = 20 AND pos.in_transit_base = 0
+       AND pg_temp.transit_value2(pg_temp.fx_id('_VERIFY-T-L1')) = 0 THEN
+        RAISE NOTICE 'ok   54l  the total loss leaves nothing in transit, in quantity or in value';
+    ELSE
+        RAISE WARNING 'FAIL 54l  position reads received %, written off %, in transit %, value %',
+            pos.received_base, pos.written_off_base, pos.in_transit_base, pg_temp.transit_value2(pg_temp.fx_id('_VERIFY-T-L1'));
+    END IF;
+END $$;
+SELECT pg_temp.refuses('54m', 'a receipt was posted for a consignment already written off in total',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.receiver() WHERE id = pg_temp.fx_id('trr_late')$q$,
+  '23Z02', '%already been written off as lost in transit, so only 0.000 remains%');
+
+-- The unified value rule, loss after receipt and receipt after loss.
+DO $$
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-L3', 20);
+    PERFORM pg_temp.receive('_VERIFY-R-L3', pg_temp.fx_id('_VERIFY-T-L3'), 15);
+    INSERT INTO fx VALUES ('l_off', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-L-OFF', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L3')), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses_at_commit('54n', 'a loss written off at a cent more than its share of the consignment cost',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('l_off'), '_VERIFY-L-OFF-P', ARRAY[5000.01])$q$,
+  'document_dmg_value_rule', '%writes off 5000.01 out of transit, but its share%is 5000.00%');
+SET CONSTRAINTS document_dmg_value_rule DEFERRED;
+SELECT pg_temp.refuses_at_commit('54o', 'a loss written off at a cent less than its share of the consignment cost',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('l_off'), '_VERIFY-L-OFF-P', ARRAY[4999.99])$q$,
+  'document_dmg_value_rule', '%writes off 4999.99 out of transit, but its share%is 5000.00%');
+SET CONSTRAINTS document_dmg_value_rule DEFERRED;
+SELECT pg_temp.accepts_at_commit('54p', 'the same loss at exactly its share is accepted',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('l_off'), '_VERIFY-L-OFF-P', ARRAY[5000.00])$q$,
+  'document_dmg_value_rule, document_dmg_posted_moved_stock');
+SET CONSTRAINTS document_dmg_value_rule, document_dmg_posted_moved_stock DEFERRED;
+
+-- A loss first, then the receipt: the receipt's share is what the loss left.
+DO $$
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-L5', 20);
+    PERFORM pg_temp.post_dmg(pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-L-FIRST', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L5')), 'APPROVED'), '_VERIFY-L-FIRST-P');
+    INSERT INTO fx VALUES ('trr_full', pg_temp.make_trr('_VERIFY-R-L5FULL', pg_temp.fx_id('_VERIFY-T-L5')));
+END $$;
+SELECT pg_temp.refuses('54q', 'a receipt of 20 was posted when 5 of the 20 had already been written off',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.receiver() WHERE id = pg_temp.fx_id('trr_full')$q$,
+  '23Z02', '%already been written off as lost in transit, so only 15.000 remains%');
+UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+ WHERE id = pg_temp.fx_id('trr_full');
+SELECT pg_temp.refuses_at_commit('54r', 'a receipt after a loss took a cent more out of transit than the remainder of the cost',
+  $q$SELECT pg_temp.receive_v_out_in('_VERIFY-R-L5A', pg_temp.fx_id('_VERIFY-T-L5'), 15, 15000.01, 15000.01)$q$,
+  'document_trr_value_share', '%takes 15000.01 out of transit, but its share%is 15000.00%');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+SELECT pg_temp.accepts_at_commit('54s', 'the receipt of the 15 that remain, at the cost that remains, is accepted',
+  $q$SELECT pg_temp.receive_v_out_in('_VERIFY-R-L5B', pg_temp.fx_id('_VERIFY-T-L5'), 15, 15000.00, 15000.00)$q$,
+  'document_trr_value_share');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+DO $$
+BEGIN
+    IF pg_temp.transit_value2(pg_temp.fx_id('_VERIFY-T-L5')) = 0
+       AND (SELECT in_transit_base FROM transfer_line_position WHERE transfer_id = pg_temp.fx_id('_VERIFY-T-L5')) = 0 THEN
+        RAISE NOTICE 'ok   54t  loss then receipt consume exactly the dispatched quantity and value';
+    ELSE
+        RAISE WARNING 'FAIL 54t  value left in transit %', pg_temp.transit_value2(pg_temp.fx_id('_VERIFY-T-L5'));
+    END IF;
+END $$;
+
+-- Whoever recorded what arrived does not also write off what did not: the
+-- author of a (non-cancelled) receipt, and every enterer of its lines, are
+-- parties to the transfer, though a different person posted the receipt.
+INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
+VALUES ('_verify_rec1', 'Verification Receipt Author', 'x', TRUE, FALSE),
+       ('_verify_rec2', 'Verification Line Enterer', 'x', TRUE, FALSE);
+DO $$
+DECLARE
+    rec1 UUID := (SELECT id FROM app_user WHERE username = '_verify_rec1');
+    rec2 UUID := (SELECT id FROM app_user WHERE username = '_verify_rec2');
+    r UUID;
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-L6', 20);
+    -- authored by rec1, one line entered by rec2, posted by the receiver
+    r := pg_temp.make_trr('_VERIFY-R-L6', pg_temp.fx_id('_VERIFY-T-L6'), rec1, 'RBV', 15);
+    UPDATE transfer_receipt_line SET entered_by = rec2 WHERE document_id = r;
+    PERFORM pg_temp.finish_receipt(r, '_VERIFY-R-L6');
+    -- a draft receipt authored by rec1
+    PERFORM pg_temp.dispatch('_VERIFY-T-L7', 20);
+    INSERT INTO fx VALUES ('trr_l7', pg_temp.make_trr('_VERIFY-R-L7', pg_temp.fx_id('_VERIFY-T-L7'), rec1));
+END $$;
+SELECT pg_temp.refuses('54u', 'a loss was raised by the author of the transfer''s receipt',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-REC1', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L6'), NULL,
+                             (SELECT id FROM app_user WHERE username = '_verify_rec1'))$q$,
+  '23Z02', '%cannot be raised by the person who recorded the arrival of transfer%');
+SELECT pg_temp.refuses('54v', 'a loss was raised by someone who entered a line of the transfer''s receipt',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-REC2', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L6'), NULL,
+                             (SELECT id FROM app_user WHERE username = '_verify_rec2'))$q$,
+  '23Z02', '%cannot be raised by the person who recorded the arrival of transfer%');
+DO $$
+BEGIN
+    INSERT INTO fx VALUES ('l_rec', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-L-REC', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L6')), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses('54w', 'a loss was posted by someone who entered a line of the transfer''s receipt',
+  $q$UPDATE document SET status = 'POSTED', posted_by = (SELECT id FROM app_user WHERE username = '_verify_rec2')
+      WHERE id = pg_temp.fx_id('l_rec')$q$,
+  '23Z02', '%cannot be posted by the person who recorded the arrival of transfer%');
+SELECT pg_temp.refuses('54x', 'a loss was raised by the author of a transfer''s draft receipt',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-REC3', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L7'), NULL,
+                             (SELECT id FROM app_user WHERE username = '_verify_rec1'))$q$,
+  '23Z02', '%cannot be raised by the person who recorded the arrival of transfer%');
+UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+ WHERE id = pg_temp.fx_id('trr_l7');
+SELECT pg_temp.accepts('54y', 'once the draft receipt is cancelled its author is no longer a party',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-REC4', 'TRANSIT_LOSS', 5, NULL, NULL, pg_temp.fx_id('_VERIFY-T-L7'), NULL,
+                             (SELECT id FROM app_user WHERE username = '_verify_rec1'))$q$);
+SELECT pg_temp.accepts('54z', 'an independent person writes off the remainder of a transfer whose receipt others recorded',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('l_rec'), '_VERIFY-L-REC-P')$q$);
+
+-- ---------------------------------------------------------------------
+-- 55. Customer returns: into quarantine, never more than delivered less
+--     returned, valued at the cost they left with
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    PERFORM pg_temp.deliver_v('_VERIFY-D-RT1', 3, 100.00);
+END $$;
+SELECT pg_temp.refuses('55a', 'a return was raised by the person who raised the authorization behind the delivery',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-C-X1', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN'), pg_temp.verify_user())$q$,
+  '23Z02', '%the person who authorized delivery note%');
+SELECT pg_temp.refuses('55b', 'a return was raised by the person who let the goods out',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-C-X2', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN'), pg_temp.gate_poster(pg_temp.fx_id('_VERIFY-D-RT1')))$q$,
+  '23Z02', '%the person who let out delivery note%');
+-- Everyone behind the delivery, not only the releaser: whoever drew up the
+-- note, and whoever signed any step of its authorization.
+DO $$
+BEGIN
+    PERFORM pg_temp.deliver_v('_VERIFY-D-RT2', 3, 100.00,
+                              p_dn_creator => (SELECT id FROM app_user WHERE username = '_verify_loader'));
+END $$;
+SELECT pg_temp.refuses('55m', 'a return was raised by the person who drew up the delivery note',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-C-X4', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT2-DN'),
+                             (SELECT id FROM app_user WHERE username = '_verify_loader'))$q$,
+  '23Z02', '%cannot be raised by the person who drew up delivery note%');
+SELECT pg_temp.refuses('55n', 'a return was raised by a verifier of the authorization behind the delivery',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-C-X5', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT2-DN'),
+                             pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('_VERIFY-D-RT2'), 3)))$q$,
+  '23Z02', '%cannot be raised by a person who signed the authorization behind delivery note%');
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('c_rt2', pg_temp.make_dmg('_VERIFY-C-RT2', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT2-DN')));
+END $$;
+SELECT pg_temp.refuses('55o', 'a line of a return was entered by the person who prepared the authorization behind it',
+  $q$UPDATE damage_report_line SET entered_by = pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('_VERIFY-D-RT2'), 1))
+      WHERE document_id = pg_temp.fx_id('c_rt2')$q$,
+  '23Z02', '%cannot be entered by a person who signed the authorization behind delivery note%');
+DO $$ BEGIN PERFORM pg_temp.dmg_at(pg_temp.fx_id('c_rt2'), 'APPROVED'); END $$;
+SELECT pg_temp.refuses('55p', 'a return was posted by a signer of the authorization behind it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder(pg_temp.step_role(pg_temp.fx_id('_VERIFY-D-RT2'), 1))
+      WHERE id = pg_temp.fx_id('c_rt2')$q$,
+  '23Z02', '%cannot be posted by a person who signed the authorization behind delivery note%');
+SELECT pg_temp.accepts_at_commit('55q', 'a return written and posted by people independent of the delivery',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('c_rt2'), '_VERIFY-C-RT2-P', ARRAY[33.33])$q$,
+  'document_dmg_value_rule, document_dmg_posted_moved_stock');
+SET CONSTRAINTS document_dmg_value_rule, document_dmg_posted_moved_stock DEFERRED;
+SELECT pg_temp.refuses('55c', 'a return was raised at the wrong branch',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-C-X3', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN'), NULL, 'RBV')$q$,
+  '23Z02', '%wrong branch%');
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('c_over',  pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-C-OVER', 'CUSTOMER_RETURN', 4, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN')), 'APPROVED')),
+        ('c_party', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-C-PARTY', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN')), 'APPROVED')),
+        ('c_one',   pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-C-ONE', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN')), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses('55d', 'the person who let the goods out posted their return',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.gate_poster(pg_temp.fx_id('_VERIFY-D-RT1')) WHERE id = pg_temp.fx_id('c_party')$q$,
+  '23Z02', '%cannot be posted by the person who let out delivery note%');
+SELECT pg_temp.refuses('55e', 'a return of 4 against 3 delivered was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.return_poster() WHERE id = pg_temp.fx_id('c_over')$q$,
+  '23Z02', '%at most 3.000 can be returned%');
+SELECT pg_temp.refuses_at_commit('55f', 'a return valued a cent off the cost the goods left with',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('c_one'), '_VERIFY-C-ONE-P', ARRAY[33.34])$q$,
+  'document_dmg_value_rule', '%brings back 33.34%share%is 33.33%');
+SET CONSTRAINTS document_dmg_value_rule DEFERRED;
+DO $$
+DECLARE q_before NUMERIC := pg_temp.glass_at('KGL-QUAR');
+BEGIN
+    PERFORM pg_temp.post_dmg(pg_temp.fx_id('c_one'), '_VERIFY-C-ONE-P', ARRAY[33.33]);
+    IF pg_temp.glass_at('KGL-QUAR') = q_before + 1 THEN
+        RAISE NOTICE 'ok   55g  a first return of 1 of 3 comes into the delivering branch''s quarantine at 33.33';
+    ELSE
+        RAISE WARNING 'FAIL 55g  quarantine moved from % to %', q_before, pg_temp.glass_at('KGL-QUAR');
+    END IF;
+END $$;
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('c_two',   pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-C-TWO', 'CUSTOMER_RETURN', 2, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN')), 'APPROVED')),
+        ('c_three', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-C-THREE', 'CUSTOMER_RETURN', 3, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN')), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses('55h', 'a return of 3 when 1 has already come back was posted',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.return_poster() WHERE id = pg_temp.fx_id('c_three')$q$,
+  '23Z02', '%at most 2.000 can be returned%');
+SELECT pg_temp.accepts_at_commit('55i', 'the second partial return of 2 is valued at the remaining 66.67, exactly',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('c_two'), '_VERIFY-C-TWO-P', ARRAY[66.67])$q$,
+  'document_dmg_value_rule, document_dmg_posted_moved_stock');
+SET CONSTRAINTS document_dmg_value_rule, document_dmg_posted_moved_stock DEFERRED;
+DO $$
+DECLARE total NUMERIC;
+BEGIN
+    SELECT SUM(m.value) INTO total FROM stock_movement m JOIN transaction_ticket t ON t.document_id = m.document_id
+     WHERE t.movement_type = 'RETURN'
+       AND t.source_document_id IN (SELECT r.document_id FROM damage_report r WHERE r.delivery_note_id = pg_temp.fx_id('_VERIFY-D-RT1-DN'));
+    IF total = 100.00 THEN
+        RAISE NOTICE 'ok   55j  two partial returns (33.33 + 66.67) bring back exactly the 100.00 that left';
+    ELSE
+        RAISE WARNING 'FAIL 55j  returns total %', total;
+    END IF;
+END $$;
+DO $$
+BEGIN
+    INSERT INTO fx VALUES ('c_more', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-C-MORE', 'CUSTOMER_RETURN', 1, NULL, NULL, NULL, pg_temp.fx_id('_VERIFY-D-RT1-DN')), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses('55k', 'a return was posted after the whole delivery had come back',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.return_poster() WHERE id = pg_temp.fx_id('c_more')$q$,
+  '23Z02', '%at most 0.000 can be returned%');
+SELECT pg_temp.refuses('55l', 'a posted return was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('c_two')$q$,
+  '23Z02', '%reversing document%');
+
+-- ---------------------------------------------------------------------
+-- 56. Quarantine release: out of quarantine, into sellable stock, at no
+--     change of value
+-- ---------------------------------------------------------------------
+DO $$
+BEGIN
+    INSERT INTO fx VALUES
+        ('q_ok',  pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-Q-OK', 'QUARANTINE_RELEASE', 2, 'KGL-QUAR', 'KGL-MAIN'), 'APPROVED')),
+        ('q_big', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-Q-BIG', 'QUARANTINE_RELEASE', 100000, 'KGL-QUAR', 'KGL-MAIN'), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses_at_commit('56a', 'a release entered the sellable location at a value different from what left quarantine',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('q_ok'), '_VERIFY-Q-OK-P', ARRAY[2000.00], ARRAY[2000.01])$q$,
+  'document_dmg_value_rule', '%left quarantine at 2000.00 but enters the sellable location at 2000.01%');
+SET CONSTRAINTS document_dmg_value_rule DEFERRED;
+SELECT pg_temp.refuses('56b', 'a release took more out of quarantine than it holds',
+  $q$SELECT pg_temp.post_dmg(pg_temp.fx_id('q_big'), '_VERIFY-Q-BIG-P')$q$,
+  '23Z02', '%Not enough stock%');
+DO $$
+DECLARE
+    q_before NUMERIC := pg_temp.glass_at('KGL-QUAR');
+    m_before NUMERIC := pg_temp.glass_at('KGL-MAIN');
+BEGIN
+    PERFORM pg_temp.post_dmg(pg_temp.fx_id('q_ok'), '_VERIFY-Q-OK-P', ARRAY[2000.00], ARRAY[2000.00]);
+    IF pg_temp.glass_at('KGL-QUAR') = q_before - 2 AND pg_temp.glass_at('KGL-MAIN') = m_before + 2 THEN
+        RAISE NOTICE 'ok   56c  a release moves 2 sheets from quarantine into the sellable location at equal value';
+    ELSE
+        RAISE WARNING 'FAIL 56c  quarantine % -> %, main % -> %', q_before, pg_temp.glass_at('KGL-QUAR'),
+            m_before, pg_temp.glass_at('KGL-MAIN');
+    END IF;
+END $$;
+SELECT pg_temp.refuses('56d', 'a posted release was cancelled',
+  $q$UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+      WHERE id = pg_temp.fx_id('q_ok')$q$,
+  '23Z02', '%reversing document%');
+
+-- Everything posted so far completed its legs and its value rules.
+SELECT pg_temp.accepts_at_commit('56e', 'posted reports that moved their stock pass every commit check',
+  $q$SELECT 1$q$,
+  'document_dmg_posted_moved_stock, document_dmg_value_rule, document_trr_value_share, document_trf_value_kept, stock_movement_ticket_posted');
+SET CONSTRAINTS document_dmg_posted_moved_stock, document_dmg_value_rule, document_trr_value_share,
+                document_trf_value_kept, stock_movement_ticket_posted DEFERRED;
+
+-- A posted report whose stock never moved.
+DO $$
+BEGIN
+    INSERT INTO fx VALUES ('w_commit', pg_temp.dmg_at(pg_temp.make_dmg('_VERIFY-W-COMMIT', 'WRITE_OFF', 1, 'KGL-MAIN'), 'APPROVED'));
+END $$;
+SELECT pg_temp.refuses_at_commit('56f', 'a report was posted whose stock never reached the ledger',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = pg_temp.fx_id('w_commit')$q$,
+  'document_dmg_posted_moved_stock', '%never completed its DAMAGE leg%');
+SET CONSTRAINTS document_dmg_posted_moved_stock DEFERRED;
+
+-- ---------------------------------------------------------------------
+-- 57. Independence runs both ways, and customs follows the goods.
+--     Whoever wrote off part of a transfer does not record its arrival;
+--     a loss or a return carries the customs reference its goods moved
+--     under.
+-- ---------------------------------------------------------------------
+INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
+VALUES ('_verify_lost1', 'Verification Loss Author', 'x', TRUE, FALSE),
+       ('_verify_lost2', 'Verification Loss Line Enterer', 'x', TRUE, FALSE);
+CREATE FUNCTION pg_temp.lost(p_n INT) RETURNS UUID AS $$
+    SELECT id FROM app_user WHERE username = '_verify_lost' || p_n;
+$$ LANGUAGE sql STABLE;
+-- This section brings its own stock, so the sections after it find what
+-- they found before.
+DO $$
+DECLARE
+    fin UUID := pg_temp.holder('FINANCE');
+    g UUID; tt UUID;
+BEGIN
+    g := pg_temp.make_grn('_VERIFY-G-X57', NULL, 'KGL', 'KGL-MAIN');
+    UPDATE goods_received_line SET quantity = 41, qty_base_uom = 41, storage_bin_id = NULL WHERE document_id = g;
+    UPDATE document SET status = 'PENDING' WHERE id = g;
+    PERFORM pg_temp.sign_upto(g, pg_temp.steps_in(g));
+    UPDATE document SET status = 'APPROVED' WHERE id = g;
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = g;
+    tt := pg_temp.make_ticket(g, fin, '_VERIFY-G-X57-TT');
+    PERFORM pg_temp.move_ticket(tt, fin, kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = tt;
+END $$;
+DO $$
+DECLARE l UUID;
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-X1', 20);
+    -- a draft loss of 5, raised by lost1, its line entered by lost2
+    l := pg_temp.make_dmg('_VERIFY-L-X1', 'TRANSIT_LOSS', 5, p_transfer => pg_temp.fx_id('_VERIFY-T-X1'),
+                          p_creator => pg_temp.lost(1));
+    UPDATE damage_report_line SET entered_by = pg_temp.lost(2) WHERE document_id = l;
+END $$;
+SELECT pg_temp.refuses('57a', 'a receipt was raised by the author of a loss of the same transfer',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-X1A', pg_temp.fx_id('_VERIFY-T-X1'), pg_temp.lost(1))$q$,
+  '23Z02', '%cannot be raised by the person who wrote off part of transfer%');
+DO $$
+BEGIN
+    -- the independent receiver's draft receipt of the 15 still expected
+    INSERT INTO fx VALUES ('trr_x1', pg_temp.make_trr('_VERIFY-R-X1', pg_temp.fx_id('_VERIFY-T-X1'), p_qty => 15));
+END $$;
+SELECT pg_temp.refuses('57b', 'a receipt line was entered by someone who entered a line of a loss of the same transfer',
+  $q$UPDATE transfer_receipt_line SET entered_by = pg_temp.lost(2) WHERE document_id = pg_temp.fx_id('trr_x1')$q$,
+  '23Z02', '%cannot be entered by the person who wrote off part of transfer%');
+SELECT pg_temp.refuses('57c', 'a receipt was posted by someone who entered a line of a loss of the same transfer',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.lost(2) WHERE id = pg_temp.fx_id('trr_x1')$q$,
+  '23Z02', '%cannot be posted by the person who wrote off part of transfer%');
+DO $$
+DECLARE l UUID;
+BEGIN
+    PERFORM pg_temp.dispatch('_VERIFY-T-X2', 20);
+    l := pg_temp.make_dmg('_VERIFY-L-X2', 'TRANSIT_LOSS', 5, p_transfer => pg_temp.fx_id('_VERIFY-T-X2'),
+                          p_creator => pg_temp.lost(1));
+    UPDATE document SET status = 'CANCELLED', cancel_reason = 'Verification', cancelled_by = pg_temp.verify_user()
+     WHERE id = l;
+END $$;
+SELECT pg_temp.accepts('57d', 'once the loss is cancelled its author may record the arrival',
+  $q$SELECT pg_temp.make_trr('_VERIFY-R-X2', pg_temp.fx_id('_VERIFY-T-X2'), pg_temp.lost(1))$q$);
+-- Judged on its value rule only: an earlier section leaves a deliberately
+-- incomplete receipt pending on the moved-stock check, as 54s also avoids.
+SELECT pg_temp.accepts_at_commit('57e', 'an independent receiver still records the arrival',
+  $q$SELECT pg_temp.finish_receipt(pg_temp.fx_id('trr_x1'), '_VERIFY-R-X1')$q$,
+  'document_trr_value_share');
+SET CONSTRAINTS document_trr_value_share DEFERRED;
+
+DO $$
+DECLARE l UUID; ref TEXT;
+BEGIN
+    l := pg_temp.make_dmg('_VERIFY-L-X3', 'TRANSIT_LOSS', 1, p_transfer => pg_temp.fx_id('_VERIFY-T-X2'));
+    SELECT customs_reference INTO ref FROM damage_report WHERE document_id = l;
+    IF ref = 'C-TRF-1' THEN
+        RAISE NOTICE 'ok   57f  a loss of a consignment that moved under customs reference C-TRF-1 carries it';
+    ELSE
+        RAISE WARNING 'FAIL 57f  the loss carries customs reference %', ref;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('57g', 'a loss of that consignment named a different customs reference',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-L-X4', 'TRANSIT_LOSS', 1, p_transfer => pg_temp.fx_id('_VERIFY-T-X2'),
+                             p_customs => 'C-OTHER')$q$,
+  '23514', '%moved under customs reference C-TRF-1%');
+DO $$
+DECLARE r UUID; ref TEXT;
+BEGIN
+    PERFORM pg_temp.deliver_v('_VERIFY-D-CUS', 1, 1000.00, 'C-DAO-1');
+    r := pg_temp.make_dmg('_VERIFY-C-CUS', 'CUSTOMER_RETURN', 1, p_dn => pg_temp.fx_id('_VERIFY-D-CUS-DN'));
+    SELECT customs_reference INTO ref FROM damage_report WHERE document_id = r;
+    IF ref = 'C-DAO-1' THEN
+        RAISE NOTICE 'ok   57h  a return of a delivery made under customs reference C-DAO-1 carries it';
+    ELSE
+        RAISE WARNING 'FAIL 57h  the return carries customs reference %', ref;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('57i', 'a return of that delivery named a different customs reference',
+  $q$SELECT pg_temp.make_dmg('_VERIFY-C-CUS2', 'CUSTOMER_RETURN', 1, p_dn => pg_temp.fx_id('_VERIFY-D-CUS-DN'),
+                             p_customs => 'C-OTHER')$q$,
+  '23514', '%moved under customs reference C-DAO-1%');
 
 -- ---------------------------------------------------------------------
 -- 46. The chain switch for transfers is a row, and a document finishes

@@ -33,5 +33,7 @@ public record TransferActions(
         boolean canDispatch,
         String dispatchReason,
         boolean canReceive,
-        String receiveReason
+        String receiveReason,
+        boolean canRaiseLoss,
+        String lossReason
 ) {}

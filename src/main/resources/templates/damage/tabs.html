@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- The three views of Returns and Damage: the reports, stock left in transit, stock in quarantine. -->
+<ul th:fragment="tabs(active)" class="nav nav-tabs mb-3">
+  <li class="nav-item">
+    <a class="nav-link" th:classappend="${active == 'reports'} ? 'active'" th:href="@{/damage}">Reports</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" th:classappend="${active == 'transit'} ? 'active'" th:href="@{/damage/in-transit}">Left in transit</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" th:classappend="${active == 'quarantine'} ? 'active'" th:href="@{/damage/quarantine}">Quarantine stock</a>
+  </li>
+</ul>
+
+</body>
+</html>

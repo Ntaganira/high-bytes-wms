@@ -35,7 +35,8 @@ public record TransferLineRow(
         String note,
         BigDecimal dispatchedBase,
         BigDecimal receivedBase,
-        BigDecimal inTransitBase
+        BigDecimal inTransitBase,
+        BigDecimal writtenOffBase
 ) {
 
     public boolean dispatched() {

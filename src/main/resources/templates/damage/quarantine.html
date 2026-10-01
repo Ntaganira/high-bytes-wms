@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Quarantine stock</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · RETURNS &amp; DAMAGE</p>
+    <h1 class="page-title">Quarantine stock</h1>
+    <p class="page-sub">Goods held out of sale at <span th:text="${currentBranch?.name}">this branch</span>: returns from
+      customers and anything set aside for inspection. A release puts it back on sale at the same value; a write-off
+      removes it at average cost. Either needs a signed report.</p>
+  </div>
+
+  <div th:replace="~{damage/tabs :: tabs('quarantine')}"></div>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table compact mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Location</th>
+            <th scope="col">Item</th>
+            <th scope="col">Bin</th>
+            <th scope="col" class="num">Quantity</th>
+            <th scope="col" class="num">Value (RWF)</th>
+            <th scope="col">Last moved</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="r : ${rows}">
+            <td class="mono" th:text="${r.locationCode()}">KGL-QUAR</td>
+            <td>
+              <span class="mono" th:text="${r.itemCode()}">GL-CF-6</span>
+              <span class="d-block small text-body-secondary" th:text="${r.itemDescription()}">Clear float</span>
+            </td>
+            <td class="mono" th:text="${r.binCode()} ?: '—'">Q1</td>
+            <td class="num mono">
+              <span th:text="${#numbers.formatDecimal(r.quantity(), 1, 'COMMA', 3, 'POINT')}">5.000</span>
+              <span class="small text-body-secondary" th:text="${r.baseUomCode()}">SHEET</span>
+            </td>
+            <td class="num mono" th:text="${#numbers.formatDecimal(r.value(), 1, 'COMMA', 2, 'POINT')}">44,347.83</td>
+            <td class="mono small" th:text="${r.lastMovementAt() != null} ? ${#temporals.format(r.lastMovementAt(), 'dd MMM yyyy')} : '—'">30 Sep 2026</td>
+            <td class="text-end text-nowrap">
+              <th:block th:if="${canCreate}" sec:authorize="hasAuthority('damage.create')">
+                <a th:href="@{/damage/new(kind='QUARANTINE_RELEASE', from=${r.locationId()})}"
+                   class="btn btn-sm btn-primary-action"><i class="bi bi-box-arrow-up-right"></i> Release</a>
+                <a th:href="@{/damage/new(kind='WRITE_OFF', from=${r.locationId()})}"
+                   class="btn btn-sm btn-outline-secondary"><i class="bi bi-exclamation-triangle"></i> Write off</a>
+              </th:block>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(rows)}">
+            <td colspan="7">
+              <div th:replace="~{fragments/ui :: emptyState('bi-shield-exclamation', 'Nothing in quarantine', 'Returned goods and stock set aside for inspection appear here.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

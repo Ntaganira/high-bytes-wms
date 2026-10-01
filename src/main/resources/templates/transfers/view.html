@@ -48,6 +48,10 @@
          th:href="@{/transfers/receipts/new(transfer=${trf.id})}" class="btn btn-primary-action">
         <i class="bi bi-box-arrow-in-down"></i> Receive
       </a>
+      <a th:if="${actions.canRaiseLoss}" sec:authorize="hasAuthority('damage.create')"
+         th:href="@{/damage/new(kind='TRANSIT_LOSS', transfer=${trf.id})}" class="btn btn-outline-secondary">
+        <i class="bi bi-exclamation-triangle"></i> Write off a loss
+      </a>
     </div>
   </div>
 
@@ -111,6 +115,7 @@
                 <th:block th:if="${trf.postedAt != null}">
                   <th scope="col" class="num">Dispatched</th>
                   <th scope="col" class="num">Received</th>
+                  <th scope="col" class="num">Written off</th>
                   <th scope="col" class="num">In transit</th>
                 </th:block>
                 <th scope="col" th:unless="${trf.postedAt != null}">On hand at source</th>
@@ -130,6 +135,7 @@
                 <th:block th:if="${trf.postedAt != null}">
                   <td class="num mono" th:text="${#numbers.formatDecimal(l.dispatchedBase(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
                   <td class="num mono" th:text="${#numbers.formatDecimal(l.receivedBase(), 1, 'COMMA', 3, 'POINT')}">98.000</td>
+                  <td class="num mono" th:text="${#numbers.formatDecimal(l.writtenOffBase(), 1, 'COMMA', 3, 'POINT')}">2.000</td>
                   <td class="num mono">
                     <span th:text="${#numbers.formatDecimal(l.inTransitBase(), 1, 'COMMA', 3, 'POINT')}">2.000</span>
                     <span class="d-block small" th:if="${l.leftInTransit() and trf.displayState == 'IN_TRANSIT'}"
@@ -167,6 +173,23 @@
             <span th:replace="~{fragments/ui :: chip(${r.status()})}"></span>
             <span th:if="${r.postedAt() != null}" class="text-body-secondary"
                   th:text="'· posted by ' + ${r.postedByName()} + ' on ' + ${#temporals.format(r.postedAt(), 'dd MMM yyyy HH:mm')}">posted</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${!#lists.isEmpty(losses)}" sec:authorize="hasAuthority('damage.view')">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+            <h2 class="card-title">Losses written off</h2>
+          </div>
+        </div>
+        <ul class="list-unstyled mb-0 small">
+          <li th:each="r : ${losses}" class="py-1">
+            <a class="doc-link" th:href="@{'/damage/' + ${r.id()}}" th:text="${r.serialNo()}">DMG-KGL-2026-0001</a>
+            <span th:replace="~{fragments/ui :: chip(${r.status()})}"></span>
+            <span th:if="${r.postedAt() != null}" class="text-body-secondary"
+                  th:text="' · posted by ' + ${r.postedByName()} + ' on ' + ${#temporals.format(r.postedAt(), 'dd MMM yyyy HH:mm')}">posted</span>
           </li>
         </ul>
       </section>
@@ -283,6 +306,7 @@
 
         <p class="small text-body-secondary" th:if="${actions.dispatchReason}" th:text="${actions.dispatchReason}">Reason</p>
         <p class="small text-body-secondary" th:if="${actions.receiveReason}" th:text="${actions.receiveReason}">Reason</p>
+        <p class="small text-body-secondary" th:if="${actions.lossReason}" th:text="${actions.lossReason}">Reason</p>
 
         <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('transfer.create')">
           <summary class="small fw-semibold">Cancel this transfer</summary>
@@ -299,7 +323,8 @@
            th:if="${!actions.canSubmit and !actions.canSign and !actions.canCancel and !actions.canEdit
                     and !actions.canDispatch and !actions.canReceive and !actions.canCorrect
                     and actions.submitReason == null and actions.signReason == null and actions.cancelReason == null
-                    and actions.dispatchReason == null and actions.receiveReason == null}">
+                    and actions.dispatchReason == null and actions.receiveReason == null
+                    and !actions.canRaiseLoss and actions.lossReason == null}">
           Nothing is waiting on you here.
         </p>
       </section>

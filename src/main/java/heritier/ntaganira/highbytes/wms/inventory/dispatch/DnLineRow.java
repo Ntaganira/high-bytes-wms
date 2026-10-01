@@ -32,5 +32,6 @@ public record DnLineRow(
         BigDecimal quantityBase,
         UUID storageBinId,
         String binCode,
-        BigDecimal measuredThicknessMm
+        BigDecimal measuredThicknessMm,
+        BigDecimal returnedBase
 ) {}

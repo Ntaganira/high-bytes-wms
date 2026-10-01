@@ -515,3 +515,12 @@ th.num, td.num { text-align: right; }
 .release-gate.gate-received {
   border-color: var(--color-success); background: var(--color-success-light); color: var(--badge-completed-text);
 }
+
+/* Returns and damage: a transfer written off in full, and a posted report's banner. */
+.status-written_off { background: var(--badge-locked-bg); color: var(--badge-locked-text); }
+.release-gate.gate-written_off {
+  border-color: var(--color-warning); background: var(--color-warning-light); color: var(--badge-held-text);
+}
+.release-gate.gate-posted {
+  border-color: var(--color-success); background: var(--color-success-light); color: var(--badge-completed-text);
+}
