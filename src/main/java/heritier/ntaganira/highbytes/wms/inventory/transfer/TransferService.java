@@ -29,6 +29,7 @@ import heritier.ntaganira.highbytes.wms.inventory.UnitConversions;
 import heritier.ntaganira.highbytes.wms.inventory.dispatch.GateSteps;
 import heritier.ntaganira.highbytes.wms.inventory.dispatch.ReleaseGate;
 import heritier.ntaganira.highbytes.wms.inventory.dispatch.StockAt;
+import heritier.ntaganira.highbytes.wms.inventory.damage.PartyCheck;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.LedgerService;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.MovementRequest;
 import heritier.ntaganira.highbytes.wms.security.CurrentUser;
@@ -77,7 +78,9 @@ public class TransferService {
             CASE WHEN d.status = 'POSTED'
                  THEN CASE WHEN NOT EXISTS (SELECT 1 FROM transfer_receipt r JOIN document rd ON rd.id = r.document_id
                                              WHERE r.transfer_id = d.id AND rd.status = 'POSTED')
-                           THEN 'DISPATCHED'
+                           THEN CASE WHEN EXISTS (SELECT 1 FROM transfer_line_position p
+                                                   WHERE p.transfer_id = d.id AND p.in_transit_base > 0)
+                                     THEN 'DISPATCHED' ELSE 'WRITTEN_OFF' END
                            WHEN EXISTS (SELECT 1 FROM transfer_line_position p
                                          WHERE p.transfer_id = d.id AND p.in_transit_base > 0)
                            THEN 'IN_TRANSIT'
@@ -115,7 +118,7 @@ public class TransferService {
     private static final String LINES = """
             SELECT l.id, l.line_no, l.item_id, i.item_code, i.description, l.uom_id, u.code AS uom_code,
                    bu.code AS base_uom_code, l.quantity, l.qty_base_uom, l.storage_bin_id, sb.bin_code, l.note,
-                   p.dispatched_base, p.received_base, p.in_transit_base
+                   p.dispatched_base, p.received_base, p.in_transit_base, p.written_off_base
               FROM transfer_order_line l
               JOIN item i  ON i.id = l.item_id
               JOIN uom u   ON u.id = l.uom_id
@@ -153,10 +156,13 @@ public class TransferService {
     /** One receipt raised against a transfer, for the transfer's view. */
     public record ReceiptSummary(UUID id, String serialNo, String status, LocalDateTime postedAt, String postedByName) {}
 
+    /** One loss report written against a transfer, for the transfer's view. */
+    public record LossSummary(UUID id, String serialNo, String status, LocalDateTime postedAt, String postedByName) {}
+
     /** Everything the transfer's view needs, gathered in one read-only pass. */
     public record Detail(TransferHeader header, List<TransferLineRow> lines, Map<UUID, List<StockAt>> stock,
                          List<ChainStep> chain, ChainInfo chainInfo, ReleaseGate gate, TransferActions actions,
-                         List<ReceiptSummary> receipts, TransferPosting posting) {}
+                         List<ReceiptSummary> receipts, TransferPosting posting, List<LossSummary> losses) {}
 
     private final JdbcClient jdbc;
     private final DocumentService documents;
@@ -165,9 +171,11 @@ public class TransferService {
     private final BranchService branches;
     private final GateSteps gateSteps;
     private final UnitConversions units;
+    private final PartyCheck parties;
 
     public TransferService(JdbcClient jdbc, DocumentService documents, TransferLookupService lookups,
-                           LedgerService ledger, BranchService branches, GateSteps gateSteps, UnitConversions units) {
+                           LedgerService ledger, BranchService branches, GateSteps gateSteps, UnitConversions units,
+                           PartyCheck parties) {
         this.jdbc = jdbc;
         this.documents = documents;
         this.lookups = lookups;
@@ -175,6 +183,7 @@ public class TransferService {
         this.branches = branches;
         this.gateSteps = gateSteps;
         this.units = units;
+        this.parties = parties;
     }
 
     // ---- reads -----------------------------------------------------------
@@ -207,6 +216,7 @@ public class TransferService {
     public List<TransferRow> awaitingReceipt(UUID branchId) {
         return jdbc.sql(LIST_COLUMNS + """
                  WHERE tl.branch_id = :branch AND d.status = 'POSTED'
+                   AND EXISTS (SELECT 1 FROM transfer_line_position p WHERE p.transfer_id = d.id AND p.in_transit_base > 0)
                    AND NOT EXISTS (SELECT 1 FROM transfer_receipt r JOIN document rd ON rd.id = r.document_id
                                     WHERE r.transfer_id = d.id AND rd.status <> 'CANCELLED')
                  ORDER BY d.posted_at
@@ -246,7 +256,8 @@ public class TransferService {
                         rs.getString("note"),
                         rs.getBigDecimal("dispatched_base"),
                         rs.getBigDecimal("received_base"),
-                        rs.getBigDecimal("in_transit_base")))
+                        rs.getBigDecimal("in_transit_base"),
+                        rs.getBigDecimal("written_off_base")))
                 .list();
     }
 
@@ -263,7 +274,7 @@ public class TransferService {
                         lines.stream().map(TransferLineRow::itemId).collect(Collectors.toSet()))
                 : Map.of();
         return new Detail(header, lines, stock, chain, documents.chainInfo(id).orElse(null), gate,
-                actionsFor(header, document, chain), receiptsOf(id), postingOf(id).orElse(null));
+                actionsFor(header, document, chain), receiptsOf(id), postingOf(id).orElse(null), lossesOf(id));
     }
 
     /** The release banner for a transfer, shared with the delivery authorization's. */
@@ -309,6 +320,20 @@ public class TransferService {
                 """)
                 .param("id", transferId, Types.OTHER)
                 .query((rs, n) -> new ReceiptSummary(rs.getObject("id", UUID.class), rs.getString("serial_no"),
+                        rs.getString("status"), KigaliTime.read(rs, "posted_at"), rs.getString("posted_by_name")))
+                .list();
+    }
+
+    /** Loss reports raised against the transfer, oldest first. */
+    public List<LossSummary> lossesOf(UUID transferId) {
+        return jdbc.sql("""
+                SELECT d.id, d.serial_no, d.status, d.posted_at, pu.full_name AS posted_by_name
+                  FROM damage_report r JOIN document d ON d.id = r.document_id
+             LEFT JOIN app_user pu ON pu.id = d.posted_by
+                 WHERE r.transfer_id = :id ORDER BY d.created_at
+                """)
+                .param("id", transferId, Types.OTHER)
+                .query((rs, n) -> new LossSummary(rs.getObject("id", UUID.class), rs.getString("serial_no"),
                         rs.getString("status"), KigaliTime.read(rs, "posted_at"), rs.getString("posted_by_name")))
                 .list();
     }
@@ -539,18 +564,38 @@ public class TransferService {
         StepCheck dispatch = documents.canPost(d, chain);
         String status = h.status();
 
+        boolean remaining = inTransitLeft(h.id());
         String receiveReason = null;
         boolean canReceive = false;
         if ("POSTED".equals(status) && receiver) {
             UUID me = CurrentUser.id();
             boolean live = receiptsOf(h.id()).stream().anyMatch(r -> !"CANCELLED".equals(r.status()));
             String independence = ReceiptService.receiverReason(h.serialNo(), me, h.createdBy(), h.postedBy(), chain);
+            if (independence == null && ReceiptService.wroteOffPart(jdbc, me, h.id())) {
+                independence = ReceiptService.lossAuthorReason(h.serialNo());
+            }
             if (independence != null) {
                 receiveReason = independence;
             } else if (live) {
                 receiveReason = h.serialNo() + " already has a live receipt. A transfer is received once.";
+            } else if (!remaining) {
+                receiveReason = "Nothing remains in transit on " + h.serialNo() + ": everything dispatched has been "
+                        + "received or written off as lost.";
             } else {
                 canReceive = true;
+            }
+        }
+        boolean canRaiseLoss = false;
+        String lossReason = null;
+        if ("POSTED".equals(status) && CurrentUser.holdsAt("damage.create", h.branchId())) {
+            String independence = parties.reason(CurrentUser.id(), "TRANSIT_LOSS", h.id(), null);
+            if (!remaining) {
+                lossReason = "Nothing remains in transit on " + h.serialNo() + ": everything dispatched has been "
+                        + "received or written off as lost.";
+            } else if (independence != null) {
+                lossReason = independence;
+            } else {
+                canRaiseLoss = true;
             }
         }
         return new TransferActions(
@@ -568,7 +613,15 @@ public class TransferService {
                 dispatch.allowed(),
                 "APPROVED".equals(status) && !dispatch.allowed() && dispatcher ? dispatch.reason() : null,
                 canReceive,
-                receiveReason);
+                receiveReason,
+                canRaiseLoss,
+                lossReason);
+    }
+
+    /** Whether any line of this dispatched transfer still has stock in the source branch's transit location. */
+    boolean inTransitLeft(UUID transferId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM transfer_line_position WHERE transfer_id = :id AND in_transit_base > 0)")
+                .param("id", transferId, Types.OTHER).query(Boolean.class).single();
     }
 
     private TransferHeader requireHeader(UUID id) {

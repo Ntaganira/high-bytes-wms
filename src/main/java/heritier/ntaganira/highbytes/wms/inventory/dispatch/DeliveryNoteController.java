@@ -134,6 +134,9 @@ public class DeliveryNoteController {
         model.addAttribute("available", totals(detail.stock()));
         model.addAttribute("actions", detail.actions());
         model.addAttribute("posting", detail.posting());
+        model.addAttribute("returns", detail.returns());
+        model.addAttribute("canReturn", detail.canReturn());
+        model.addAttribute("returnReason", detail.returnReason());
         model.addAttribute("history", audit.historyOf("document", id, 40));
         return "delivery-notes/view";
     }

@@ -23,6 +23,7 @@ import heritier.ntaganira.highbytes.wms.document.DocumentKind;
 import heritier.ntaganira.highbytes.wms.document.DocumentService;
 import heritier.ntaganira.highbytes.wms.document.OpenedDocument;
 import heritier.ntaganira.highbytes.wms.document.StepCheck;
+import heritier.ntaganira.highbytes.wms.inventory.damage.PartyCheck;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.LedgerService;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.MovementRequest;
 import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.BinOption;
@@ -96,7 +97,8 @@ public class DeliveryNoteService {
             SELECT dl.id, dl.line_no, dl.authorization_line_id, al.line_no AS dao_line_no,
                    dl.item_id, i.item_code, i.description, i.product_type, i.thickness_mm,
                    dl.uom_id, u.code AS uom_code, bu.code AS base_uom_code,
-                   dl.quantity, dl.qty_base_uom, dl.storage_bin_id, sb.bin_code, dl.measured_thickness_mm
+                   dl.quantity, dl.qty_base_uom, dl.storage_bin_id, sb.bin_code, dl.measured_thickness_mm,
+                   delivery_line_returned(dl.id) AS returned_base
               FROM delivery_note_line dl
               JOIN delivery_authorization_line al ON al.id = dl.authorization_line_id
               JOIN item i  ON i.id = dl.item_id
@@ -113,7 +115,12 @@ public class DeliveryNoteService {
 
     /** Everything the note's own view needs. */
     public record Detail(DnHeader header, List<DnLineRow> lines, ReleaseGate gate, Map<UUID, List<StockAt>> stock,
-                         DnActions actions, DnPosting posting) {}
+                         DnActions actions, DnPosting posting,
+                         List<ReturnSummary> returns, boolean canReturn, String returnReason) {}
+
+    /** One customer-return report written against the note, for the note's view. */
+    public record ReturnSummary(UUID id, String serialNo, String status, java.time.LocalDateTime postedAt,
+                                String postedByName) {}
 
     private final JdbcClient jdbc;
     private final DocumentService documents;
@@ -121,15 +128,18 @@ public class DeliveryNoteService {
     private final DispatchLookupService lookups;
     private final LedgerService ledger;
     private final BranchService branches;
+    private final PartyCheck parties;
 
     public DeliveryNoteService(JdbcClient jdbc, DocumentService documents, DispatchService dispatch,
-                               DispatchLookupService lookups, LedgerService ledger, BranchService branches) {
+                               DispatchLookupService lookups, LedgerService ledger, BranchService branches,
+                               PartyCheck parties) {
         this.jdbc = jdbc;
         this.documents = documents;
         this.dispatch = dispatch;
         this.lookups = lookups;
         this.ledger = ledger;
         this.branches = branches;
+        this.parties = parties;
     }
 
     // ---- reads -----------------------------------------------------------
@@ -217,7 +227,8 @@ public class DeliveryNoteService {
                         rs.getBigDecimal("qty_base_uom"),
                         rs.getObject("storage_bin_id", UUID.class),
                         rs.getString("bin_code"),
-                        rs.getBigDecimal("measured_thickness_mm")))
+                        rs.getBigDecimal("measured_thickness_mm"),
+                        rs.getBigDecimal("returned_base")))
                 .list();
     }
 
@@ -280,7 +291,37 @@ public class DeliveryNoteService {
                 ? lookups.stockAt(header.locationId(),
                         lines.stream().map(DnLineRow::itemId).collect(Collectors.toSet()))
                 : Map.of();
-        return new Detail(header, lines, gate, stock, actionsFor(header, gate), postingOf(id).orElse(null));
+        boolean posted = "POSTED".equals(header.status());
+        boolean right = posted && CurrentUser.holdsAt("damage.create", header.branchId());
+        boolean anyLeft = lines.stream().anyMatch(l -> l.quantityBase().compareTo(l.returnedBase()) > 0);
+        String returnReason = null;
+        boolean canReturn = false;
+        if (right) {
+            String independence = parties.reason(CurrentUser.id(), "CUSTOMER_RETURN", null, id);
+            if (!anyLeft) {
+                returnReason = "Everything delivered on " + header.serialNo() + " has already come back.";
+            } else if (independence != null) {
+                returnReason = independence;
+            } else {
+                canReturn = true;
+            }
+        }
+        return new Detail(header, lines, gate, stock, actionsFor(header, gate), postingOf(id).orElse(null),
+                returnsOf(id), canReturn, returnReason);
+    }
+
+    /** Customer-return reports raised against this note, oldest first. */
+    public List<ReturnSummary> returnsOf(UUID noteId) {
+        return jdbc.sql("""
+                SELECT d.id, d.serial_no, d.status, d.posted_at, pu.full_name AS posted_by_name
+                  FROM damage_report r JOIN document d ON d.id = r.document_id
+             LEFT JOIN app_user pu ON pu.id = d.posted_by
+                 WHERE r.delivery_note_id = :id ORDER BY d.created_at
+                """)
+                .param("id", noteId, Types.OTHER)
+                .query((rs, n) -> new ReturnSummary(rs.getObject("id", UUID.class), rs.getString("serial_no"),
+                        rs.getString("status"), KigaliTime.read(rs, "posted_at"), rs.getString("posted_by_name")))
+                .list();
     }
 
     public Optional<DnPosting> postingOf(UUID id) {

@@ -31,6 +31,8 @@ public enum DocumentKind {
     TRF("TRF", "transfer", "Inter-Warehouse Transfer", "create", "dispatch"),
     /** Raised at the destination branch; posting it is the receipt, and cancelling one is the receiver's right. */
     TRR("TRR", "transfer", "Transfer Receipt", "receive", "receive"),
+    /** Raised by the warehouse manager; Finance posts it, so cancelling a draft is the raiser's right (damage.create). */
+    DMG("DMG", "damage", "Return & Damage Report"),
     TT("TT", "ticket", "Transaction Ticket");
 
     private final String code;

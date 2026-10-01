@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${dmg.serialNo}">Report</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${dmg})}"></div>
+
+  <!-- The state of the approval and the posting, in the one banner every controlled document uses. -->
+  <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · RETURNS &amp; DAMAGE · DMG-009</p>
+      <h1 class="page-title" th:text="${dmg.kind.title}">Write-off</h1>
+      <p class="page-sub">
+        <span th:text="${dmg.reasonLabel}">Damaged</span>
+        <th:block th:if="${dmg.fromCode != null}">· from <span class="mono" th:text="${dmg.fromCode}">KGL-MAIN</span></th:block>
+        <th:block th:if="${dmg.toCode != null}">· into <span class="mono" th:text="${dmg.toCode}">KGL-QUAR</span></th:block>
+        <th:block th:if="${dmg.transferId != null}">· against
+          <a class="doc-link mono" th:href="@{'/transfers/' + ${dmg.transferId}}" th:text="${dmg.transferSerial}">TRF-KGL-2026-0001</a></th:block>
+        <th:block th:if="${dmg.deliveryNoteId != null}">· against
+          <a class="doc-link mono" th:href="@{'/delivery-notes/' + ${dmg.deliveryNoteId}}" th:text="${dmg.deliveryNoteSerial}">DN-KGL-2026-0001</a></th:block>
+      </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a th:if="${actions.canEdit}" sec:authorize="hasAuthority('damage.create')"
+         th:href="@{'/damage/' + ${dmg.id} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit draft
+      </a>
+    </div>
+  </div>
+
+  <div class="alert alert-secondary d-flex align-items-start gap-2" role="status" th:if="${dmg.status == 'CANCELLED'}">
+    <i class="bi bi-x-circle-fill"></i>
+    <div>
+      <strong>Cancelled</strong>
+      by <span th:text="${dmg.cancelledByName}">Name</span>
+      on <span th:text="${#temporals.format(dmg.cancelledAt, 'dd MMM yyyy HH:mm')}">30 Sep 10:00</span>.
+      Reason: <span th:text="${dmg.cancelReason}">Reason</span>. The serial stays on the register.
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+            <h2 class="card-title">What happened</h2>
+          </div>
+        </div>
+        <p class="mb-3" th:text="${dmg.reason}">Reason</p>
+        <dl class="row mb-0 small">
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Kind</dt>
+          <dd class="col-7 col-md-3" th:text="${dmg.kind.title}">Write-off</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Reason code</dt>
+          <dd class="col-7 col-md-3" th:text="${dmg.reasonLabel}">Damaged</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customs reference</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${dmg.customsReference} ?: '—'">C-2026-1</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Dated</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${#temporals.format(dmg.documentDate, 'dd MMM yyyy')}">30 Sep 2026</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Reference</dt>
+          <dd class="col-7 col-md-3" th:text="${dmg.reference} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Notes</dt>
+          <dd class="col-7 col-md-3" th:text="${dmg.notes} ?: '—'">—</dd>
+        </dl>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-ol" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Lines</h2>
+              <p class="card-sub" th:if="${dmg.status == 'POSTED'}">With what each line was worth in the ledger</p>
+              <p class="card-sub" th:unless="${dmg.status == 'POSTED'}">No stock has moved: the value is fixed when Finance posts</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Item</th>
+                <th scope="col" class="num">Quantity</th>
+                <th scope="col">Unit</th>
+                <th scope="col">From bin</th>
+                <th scope="col">To bin</th>
+                <th scope="col">Against</th>
+                <th scope="col" class="num" th:if="${dmg.status == 'POSTED'}">Value (RWF)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="l : ${lines}">
+                <td class="mono" th:text="${l.lineNo()}">1</td>
+                <td>
+                  <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                  <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                  <span class="d-block small text-body-secondary" th:if="${l.note()}" th:text="${l.note()}">note</span>
+                </td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(l.quantity(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
+                <td class="mono" th:text="${l.uomCode()}">SHEET</td>
+                <td class="mono" th:text="${l.binCode()} ?: '—'">A1</td>
+                <td class="mono" th:text="${l.toBinCode()} ?: '—'">Q1</td>
+                <td class="mono small">
+                  <span th:if="${l.transferLineNo() != null}" th:text="'transfer line ' + ${l.transferLineNo()}">transfer line 1</span>
+                  <span th:if="${l.deliveryNoteLineNo() != null}" th:text="'delivery line ' + ${l.deliveryNoteLineNo()}">delivery line 1</span>
+                  <span th:if="${l.transferLineNo() == null and l.deliveryNoteLineNo() == null}">—</span>
+                </td>
+                <td class="num mono" th:if="${dmg.status == 'POSTED'}"
+                    th:text="${l.value() != null} ? ${#numbers.formatDecimal(l.value(), 1, 'COMMA', 2, 'POINT')} : '—'">354,782.61</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${!#lists.isEmpty(stock)}">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-box" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">On hand at <span class="mono" th:text="${dmg.fromCode}">KGL-MAIN</span> now</h2>
+              <p class="card-sub">What the stock would be weighed against if this were posted today</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr><th scope="col">Item</th><th scope="col">Bin</th><th scope="col" class="num">Quantity</th><th scope="col" class="num">Value (RWF)</th></tr>
+            </thead>
+            <tbody>
+              <tr th:each="s : ${stock}">
+                <td><span class="mono" th:text="${s.itemCode()}">GL-CF-6</span></td>
+                <td class="mono small" th:text="${s.binCode()} ?: 'no bin'">A1</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(s.quantity(), 1, 'COMMA', 3, 'POINT')}">120.000</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(s.value(), 1, 'COMMA', 2, 'POINT')}">1,064,347.83</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${posting != null}">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-journal-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">In the ledger</h2>
+              <p class="card-sub">Every leg this report moved, valued as the rule for its kind requires</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Ticket</th>
+                <th scope="col">Leg</th>
+                <th scope="col">Line</th>
+                <th scope="col">Item</th>
+                <th scope="col">Location</th>
+                <th scope="col" class="num">Quantity</th>
+                <th scope="col" class="num">Unit cost</th>
+                <th scope="col" class="num">Value</th>
+                <th scope="col">Business date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="m : ${posting.movements()}">
+                <td class="mono" th:text="${m.ticketSerial()}">TT-KGL-2026-0003</td>
+                <td class="small" th:text="${m.direction() == 'OUT'} ? 'out' : 'in'">out</td>
+                <td class="mono" th:text="${m.lineNo()}">1</td>
+                <td class="mono" th:text="${m.itemCode()}">GL-CF-6</td>
+                <td class="mono"><span th:text="${m.locationCode()}">KGL-MAIN</span><span th:if="${m.binCode() != null}" th:text="' / ' + ${m.binCode()}"> / A1</span></td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.quantityBase(), 1, 'COMMA', 3, 'POINT')}">40.000</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.unitCost(), 1, 'COMMA', 4, 'POINT')}">8,869.5650</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">354,782.61</td>
+                <td class="mono" th:text="${#temporals.format(m.businessDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-pen" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Approval chain</h2>
+              <p class="card-sub" th:if="${chainInfo != null}">
+                Chain v<span th:text="${chainInfo.version}">2</span>
+                · <span th:text="${chainInfo.basis == 'RESTRUCTURE_2027'} ? 'Board restructuring 2027' : 'Inventory Policy 2026'">Policy</span>,
+                in force on the day this report was created
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <ol th:replace="~{fragments/ui :: approvalChain(${chain})}"></ol>
+
+        <p class="small text-body-secondary mt-3 mb-0">
+          Raised by <span th:text="${dmg.createdByName}">Name</span>
+          on <span th:text="${#temporals.format(dmg.createdAt, 'dd MMM HH:mm')}">30 Sep 09:00</span>.
+          Every report needs all three signatures until the client sets a write-off threshold. Finance posts it, and
+          whoever raised or signed it does not. Whoever sent, received or let out the goods does not write off what
+          went missing from them or take back what came back.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning" aria-hidden="true"></i>
+            <h2 class="card-title">What you can do</h2>
+          </div>
+        </div>
+
+        <p class="small text-body-secondary" th:if="${actions.editReason}" th:text="${actions.editReason}">Reason</p>
+
+        <form th:if="${actions.canSubmit}"
+              sec:authorize="hasAnyAuthority('damage.create','damage.verify','damage.approve')"
+              th:action="@{'/damage/' + ${dmg.id} + '/submit'}" method="post" class="mb-3">
+          <p class="small">Submitting signs step 1 for you
+            (<span th:text="${actions.nextStep?.actionLabel}">PREPARE</span> as
+            <span th:text="${actions.nextStep?.roleName}">Warehouse Manager</span>).
+            After that the report can no longer be edited.</p>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-send"></i> Submit for signature</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.submitReason}" th:text="${actions.submitReason}">Reason</p>
+
+        <th:block th:if="${actions.canSign}"
+                  sec:authorize="hasAnyAuthority('damage.create','damage.verify','damage.approve')">
+          <form th:action="@{'/damage/' + ${dmg.id} + '/approve'}" method="post" class="mb-2">
+            <label for="approveComment" class="form-label small fw-semibold" style="color: var(--color-heading)">
+              Sign step <span th:text="${actions.nextStep.sequenceNo}">2</span>
+              (<span th:text="${actions.nextStep.roleName}">Role</span>)
+            </label>
+            <input id="approveComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                   placeholder="Comment (optional)" autocomplete="off">
+            <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-check2-circle"></i> Approve</button>
+          </form>
+          <details class="mb-3">
+            <summary class="small fw-semibold">Reject this report</summary>
+            <form th:action="@{'/damage/' + ${dmg.id} + '/reject'}" method="post" class="mt-2">
+              <label for="rejectComment" class="form-label small">Reason (required). A rejected report is final.</label>
+              <input id="rejectComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                     required autocomplete="off">
+              <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-x-octagon"></i> Reject</button>
+            </form>
+          </details>
+        </th:block>
+        <p class="small text-body-secondary" th:if="${actions.signReason}" th:text="${actions.signReason}">Reason</p>
+
+        <form th:if="${actions.canPost}" sec:authorize="hasAuthority('damage.post')"
+              th:action="@{'/damage/' + ${dmg.id} + '/post'}" method="post" class="mb-3">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="confirmPost" name="confirm" value="true">
+            <label class="form-check-label small" for="confirmPost">
+              I confirm this report is approved and that posting moves the stock in the ledger. It cannot be undone.
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-journal-check"></i> Post to the ledger</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.postReason}" th:text="${actions.postReason}">Reason</p>
+
+        <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('damage.create')">
+          <summary class="small fw-semibold">Cancel this report</summary>
+          <form th:action="@{'/damage/' + ${dmg.id} + '/cancel'}" method="post" class="mt-2">
+            <label for="cancelReason" class="form-label small">Reason (required). The serial stays on the register.</label>
+            <input id="cancelReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400"
+                   required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-slash-circle"></i> Cancel report</button>
+          </form>
+        </details>
+        <p class="small text-body-secondary" th:if="${actions.cancelReason}" th:text="${actions.cancelReason}">Reason</p>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canSubmit and !actions.canSign and !actions.canCancel and !actions.canEdit and !actions.canPost
+                    and actions.editReason == null and actions.submitReason == null and actions.signReason == null
+                    and actions.cancelReason == null and actions.postReason == null}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">History</h2>
+              <p class="card-sub">Every change, signature, refusal and posting, newest first</p>
+            </div>
+          </div>
+        </div>
+
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Changes to this report will be listed here.')}"></div>
+        </th:block>
+
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

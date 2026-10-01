@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>New report</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · RETURNS &amp; DAMAGE</p>
+    <h1 class="page-title">New report</h1>
+    <p class="page-sub">Choose what kind of report this is. The kind is fixed when it is raised, because each kind has
+      its own rules for what it may touch and what it is worth.</p>
+  </div>
+
+  <!-- Step one: the kind. -->
+  <div class="row g-3 mb-4" th:if="${kind == null}">
+    <div class="col-12 col-md-6" th:each="k : ${kinds}">
+      <a class="hb-card hb-card-body d-block text-decoration-none h-100"
+         th:href="@{/damage/new(kind=${k.name()})}">
+        <h2 class="card-title" th:text="${k.title()}">Write-off</h2>
+        <p class="small text-body-secondary mb-0" th:text="${k.summary()}">Summary</p>
+      </a>
+    </div>
+  </div>
+
+  <!-- Step two for a loss in transit: which transfer. -->
+  <section class="hb-card hb-card-body" th:if="${kind != null and kind.name() == 'TRANSIT_LOSS'}">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Which transfer lost stock?</h2>
+          <p class="card-sub">Dispatched from this branch, with stock still in transit</p>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table hb-table compact mb-0">
+        <thead>
+          <tr><th scope="col">Transfer</th><th scope="col">To</th><th scope="col">Dispatched</th>
+              <th scope="col" class="num">Lines in transit</th><th scope="col"><span class="visually-hidden">Choose</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="t : ${transfers}">
+            <td><a class="doc-link mono" th:href="@{'/transfers/' + ${t.id()}}" th:text="${t.serialNo()}">TRF-KGL-2026-0001</a></td>
+            <td><span th:text="${t.toBranch()}">Rubavu</span> · <span class="mono" th:text="${t.toCode()}">RBV-BOND</span></td>
+            <td class="mono small" th:text="${t.dispatchedAt() != null} ? ${#temporals.format(t.dispatchedAt(), 'dd MMM yyyy HH:mm')} : '—'">30 Sep</td>
+            <td class="num" th:text="${t.lines()}">1</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-primary-action" th:href="@{/damage/new(kind='TRANSIT_LOSS', transfer=${t.id()})}">
+                Write off a loss
+              </a>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(transfers)}">
+            <td colspan="5">
+              <div th:replace="~{fragments/ui :: emptyState('bi-arrow-left-right', 'Nothing left in transit', 'A dispatched transfer with stock still in transit appears here.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Step two for a customer return: which delivery note. -->
+  <section class="hb-card hb-card-body" th:if="${kind != null and kind.name() == 'CUSTOMER_RETURN'}">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-truck" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Which delivery came back?</h2>
+          <p class="card-sub">Posted delivery notes of this branch with goods that could still be returned</p>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table hb-table compact mb-0">
+        <thead>
+          <tr><th scope="col">Delivery note</th><th scope="col">Customer</th><th scope="col">Delivered</th>
+              <th scope="col" class="num">Lines</th><th scope="col"><span class="visually-hidden">Choose</span></th></tr>
+        </thead>
+        <tbody>
+          <tr th:each="n : ${notes}">
+            <td><a class="doc-link mono" th:href="@{'/delivery-notes/' + ${n.id()}}" th:text="${n.serialNo()}">DN-KGL-2026-0001</a></td>
+            <td th:text="${n.customer()}">Customer</td>
+            <td class="mono small" th:text="${n.postedAt() != null} ? ${#temporals.format(n.postedAt(), 'dd MMM yyyy HH:mm')} : '—'">30 Sep</td>
+            <td class="num" th:text="${n.lines()}">1</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-primary-action" th:href="@{/damage/new(kind='CUSTOMER_RETURN', note=${n.id()})}">
+                Take goods back
+              </a>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(notes)}">
+            <td colspan="5">
+              <div th:replace="~{fragments/ui :: emptyState('bi-truck', 'Nothing to take back', 'A posted delivery note with goods not yet returned appears here.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="mt-3"><a th:href="@{/damage}" class="btn btn-outline-secondary">Back to reports</a></div>
+
+</div>
+</body>
+</html>

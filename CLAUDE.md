@@ -116,8 +116,9 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── ledger/    the only writer of stock_movement and stock_balance
 │   ├── receiving/ Goods Received Notes
 │   ├── dispatch/  Delivery Authorizations, Delivery Notes (the gate)
-│   └── transfer/  inter-branch transfers and their receipts (via TRANSIT)
-│                  NOT BUILT — cutting, damage, count
+│   ├── transfer/  inter-branch transfers and their receipts (via TRANSIT)
+│   └── damage/    write-offs, transit losses, customer returns, quarantine
+│                  NOT BUILT — cutting, count
 └── reporting/     NOT BUILT — daily close, KPIs, exports
 ```
 
@@ -205,7 +206,7 @@ Schema for the unbuilt modules is already in place (V3, V4).
   signs, and ask the client when the chain does not say.
 - **A new stock-moving document widens two lists together.** Stock moves
   only through a transaction ticket whose source is a type `ticket_guard`
-  handles (GRN, DN, TRF and TRR today), and the ledger finds the approving document
+  handles (GRN, DN, TRF, TRR and DMG today), and the ledger finds the approving document
   by walking `document_support_link` (V12). A module that moves stock adds
   its type to both in its migration, or its tickets are refused.
 - **The access checks run at COMMIT** (deferred constraint triggers). A
@@ -255,7 +256,8 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 4. ~~Transfers~~ — done; goods in transit, each consignment at its own
    cost (V13)
 5. Cutting — needs the off-cut identity decision first (see Open questions)
-6. Returns & Damage — quarantine, write-off approval
+6. ~~Returns & Damage~~ — done; write-off, transit loss, customer return,
+   quarantine release, each through the full chain and posted by Finance (V14)
 7. Counts + Variances — blind entry, adjustment tickets
 8. Daily Close
 9. Admin screens — ~~users, roles~~ done; workflow editor, branches and
@@ -267,6 +269,15 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
   the item master fast) or a remnant pool per parent item (lighter, weaker
   traceability)? Blocks the cutting module.
 - Tolerance thresholds for count variances, damage and write-off approval.
+  Until they are set, every damage report takes all three signatures,
+  however small.
+- Does a customer return need a Finance credit note before it is posted, and
+  is it raised here or in the accounting system?
+- Nobody who signed an authorization raises the return of what it let out,
+  and in 2026 a Warehouse Manager signs every authorization: a return then
+  needs a second Warehouse Manager or one covering from another branch.
+- When may a transit loss be raised: at once, after the destination
+  confirms non-arrival, or after some days in transit?
 - Hosting: on-premises at Gahanga or cloud — decides whether bonded stock
   data leaves Rwanda.
 - **Who approves transfers from 1 January 2027?** The Head of Inventory

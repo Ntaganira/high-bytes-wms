@@ -24,6 +24,7 @@ import heritier.ntaganira.highbytes.wms.document.DocumentService;
 import heritier.ntaganira.highbytes.wms.document.OpenedDocument;
 import heritier.ntaganira.highbytes.wms.document.StepCheck;
 import heritier.ntaganira.highbytes.wms.inventory.UnitConversions;
+import heritier.ntaganira.highbytes.wms.inventory.ledger.ConsignmentShares;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.LedgerService;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.MovementRequest;
 import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.BinOption;
@@ -37,7 +38,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
@@ -121,10 +121,11 @@ public class ReceiptService {
     private final LedgerService ledger;
     private final BranchService branches;
     private final UnitConversions units;
+    private final ConsignmentShares shares;
 
     public ReceiptService(JdbcClient jdbc, DocumentService documents, TransferService transfers,
                           TransferLookupService lookups, LedgerService ledger, BranchService branches,
-                          UnitConversions units) {
+                          UnitConversions units, ConsignmentShares shares) {
         this.jdbc = jdbc;
         this.documents = documents;
         this.transfers = transfers;
@@ -132,6 +133,7 @@ public class ReceiptService {
         this.ledger = ledger;
         this.branches = branches;
         this.units = units;
+        this.shares = shares;
     }
 
     // ---- reads -----------------------------------------------------------
@@ -183,12 +185,24 @@ public class ReceiptService {
         // A read: refused with its reason, not recorded. The form is not even opened for someone who may not receive.
         String reason = independenceReason(transferId);
         if (reason != null) throw new ControlRefusedException(reason);
+        // Nothing to receive because it was all written off: say so here. (A transfer already received, or one not yet
+        // dispatched, is refused by the database with its own reason when the receipt is raised.)
+        boolean dispatched = "POSTED".equals(context.transfer().status());
+        boolean liveReceipt = transfers.receiptsOf(transferId).stream().anyMatch(r -> !"CANCELLED".equals(r.status()));
+        if (dispatched && !liveReceipt && !transfers.inTransitLeft(transferId)) {
+            throw new ControlRefusedException("Nothing remains in transit on " + context.transfer().serialNo()
+                    + ": everything dispatched has been received or written off as lost, so there is nothing to receive.");
+        }
         ReceiptForm form = new ReceiptForm();
         form.setTransferId(transferId);
         for (TransferLineRow line : context.transferLines()) {
             ReceiptLineForm row = new ReceiptLineForm();
             row.setTransferLineId(line.id());
-            row.setQuantity(line.quantity());
+            // What is still in transit: less than was dispatched once part of the line has been written off as lost.
+            row.setQuantity(line.inTransitBase() == null || line.dispatchedBase().signum() == 0
+                    || line.inTransitBase().compareTo(line.dispatchedBase()) >= 0
+                    ? line.quantity()
+                    : line.quantity().multiply(line.inTransitBase()).divide(line.dispatchedBase(), 3, java.math.RoundingMode.HALF_UP));
             form.getLines().add(row);
         }
         return form;
@@ -373,7 +387,6 @@ public class ReceiptService {
         OpenedDocument in;
         BigDecimal value = BigDecimal.ZERO;
         int movements = 0;
-        Map<UUID, BigDecimal> received = new java.util.HashMap<>();     // running quantity per transfer line, in line order
         try {
             List<LedgerService.Place> places = new ArrayList<>();
             for (ReceiptLineRow l : lines) {
@@ -397,11 +410,9 @@ public class ReceiptService {
             }
             for (int i = 0; i < lines.size(); i++) {
                 ReceiptLineRow l = lines.get(i);
-                // The consignment leaves transit at its own cost, allocated cumulatively across this transfer line's
-                // receipt lines so the shares of a split add up to exactly what was dispatched.
-                BigDecimal before = received.getOrDefault(l.transferLineId(), BigDecimal.ZERO);
-                BigDecimal own = consignmentShare(l, before);
-                received.put(l.transferLineId(), before.add(l.quantityBase()));
+                // The consignment leaves transit at its own cost: the one shared rule, which starts from what the
+                // ledger already took out of this transfer line (earlier receipts and earlier losses).
+                BigDecimal own = shares.transitShare(l.transferLineId(), l.quantityBase());
                 var left = ledger.post(MovementRequest.issueAt(out.id(), outLines.get(i), transfer.branchId(),
                         l.itemId(), transfer.transitLocationId(), null, l.quantityBase(), own), poster);
                 ledger.post(MovementRequest.receipt(in.id(), inLines.get(i), d.branchId(), l.itemId(),
@@ -433,45 +444,30 @@ public class ReceiptService {
     // ---- helpers ---------------------------------------------------------
 
     /**
-     * The value of the stock this receipt line takes out of transit: what the
-     * dispatch of its own transfer line put into transit, allocated
-     * cumulatively over the receipt lines of that transfer line in line order:
-     * {@code share_i = round(v x cum_i / Q, 2) - round(v x cum_(i-1) / Q, 2)},
-     * half up, where v is the value of the transit-in movement of that transfer
-     * line, cum the running quantity received and Q the quantity dispatched.
-     * A line split across bins therefore takes exactly v when received in full,
-     * with no cent stranded or over-taken. The database checks the same formula. So each consignment carries its own cost through
-     * transit, whatever else sits in the pooled transit location.
-     */
-    private BigDecimal consignmentShare(ReceiptLineRow line, BigDecimal receivedBefore) {
-        record Dispatched(BigDecimal value, BigDecimal quantity) {}
-        Dispatched d = jdbc.sql("""
-                SELECT m.value AS v, tl.qty_base_uom AS q_total
-                  FROM transfer_order_line tl
-                  JOIN transaction_ticket t ON t.source_document_id = tl.document_id AND t.movement_type = 'TRANSFER_IN'
-                  JOIN ticket_line x        ON x.ticket_id = t.document_id AND x.line_no = tl.line_no
-                  JOIN stock_movement m     ON m.ticket_line_id = x.id AND m.reverses_movement_id IS NULL
-                 WHERE tl.id = :line
-                """)
-                .param("line", line.transferLineId(), Types.OTHER)
-                .query((rs, n) -> new Dispatched(rs.getBigDecimal("v"), rs.getBigDecimal("q_total")))
-                .optional()
-                .orElseThrow(() -> new ControlRefusedException("Line " + line.transferLineNo()
-                        + " of the transfer has no dispatch in the ledger, so nothing of it can be received."));
-        BigDecimal cumulative = receivedBefore.add(line.quantityBase());
-        return d.value().multiply(cumulative).divide(d.quantity(), 2, RoundingMode.HALF_UP)
-                .subtract(d.value().multiply(receivedBefore).divide(d.quantity(), 2, RoundingMode.HALF_UP));
-    }
-
-    /**
      * Why the signed-in user may not record this transfer's arrival, or null
      * when they may: the receiver is independent of everyone who raised,
-     * signed or dispatched it (the database refuses the same).
+     * signed or dispatched it, and of whoever wrote off part of it (the
+     * database refuses the same, asking its own {@code transfer_loss_author}).
      */
     String independenceReason(UUID transferId) {
         TransferHeader t = transfers.find(transferId);
-        return receiverReason(t.serialNo(), CurrentUser.id(), t.createdBy(), t.postedBy(),
+        String reason = receiverReason(t.serialNo(), CurrentUser.id(), t.createdBy(), t.postedBy(),
                 transfers.chainOf(transferId));
+        if (reason != null) return reason;
+        return wroteOffPart(jdbc, CurrentUser.id(), transferId) ? lossAuthorReason(t.serialNo()) : null;
+    }
+
+    /** Whether {@code person} raised, posted or entered a line of a live transit loss of the transfer. */
+    static boolean wroteOffPart(JdbcClient jdbc, UUID person, UUID transferId) {
+        return jdbc.sql("SELECT transfer_loss_author(:me, :transfer)")
+                .param("me", person, Types.OTHER)
+                .param("transfer", transferId, Types.OTHER)
+                .query(Boolean.class).single();
+    }
+
+    static String lossAuthorReason(String transferSerial) {
+        return "You wrote off part of " + transferSerial + ", so you cannot record its arrival. "
+                + "Whoever says what was lost does not also say what arrived.";
     }
 
     /** The plain reason {@code me} cannot record the arrival of a transfer, or null. Pure, so it is tested alone. */

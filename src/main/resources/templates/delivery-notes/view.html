@@ -30,6 +30,10 @@
          th:href="@{'/delivery-notes/' + ${dn.id} + '/edit'}" class="btn btn-outline-secondary">
         <i class="bi bi-pencil"></i> Edit load
       </a>
+      <a th:if="${canReturn}" sec:authorize="hasAuthority('damage.create')"
+         th:href="@{/damage/new(kind='CUSTOMER_RETURN', note=${dn.id})}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-return-left"></i> Take goods back
+      </a>
     </div>
   </div>
 
@@ -42,6 +46,8 @@
       Reason: <span th:text="${dn.cancelReason}">Reason</span>.
     </div>
   </div>
+
+  <p class="small text-body-secondary" th:if="${returnReason}" sec:authorize="hasAuthority('damage.create')" th:text="${returnReason}">Reason</p>
 
   <div class="row g-3">
 
@@ -86,6 +92,7 @@
                 <th scope="col" class="num">In base unit</th>
                 <th scope="col">From bin</th>
                 <th scope="col" class="num">Measured / nominal</th>
+                <th scope="col" class="num" th:if="${dn.status == 'POSTED'}">Returned</th>
                 <th scope="col" th:if="${dn.status == 'DRAFT'}">On hand (base unit)</th>
               </tr>
             </thead>
@@ -109,6 +116,7 @@
                   <span class="d-block small text-body-secondary" th:if="${l.nominalThicknessMm() != null}"
                         th:text="'nominal ' + ${l.nominalThicknessMm()} + ' mm'">nominal 6.00 mm</span>
                 </td>
+                <td class="num mono" th:if="${dn.status == 'POSTED'}" th:text="${#numbers.formatDecimal(l.returnedBase(), 1, 'COMMA', 3, 'POINT')}">0.000</td>
                 <td class="mono small" th:if="${dn.status == 'DRAFT'}">
                   <th:block th:with="have=${available.get(l.itemId())}">
                     <span th:if="${have == null}" style="color: var(--color-danger)">none on hand</span>
@@ -123,6 +131,23 @@
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${!#lists.isEmpty(returns)}" sec:authorize="hasAuthority('damage.view')">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-arrow-return-left" aria-hidden="true"></i>
+            <h2 class="card-title">Returns</h2>
+          </div>
+        </div>
+        <ul class="list-unstyled mb-0 small">
+          <li th:each="r : ${returns}" class="py-1">
+            <a class="doc-link" th:href="@{'/damage/' + ${r.id()}}" th:text="${r.serialNo()}">DMG-KGL-2026-0001</a>
+            <span th:replace="~{fragments/ui :: chip(${r.status()})}"></span>
+            <span th:if="${r.postedAt() != null}" class="text-body-secondary"
+                  th:text="' · posted by ' + ${r.postedByName()} + ' on ' + ${#temporals.format(r.postedAt(), 'dd MMM yyyy HH:mm')}">posted</span>
+          </li>
+        </ul>
       </section>
 
       <section class="hb-card hb-card-body mb-3" th:if="${posting != null}">

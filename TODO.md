@@ -81,11 +81,30 @@ shape, so it is worth building carefully.
       is cancelled and authorized again
 - [x] Transfers — dispatch relieves to TRANSIT, receipt clears it (V13, `inventory/transfer/`; a
       shortfall stays in transit until a damage or loss document exists)
-- [ ] Damage and loss documents must clear stock left in transit (`transfer_line_position.in_transit_base`)
+- [x] Stock left in transit is cleared by a loss report (`transfer_line_position.in_transit_base`; the "Left in
+      transit" worklist, `/damage/in-transit`): received + written off never exceeds dispatched, whichever
+      comes first, and both take exactly the consignment's dispatch value (one shared rule, `ConsignmentShares`)
 - [ ] The 2027 transfer approver (Managing Director) is for the client to confirm; reversing a posted
       transfer or receipt is not built
 - [ ] Cutting — **blocked** on the off-cut identity decision
-- [ ] Returns & Damage — quarantine location, write-off approval
+- [x] Returns & Damage — one DMG type, four kinds: write-off, loss in transit, customer return, quarantine
+      release (V14, `inventory/damage/`). One chain (Warehouse Manager, Internal Controller, Managing Director),
+      Finance posts. **Every report takes the full chain until the client sets the write-off threshold.**
+      `/verify` clean (422 ok), `control-auditor` clean after one round of fixes (2026-10-01): a return now
+      excludes everyone behind the delivery (the note's author and poster, the authorization's raiser and every
+      signer, not only its releaser), and the form's bin and stock lookups read only the working branch
+- [ ] Returns & Damage, left for later: no reversal of a posted report (nor of anything posted), no
+      quarantine-age or expiry rule, no attachment of the customer's return note or the police report, no
+      separate mid-chain threshold route for small write-offs
+- [ ] A transit loss may be raised the moment a transfer is dispatched: the destination is never asked to
+      confirm non-arrival and no age applies, so a posted loss can refuse the genuine receipt that follows
+      ("only X remains"). The full chain still signs it, and its author may not record the arrival
+- [ ] The receipt and transfer forms still list the bins of whatever location id is posted
+      (`ReceivingController`, `TransferController` → `binsOf`), so another branch's bin codes can be read.
+      Codes only, no stock; scope them to the working branch as `DamageLookupService` now does
+- [ ] A report's own signers are not judged against what it is about: the Internal Controller who released a
+      transfer or an authorization may verify its loss or return. Kept as is for the assurance role; a
+      conscious choice, not an oversight
 - [ ] Counts + Variances — blind entry (book quantity absent from the page,
       not hidden), adjustment tickets
 - [ ] Daily Close — reconcile and lock, with the Quartz job
@@ -160,6 +179,12 @@ shape, so it is worth building carefully.
 - [ ] **Off-cut identity** — item code per remnant, or remnant pool per
       parent? Blocks cutting.
 - [ ] Tolerance thresholds: count variance, damage, write-off approval
+- [ ] **Returns against 2026 authorizations need a second Warehouse Manager.** The 2026 chain has a
+      Warehouse Manager verify every authorization, and nobody who signed one takes back what it let out,
+      so the return is raised by another Warehouse Manager or one covering from another branch. The 2027
+      chain has no Warehouse Manager step. Confirm the client accepts this, or name who else raises returns
+- [ ] When may a transit loss be raised: at once, after the destination confirms non-arrival, or after
+      some days in transit?
 - [ ] Hosting: on-premises at Gahanga or cloud (bonded data residency)
 - [ ] **Who may cancel a document others have signed.** Today: a receipt's
       creator or any `receiving.create` holder at its branch, until posted.

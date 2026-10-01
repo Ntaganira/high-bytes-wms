@@ -53,6 +53,7 @@ public class GlobalModelAdvice {
               (SELECT COUNT(*) FROM document x JOIN document_type xt ON xt.id = x.document_type_id AND xt.code = 'TRF'
                 WHERE (x.branch_id = :branchId AND x.status = 'APPROVED')
                    OR (x.status = 'POSTED'
+                       AND EXISTS (SELECT 1 FROM transfer_line_position p WHERE p.transfer_id = x.id AND p.in_transit_base > 0)
                        AND EXISTS (SELECT 1 FROM transfer_order o JOIN location l ON l.id = o.to_location_id
                                     WHERE o.document_id = x.id AND l.branch_id = :branchId)
                        AND NOT EXISTS (SELECT 1 FROM transfer_receipt r JOIN document rd ON rd.id = r.document_id
