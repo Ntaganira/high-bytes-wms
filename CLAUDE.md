@@ -117,12 +117,15 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── receiving/ Goods Received Notes
 │   ├── dispatch/  Delivery Authorizations, Delivery Notes (the gate)
 │   ├── transfer/  inter-branch transfers and their receipts (via TRANSIT)
-│   └── damage/    write-offs, transit losses, customer returns, quarantine
-│                  NOT BUILT — cutting, count
+│   ├── damage/    write-offs, transit losses, customer returns, quarantine
+│   └── count/     stock counts (blind, verified, frozen) and the variance report
+│                  NOT BUILT — cutting
 └── reporting/     NOT BUILT — daily close, KPIs, exports
 ```
 
-Schema for the unbuilt modules is already in place (V3, V4).
+The spine and the ledger (V3, V4) serve every module, and `daily_close`
+already exists for Daily Close. A document module's own tables come with its
+own migration (V11–V15); cutting has none yet.
 
 ## Conventions
 
@@ -206,9 +209,32 @@ Schema for the unbuilt modules is already in place (V3, V4).
   signs, and ask the client when the chain does not say.
 - **A new stock-moving document widens two lists together.** Stock moves
   only through a transaction ticket whose source is a type `ticket_guard`
-  handles (GRN, DN, TRF, TRR and DMG today), and the ledger finds the approving document
+  handles (GRN, DN, TRF, TRR, DMG and CNT today), and the ledger finds the approving document
   by walking `document_support_link` (V12). A module that moves stock adds
-  its type to both in its migration, or its tickets are refused.
+  its type to both in its migration, or its tickets are refused. (The view
+  already links every ticket to its source; a document that relates to no
+  other, as a count does, needs no branch of its own there.)
+- **An open count freezes what it counts.** From the moment a count opens
+  until its verification is signed, the ledger refuses any movement of a
+  counted item at the counted location (a full count: the whole location),
+  and a location carries one live count at a time (V15). A test that opens a
+  count uses a location of its own (`Fixtures.newLocation`), or every other
+  test moving stock there fails. Cancelling the count lifts the freeze.
+- **The book of a blind count is on no page.** Until a count's verification
+  is signed, its book quantities, values and variances reach no screen, no
+  list, no nav badge and no audit entry; the verifier does not see the first
+  count either. Nor do the lines chosen for the verification count, or how
+  many, reach anyone but the verifier: the choice is every line that differs
+  from the book, so it reads the book line by line. Refusals are written to
+  the count's trail, which the counters read, so no count refusal names a
+  chosen line. `CountService.mapLine` is the one place a sheet is masked:
+  a new read of count lines goes through it, or checks
+  `count_book_visible()`.
+- **Who judges a count took no part in it** (V15). Whoever counted a line
+  signs no step but the first, approving or rejecting, and takes no
+  verification count; whoever verified signs only the verification. Once
+  the verification is signed the count is never cancelled: it is posted, or
+  rejected by a later signer.
 - **The access checks run at COMMIT** (deferred constraint triggers). A
   service asks `access_conflict()` first so the refusal carries its reason;
   a psql test must `SET CONSTRAINTS ALL IMMEDIATE`, as `verify-controls.sql`
@@ -258,7 +284,9 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 5. Cutting — needs the off-cut identity decision first (see Open questions)
 6. ~~Returns & Damage~~ — done; write-off, transit loss, customer return,
    quarantine release, each through the full chain and posted by Finance (V14)
-7. Counts + Variances — blind entry, adjustment tickets
+7. ~~Counts + Variances~~ — done; blind first count, blind verification
+   count of every differing line and a random sample, the freeze, adjustment
+   tickets posted by a second Finance officer (V15)
 8. Daily Close
 9. Admin screens — ~~users, roles~~ done; workflow editor, branches and
    the audit log viewer remain
@@ -269,8 +297,20 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
   the item master fast) or a remnant pool per parent item (lighter, weaker
   traceability)? Blocks the cutting module.
 - Tolerance thresholds for count variances, damage and write-off approval.
-  Until they are set, every damage report takes all three signatures,
-  however small.
+  Until they are set, every damage report and every count takes all three
+  signatures, however small.
+- **Who posts a count's adjustment?** The count chain ends with Finance
+  approving, and nobody posts what they signed, so V15 gives `count.post` to
+  Finance and a second Finance officer posts. A branch with one Finance
+  officer needs one covering from another branch. The client is to confirm.
+- How large is the verification sample? V15 recounts every line whose first
+  count differs from the book and one in ten of the rest (at least one),
+  chosen at random at submission. Changed by migration.
+- The book is absent from the count pages, but the Warehouse Manager holds
+  `stock.view`, so stock figures elsewhere (the dashboard, and the stock
+  screens once built) stay readable during a count. Should counters lose
+  them while a count is open? The random verification sample is what
+  catches a counter who copies the book.
 - Does a customer return need a Finance credit note before it is posted, and
   is it raised here or in the accounting system?
 - Nobody who signed an authorization raises the return of what it let out,
@@ -288,9 +328,15 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
   receipt's creator, or anyone holding `receiving.create` at its branch, may
   cancel it until it is posted. Cancelling moves no stock, but it lets one
   person veto a chain the Directors and the Internal Controller have signed.
+  A count answers it for itself (V15): never once its verification is
+  signed, since withdrawing it would drop a variance an independent recount
+  confirmed. The client is to confirm.
 - No segregation rule pairs the Director of Supply Chain with the Internal
   Controller, so one person may hold both. On one document they can sign
   only one step, but Board Table 6 may intend the pair to be blocked.
+- Nor does any pair the Warehouse Manager with Finance. V15 keeps someone
+  holding both from approving or rejecting a count they counted; should the
+  pair be blocked outright?
 
 ## Source documents
 

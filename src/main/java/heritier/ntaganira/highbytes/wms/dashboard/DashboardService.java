@@ -76,6 +76,23 @@ public class DashboardService {
                AND d.status IN ('DRAFT','PENDING')
             """;
 
+    /**
+     * Inventory accuracy: of the places counted by counts posted in the last 90 days, the share where what was
+     * found matched the book. Only posted counts: a count still open has neither its final quantities nor, while
+     * it is blind, a book anyone may read.
+     */
+    private static final String ACCURACY = """
+            SELECT COUNT(*) AS places, COUNT(*) FILTER (WHERE l.variance_qty = 0) AS exact
+              FROM stock_count_line l
+              JOIN document d ON d.id = l.document_id
+             WHERE d.branch_id = :branchId
+               AND d.status = 'POSTED'
+               AND d.posted_at >= now() - INTERVAL '90 days'
+            """;
+
+    /** The target the dashboard measures accuracy against. */
+    static final BigDecimal ACCURACY_TARGET = new BigDecimal("99.0");
+
     public Kpi kpis(UUID branchId) {
         BigDecimal stockValue = jdbc.sql(STOCK_VALUE).param("branchId", branchId)
                 .query(BigDecimal.class).optional().orElse(BigDecimal.ZERO);
@@ -94,11 +111,19 @@ public class DashboardService {
                 .query((rs, n) -> new int[]{rs.getInt("held"), rs.getInt("over_24h")})
                 .optional().orElse(new int[]{0, 0});
 
-        // Inventory accuracy needs count lines, which arrive with the count
-        // module. Until then it reads as not yet measured rather than 100%,
-        // because a KPI that flatters by default is worse than a blank.
+        // With no posted count yet it reads as not yet measured rather than
+        // 100%, because a KPI that flatters by default is worse than a blank.
+        int[] counted = jdbc.sql(ACCURACY).param("branchId", branchId)
+                .query((rs, n) -> new int[]{rs.getInt("places"), rs.getInt("exact")})
+                .optional().orElse(new int[]{0, 0});
         String accuracy = "—";
         boolean onTarget = true;
+        if (counted[0] > 0) {
+            BigDecimal share = new BigDecimal(counted[1] * 100L)
+                    .divide(new BigDecimal(counted[0]), 1, RoundingMode.HALF_UP);
+            accuracy = share.toPlainString();
+            onTarget = share.compareTo(ACCURACY_TARGET) >= 0;
+        }
 
         return new Kpi(
                 billions(stockValue),

@@ -33,6 +33,8 @@ public enum DocumentKind {
     TRR("TRR", "transfer", "Transfer Receipt", "receive", "receive"),
     /** Raised by the warehouse manager; Finance posts it, so cancelling a draft is the raiser's right (damage.create). */
     DMG("DMG", "damage", "Return & Damage Report"),
+    /** Opened by the warehouse manager; a second Finance officer posts its adjustment (count.post). */
+    CNT("CNT", "count", "Physical Stock Count"),
     TT("TT", "ticket", "Transaction Ticket");
 
     private final String code;

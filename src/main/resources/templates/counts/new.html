@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Open a count</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · STOCK COUNTS · CSH-012</p>
+    <h1 class="page-title">Open a count</h1>
+    <p class="page-sub">The system writes the sheet from the ledger and keeps the book quantities to itself: you count
+      what is there, not what should be. From the moment the count opens, what it counts cannot move at the location
+      until its verification is signed, so open it when you are ready to count.</p>
+  </div>
+
+  <form id="cnt-form" th:action="@{/counts}" th:object="${form}" method="post" novalidate>
+
+    <div th:if="${#fields.hasGlobalErrors()}" class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+      <i class="bi bi-exclamation-octagon-fill"></i>
+      <div><p th:each="e : ${#fields.globalErrors()}" th:text="${e}" class="mb-0"></p></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-xl-8">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-clipboard-data" aria-hidden="true"></i>
+              <h2 class="card-title">What to count</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label for="locationId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Location <span class="text-danger">*</span>
+              </label>
+              <select id="locationId" th:field="*{locationId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('locationId')} ? 'is-invalid'">
+                <option value="">— choose —</option>
+                <option th:each="l : ${locations}" th:value="${l.id()}" th:text="${l.label()}">KGL-MAIN — Gahanga main store</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('locationId')}" th:errors="*{locationId}">error</div>
+              <div class="form-text">Where stock is kept. Goods in transit are accounted for by their transfer, not counted.</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="customsReference" class="form-label small fw-semibold" style="color: var(--color-heading)">Customs reference</label>
+              <input id="customsReference" th:field="*{customsReference}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('customsReference')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('customsReference')}" th:errors="*{customsReference}">error</div>
+              <div class="form-text">Required when the location or the branch is bonded: a count may adjust duty-suspended goods.</div>
+            </div>
+
+            <div class="col-12">
+              <fieldset>
+                <legend class="form-label small fw-semibold" style="color: var(--color-heading)">Scope <span class="text-danger">*</span></legend>
+                <div class="form-check mb-2" th:each="s : ${scopes}">
+                  <input class="form-check-input" type="radio" th:field="*{scope}" th:value="${s.name()}">
+                  <label class="form-check-label" th:for="${#ids.prev('scope')}">
+                    <strong th:text="${s.title()}">Full count</strong>
+                    <span class="d-block small text-body-secondary" th:text="${s.summary()}">Summary</span>
+                  </label>
+                </div>
+              </fieldset>
+            </div>
+
+            <div class="col-12">
+              <label for="itemIds" class="form-label small fw-semibold" style="color: var(--color-heading)">Items (cycle count only)</label>
+              <select id="itemIds" th:field="*{itemIds}" class="form-select mono" multiple size="8"
+                      th:classappend="${#fields.hasErrors('itemIds')} ? 'is-invalid'">
+                <option th:each="i : ${items}" th:value="${i.id()}" th:text="${i.label()}">GL-CF-6 — Clear float</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('itemIds')}" th:errors="*{itemIds}">error</div>
+              <div class="form-text">Every bin holding the item at the location goes on the sheet. Ignored for a full count.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        <section class="hb-card hb-card-body mb-3">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-sticky" aria-hidden="true"></i>
+              <h2 class="card-title">Reference and notes</h2>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="reference" class="form-label small fw-semibold" style="color: var(--color-heading)">Reference</label>
+            <input id="reference" th:field="*{reference}" class="form-control"
+                   th:classappend="${#fields.hasErrors('reference')} ? 'is-invalid'" autocomplete="off">
+            <div class="invalid-feedback" th:if="${#fields.hasErrors('reference')}" th:errors="*{reference}">error</div>
+          </div>
+          <label for="notes" class="form-label small fw-semibold" style="color: var(--color-heading)">Notes</label>
+          <textarea id="notes" th:field="*{notes}" rows="3" class="form-control"
+                    th:classappend="${#fields.hasErrors('notes')} ? 'is-invalid'"></textarea>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('notes')}" th:errors="*{notes}">error</div>
+        </section>
+
+        <section class="hb-card hb-card-body">
+          <p class="small text-body-secondary">Opened as a draft at this branch, dated today (Kigali time), on the chain
+            in force today: you prepare it, the Internal Controller verifies it with a recount of their own, Finance
+            approves the adjustment and a second Finance officer posts it.</p>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-clipboard-check"></i> Open the count</button>
+          <a th:href="@{/counts}" class="btn btn-outline-secondary w-100 mt-2">Back to counts</a>
+        </section>
+      </div>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

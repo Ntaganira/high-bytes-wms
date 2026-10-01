@@ -70,8 +70,6 @@ public class ErrorPages implements ErrorViewResolver {
             new PlannedScreen("/tickets",          "Transaction Tickets",     "bi-ticket-perforated",  "tickets"),
             new PlannedScreen("/stock/movements",  "Stock Movements",         "bi-box",                "stock"),
             new PlannedScreen("/stock",            "Stock Balances",          "bi-box",                "stock"),
-            new PlannedScreen("/counts",           "Stock Counts",            "bi-clipboard-data",     "counts"),
-            new PlannedScreen("/variances",        "Variances",               "bi-graph-up-arrow",     "variances"),
             new PlannedScreen("/daily-close",      "Daily Close",             "bi-calendar-check",     "dailyClose"),
             new PlannedScreen("/reports",          "Reports & KPIs",          "bi-bar-chart",          "reports"),
             new PlannedScreen("/approvals",        "Approval Queue",          "bi-check2-square",      null),

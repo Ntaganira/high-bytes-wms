@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Stock Counts</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · CSH-012</p>
+      <h1 class="page-title">Stock Counts</h1>
+      <p class="page-sub">Physical counts at <span th:text="${currentBranch?.name}">this branch</span>. Counted blind,
+        recounted by the Internal Controller, approved by Finance and posted by a second Finance officer. While a count
+        is open, what it counts cannot move.</p>
+    </div>
+    <a th:href="@{/counts/new}" class="btn btn-primary-action" sec:authorize="hasAuthority('count.create')">
+      <i class="bi bi-plus-lg"></i> Open a count
+    </a>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/counts}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-4">
+        <label for="status" class="form-label small fw-semibold" style="color: var(--color-heading)">State</label>
+        <select id="status" name="status" class="form-select">
+          <option value="">All states</option>
+          <option th:each="s : ${statuses}" th:value="${s}" th:text="${s}"
+                  th:selected="${status != null and status == s}">PENDING</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-4 d-flex flex-column justify-content-end pb-1">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="awaitingMe" name="awaitingMe"
+                 value="true" th:checked="${awaitingMe}">
+          <label class="form-check-label small" for="awaitingMe">Awaiting my signature</label>
+        </div>
+      </div>
+      <div class="col-12 col-md-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/counts}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Serial</th>
+            <th scope="col">Date</th>
+            <th scope="col">Location</th>
+            <th scope="col">Scope</th>
+            <th scope="col" class="num">Counted</th>
+            <th scope="col" class="num">Variances</th>
+            <th scope="col">Opened by</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="c : ${counts}">
+            <td><a class="doc-link mono" th:href="@{'/counts/' + ${c.id()}}" th:text="${c.serialNo()}">CNT-KGL-2026-0001</a></td>
+            <td class="mono" th:text="${#temporals.format(c.documentDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
+            <td class="mono">
+              <span th:text="${c.locationCode()}">KGL-MAIN</span>
+              <span class="d-block small text-body-secondary" th:if="${c.frozen()}"><i class="bi bi-snow" aria-hidden="true"></i> frozen while counted</span>
+            </td>
+            <td th:text="${c.scope().title()}">Full count</td>
+            <td class="num mono" th:text="${c.countedLines()} + ' / ' + ${c.lineCount()}">12 / 14</td>
+            <!-- Unknown, not zero, until the verification is signed: even a number of differences tells a counter something. -->
+            <td class="num mono" th:text="${c.varianceLines() != null} ? ${c.varianceLines()} : '—'">2</td>
+            <td th:text="${c.createdByName()}">Name</td>
+            <td>
+              <span th:replace="~{fragments/ui :: chip(${c.status()})}"></span>
+              <span class="d-block small text-body-secondary" th:if="${c.awaitingRole() != null}">
+                awaiting <span th:text="${c.awaitingRole()}">Internal Controller</span>
+              </span>
+              <span class="d-block small fw-semibold" th:if="${c.awaitingMe()}" style="color: var(--color-warning)">your signature</span>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(counts)}">
+            <td colspan="8">
+              <div th:replace="~{fragments/ui :: emptyState('bi-clipboard-data', 'No counts match', 'Clear the filters, or open the first count.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

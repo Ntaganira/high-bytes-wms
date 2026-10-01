@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${cnt.serialNo}">Count</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${cnt})}"></div>
+
+  <!-- The state of the approval and the posting, in the one banner every controlled document uses. -->
+  <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · STOCK COUNTS · CSH-012</p>
+      <h1 class="page-title"><span th:text="${cnt.scope.title()}">Full count</span> of
+        <span class="mono" th:text="${cnt.locationCode}">KGL-MAIN</span></h1>
+      <p class="page-sub">
+        <span th:text="${cnt.locationName}">Gahanga main store</span> ·
+        <span th:text="${cnt.scope.summary()}">Summary</span>
+      </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a th:if="${actions.canCount}" sec:authorize="hasAuthority('count.enter')"
+         th:href="@{'/counts/' + ${cnt.id} + '/count'}" class="btn btn-primary-action">
+        <i class="bi bi-pencil-square"></i> Counting sheet
+      </a>
+      <a th:if="${actions.canVerify}" sec:authorize="hasAuthority('count.verify')"
+         th:href="@{'/counts/' + ${cnt.id} + '/verify'}" class="btn btn-primary-action">
+        <i class="bi bi-search"></i> Verification sheet
+      </a>
+    </div>
+  </div>
+
+  <!-- Where the count is in its blind phases. -->
+  <div class="alert alert-info d-flex align-items-start gap-2" role="status" th:if="${cnt.counting()}">
+    <i class="bi bi-snow"></i>
+    <div>
+      <strong>Counting.</strong>
+      <span th:text="${progress.counted()} + ' of ' + ${progress.lines()} + ' lines counted.'">3 of 12 lines counted.</span>
+      <span th:if="${cnt.scope.name() == 'FULL'}">Nothing moves in or out of <span class="mono" th:text="${cnt.locationCode}">KGL-MAIN</span></span>
+      <span th:if="${cnt.scope.name() == 'PARTIAL'}">The items on this sheet do not move at <span class="mono" th:text="${cnt.locationCode}">KGL-MAIN</span></span>
+      until the verification count is signed. The book quantities are on no page until then: count what is there.
+    </div>
+  </div>
+  <div class="alert alert-info d-flex align-items-start gap-2" role="status" th:if="${cnt.awaitingVerification()}">
+    <i class="bi bi-search"></i>
+    <div>
+      <strong>Awaiting the verification count.</strong>
+      <span th:if="${progress.recountShown()}" th:text="${progress.verified()} + ' of ' + ${progress.toVerify()} + ' chosen lines recounted.'">1 of 3 chosen lines recounted.</span>
+      The system chose every line that differs from the book and a random sample of the rest when the count was
+      submitted. The Internal Controller recounts them without seeing the book or the first count. Which lines
+      were chosen is shown once the verification is signed: until then it would tell which counts agree with the
+      book. Still frozen.
+    </div>
+  </div>
+
+  <div class="alert alert-secondary d-flex align-items-start gap-2" role="status" th:if="${cnt.status == 'CANCELLED'}">
+    <i class="bi bi-x-circle-fill"></i>
+    <div>
+      <strong>Cancelled</strong>
+      by <span th:text="${cnt.cancelledByName}">Name</span>
+      on <span th:text="${#temporals.format(cnt.cancelledAt, 'dd MMM yyyy HH:mm')}">30 Sep 10:00</span>.
+      Reason: <span th:text="${cnt.cancelReason}">Reason</span>. The serial stays on the register.
+      <th:block th:unless="${cnt.bookVisible}">It was cancelled before its verification, so its book is never shown.</th:block>
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3" th:if="${!#lists.isEmpty(inFlight)}">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-scissors" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Cut-off: keep these goods apart</h2>
+              <p class="card-sub">Documents not yet posted whose goods are at, or on their way into or out of, this location</p>
+            </div>
+          </div>
+        </div>
+        <p class="small">Their stock is not on the book yet, or is still on it. Counted, it would be adjusted once by the
+          count and again when the document posts. While the count is open the ledger refuses their posting here.</p>
+        <ul class="small mb-0">
+          <li th:each="f : ${inFlight}">
+            <a class="doc-link mono" th:href="@{'/documents/' + ${f.id()}}" th:text="${f.serialNo()}">GRN-KGL-2026-0001</a>
+            (<span th:text="${f.typeName()}">Goods Received Note</span>, <span th:text="${f.status()}">PENDING</span>):
+            <span th:text="${f.how()}">received into it, not yet on the book</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-ol" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Sheet</h2>
+              <p class="card-sub" th:if="${cnt.bookVisible}">The book is the ledger's when each line was written; what was found is the recount where there is one</p>
+              <p class="card-sub" th:unless="${cnt.bookVisible}">Progress only: no quantity is shown until the verification is signed</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <!-- Before the verification is signed the lines carry no quantity at all: the book, the first count and the recount are not in the page, nor which lines were chosen for the recount. -->
+          <table class="table hb-table compact mb-0" th:unless="${cnt.bookVisible}">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Item</th>
+                <th scope="col">Bin</th>
+                <th scope="col">Counted</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="l : ${lines}">
+                <td class="mono" th:text="${l.lineNo()}">1</td>
+                <td>
+                  <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                  <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                  <span class="d-block small text-body-secondary" th:unless="${l.onSheet()}">added as found</span>
+                </td>
+                <td class="mono" th:text="${l.place()}">A1</td>
+                <td><i class="bi" th:classappend="${l.counted()} ? 'bi-check-circle-fill' : 'bi-circle'"
+                       th:attr="aria-label=${l.counted()} ? 'counted' : 'not counted'"></i></td>
+              </tr>
+              <tr th:if="${#lists.isEmpty(lines)}">
+                <td colspan="4" class="small text-body-secondary">The location holds nothing on the book. Add what you find on the counting sheet.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table class="table hb-table compact mb-0" th:if="${cnt.bookVisible}">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Item</th>
+                <th scope="col">Bin</th>
+                <th scope="col" class="num">Book</th>
+                <th scope="col" class="num">First count</th>
+                <th scope="col" class="num">Recount</th>
+                <th scope="col" class="num">Found</th>
+                <th scope="col" class="num">Variance</th>
+                <th scope="col" class="num" th:text="${cnt.status == 'POSTED'} ? 'Value (RWF)' : 'Est. value (RWF)'">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="l : ${lines}">
+                <td class="mono" th:text="${l.lineNo()}">1</td>
+                <td>
+                  <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                  <span class="d-block small text-body-secondary" th:text="${l.itemDescription()}">Clear float</span>
+                  <span class="d-block small text-body-secondary" th:if="${l.note()}" th:text="${l.note()}">note</span>
+                </td>
+                <td class="mono" th:text="${l.place()}">A1</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(l.bookQty(), 1, 'COMMA', 3, 'POINT')}">10.000</td>
+                <td class="num mono">
+                  <span th:text="${l.countedQty() != null} ? ${#numbers.formatDecimal(l.countedQty(), 1, 'COMMA', 3, 'POINT')} : '—'">8.000</span>
+                  <span class="d-block small text-body-secondary" th:if="${l.countedByName()}" th:text="${l.countedByName()}">Name</span>
+                </td>
+                <td class="num mono">
+                  <span th:text="${l.verifiedQty() != null} ? ${#numbers.formatDecimal(l.verifiedQty(), 1, 'COMMA', 3, 'POINT')} : '—'">7.000</span>
+                  <span class="d-block small" th:if="${l.recountDiffers()}" style="color: var(--color-warning)">differs from first count</span>
+                  <span class="d-block small text-body-secondary" th:if="${l.verifiedByName()}" th:text="${l.verifiedByName()}">Name</span>
+                </td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(l.finalQty(), 1, 'COMMA', 3, 'POINT')}">7.000</td>
+                <td class="num mono">
+                  <th:block th:if="${l.hasVariance()}"><span th:replace="~{fragments/ui :: chip('VARIANCE')}"></span></th:block>
+                  <span class="d-block" th:text="${#numbers.formatDecimal(l.varianceQty(), 1, 'COMMA', 3, 'POINT')}">-3.000</span>
+                </td>
+                <td class="num mono"
+                    th:text="${cnt.status == 'POSTED'}
+                             ? (${l.postedValue() != null} ? ${#numbers.formatDecimal(l.postedValue(), 1, 'COMMA', 2, 'POINT')} : '0.00')
+                             : ${#numbers.formatDecimal(l.varianceValue(), 1, 'COMMA', 2, 'POINT')}">-3,000.00</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="small text-body-secondary mt-2 mb-0" th:if="${cnt.bookVisible and cnt.status != 'POSTED'}">
+          A shortage leaves at the ledger's average cost when posted, so its value here is an estimate at the book's
+          average. A surplus enters at its line's unit cost, the value shown.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${posting != null}">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-journal-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">In the ledger</h2>
+              <p class="card-sub">Every adjustment this count moved</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Ticket</th>
+                <th scope="col">Leg</th>
+                <th scope="col">Line</th>
+                <th scope="col">Item</th>
+                <th scope="col">Location</th>
+                <th scope="col" class="num">Quantity</th>
+                <th scope="col" class="num">Unit cost</th>
+                <th scope="col" class="num">Value</th>
+                <th scope="col">Business date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="m : ${posting.movements()}">
+                <td class="mono" th:text="${m.ticketSerial()}">TT-KGL-2026-0003</td>
+                <td class="small" th:text="${m.direction() == 'OUT'} ? 'out' : 'in'">out</td>
+                <td class="mono" th:text="${m.lineNo()}">1</td>
+                <td class="mono" th:text="${m.itemCode()}">GL-CF-6</td>
+                <td class="mono"><span th:text="${m.locationCode()}">KGL-MAIN</span><span th:if="${m.binCode() != null}" th:text="' / ' + ${m.binCode()}"> / A1</span></td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.quantityBase(), 1, 'COMMA', 3, 'POINT')}">3.000</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.unitCost(), 1, 'COMMA', 4, 'POINT')}">1,000.0000</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">3,000.00</td>
+                <td class="mono" th:text="${#temporals.format(m.businessDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-info-circle" aria-hidden="true"></i>
+            <h2 class="card-title">Details</h2>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Scope</dt>
+          <dd class="col-7 col-md-3" th:text="${cnt.scope.title()}">Full count</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customs reference</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${cnt.customsReference} ?: '—'">C-2026-1</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Dated</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${#temporals.format(cnt.documentDate, 'dd MMM yyyy')}">30 Sep 2026</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Reference</dt>
+          <dd class="col-7 col-md-3" th:text="${cnt.reference} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Notes</dt>
+          <dd class="col-7 col-md-9" th:text="${cnt.notes} ?: '—'">—</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-pen" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Approval chain</h2>
+              <p class="card-sub" th:if="${chainInfo != null}">
+                Chain v<span th:text="${chainInfo.version}">1</span>
+                · <span th:text="${chainInfo.basis == 'RESTRUCTURE_2027'} ? 'Board restructuring 2027' : 'Inventory Policy 2026'">Policy</span>,
+                in force on the day this count was opened
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <ol th:replace="~{fragments/ui :: approvalChain(${chain})}"></ol>
+
+        <p class="small text-body-secondary mt-3 mb-0">
+          Opened by <span th:text="${cnt.createdByName}">Name</span>
+          on <span th:text="${#temporals.format(cnt.createdAt, 'dd MMM HH:mm')}">30 Sep 09:00</span>.
+          Every count takes all three signatures until the client sets a variance tolerance. The verifier signs only
+          after recounting every line chosen for it, and a variance is never approved on one person's count. Whoever
+          raised, signed, counted or recounted the count does not post it.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning" aria-hidden="true"></i>
+            <h2 class="card-title">What you can do</h2>
+          </div>
+        </div>
+
+        <p class="small text-body-secondary" th:if="${actions.countReason}" th:text="${actions.countReason}">Reason</p>
+        <p class="small text-body-secondary" th:if="${actions.verifyReason}" th:text="${actions.verifyReason}">Reason</p>
+
+        <form th:if="${actions.canSubmit}"
+              sec:authorize="hasAnyAuthority('count.create','count.verify','count.approve')"
+              th:action="@{'/counts/' + ${cnt.id} + '/submit'}" method="post" class="mb-3">
+          <p class="small">Submitting signs step 1 for you
+            (<span th:text="${actions.nextStep?.actionLabel}">PREPARE</span> as
+            <span th:text="${actions.nextStep?.roleName}">Warehouse Manager</span>) and closes the first count: no
+            line changes after that. The location stays frozen until the verification is signed.</p>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-send"></i> Submit the count</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.submitReason}" th:text="${actions.submitReason}">Reason</p>
+
+        <th:block th:if="${actions.canSign}"
+                  sec:authorize="hasAnyAuthority('count.create','count.verify','count.approve')">
+          <form th:action="@{'/counts/' + ${cnt.id} + '/approve'}" method="post" class="mb-2">
+            <label for="approveComment" class="form-label small fw-semibold" style="color: var(--color-heading)">
+              Sign step <span th:text="${actions.nextStep.sequenceNo}">2</span>
+              (<span th:text="${actions.nextStep.roleName}">Role</span>)
+            </label>
+            <input id="approveComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                   placeholder="Comment (optional)" autocomplete="off">
+            <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-check2-circle"></i> Approve</button>
+          </form>
+          <details class="mb-3">
+            <summary class="small fw-semibold">Reject this count</summary>
+            <form th:action="@{'/counts/' + ${cnt.id} + '/reject'}" method="post" class="mt-2">
+              <label for="rejectComment" class="form-label small">Reason (required). A rejected count is final.</label>
+              <input id="rejectComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                     required autocomplete="off">
+              <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-x-octagon"></i> Reject</button>
+            </form>
+          </details>
+        </th:block>
+        <p class="small text-body-secondary" th:if="${actions.signReason}" th:text="${actions.signReason}">Reason</p>
+
+        <form th:if="${actions.canPost}" sec:authorize="hasAuthority('count.post')"
+              th:action="@{'/counts/' + ${cnt.id} + '/post'}" method="post" class="mb-3">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="confirmPost" name="confirm" value="true">
+            <label class="form-check-label small" for="confirmPost">
+              I confirm this count is approved and that posting adjusts the stock in the ledger to what was found. It
+              cannot be undone.
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-journal-check"></i> Post the adjustment</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.postReason}" th:text="${actions.postReason}">Reason</p>
+
+        <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('count.create')">
+          <summary class="small fw-semibold">Cancel this count</summary>
+          <form th:action="@{'/counts/' + ${cnt.id} + '/cancel'}" method="post" class="mt-2">
+            <label for="cancelReason" class="form-label small">Reason (required). The serial stays on the register.</label>
+            <input id="cancelReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400"
+                   required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-slash-circle"></i> Cancel count</button>
+          </form>
+        </details>
+        <p class="small text-body-secondary" th:if="${actions.cancelReason}" th:text="${actions.cancelReason}">Reason</p>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canCount and !actions.canVerify and !actions.canSubmit and !actions.canSign
+                    and !actions.canCancel and !actions.canPost
+                    and actions.countReason == null and actions.verifyReason == null and actions.submitReason == null
+                    and actions.signReason == null and actions.cancelReason == null and actions.postReason == null}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">History</h2>
+              <p class="card-sub">Every change, signature, refusal and posting, newest first. Lines counted and recounted are named here, never their quantities</p>
+            </div>
+          </div>
+        </div>
+
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Changes to this count will be listed here.')}"></div>
+        </th:block>
+
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>
