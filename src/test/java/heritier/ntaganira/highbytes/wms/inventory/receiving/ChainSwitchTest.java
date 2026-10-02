@@ -15,6 +15,8 @@ import heritier.ntaganira.highbytes.wms.support.GrnFlow;
 import heritier.ntaganira.highbytes.wms.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -29,6 +31,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * still signed and posted by the 2026 roles, while one raised after is
  * signed by the 2027 roles, with no change to any code.
  *
+ * <p>Outside a migration no chain is put in force for a day already begun
+ * (V17), so the date arriving is simulated as a migration would move it.
+ *
  * <p>The dates are put back afterwards.
  */
 class ChainSwitchTest extends IntegrationTest {
@@ -38,6 +43,34 @@ class ChainSwitchTest extends IntegrationTest {
     @Autowired heritier.ntaganira.highbytes.wms.inventory.dispatch.DeliveryNoteService notes;
     @Autowired heritier.ntaganira.highbytes.wms.inventory.transfer.TransferService transfers;
     @Autowired heritier.ntaganira.highbytes.wms.inventory.transfer.ReceiptService receipts;
+    @Autowired PlatformTransactionManager transactions;
+
+    /** Both chains moved together, in one transaction, as a reviewed migration moves them. */
+    private void switchOn(java.time.LocalDate day, UUID old2026, UUID new2027, boolean forward) {
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            jdbc.sql("SELECT set_config('highbytes.migration', 'on', true)").query(String.class).single();
+            if (forward) {
+                jdbc.sql("UPDATE workflow_definition SET effective_to = :d WHERE id = :id").param("d", day).param("id", old2026).update();
+                jdbc.sql("UPDATE workflow_definition SET effective_from = :d WHERE id = :id").param("d", day).param("id", new2027).update();
+            } else {
+                // Shrink the new chain first so the two never overlap.
+                jdbc.sql("UPDATE workflow_definition SET effective_from = :d WHERE id = :id").param("d", day).param("id", new2027).update();
+                jdbc.sql("UPDATE workflow_definition SET effective_to = :d WHERE id = :id").param("d", day).param("id", old2026).update();
+            }
+        });
+    }
+
+    private java.time.LocalDate today() {
+        return jdbc.sql("SELECT kigali_today()").query(java.time.LocalDate.class).single();
+    }
+
+    private void bringForward(UUID old2026, UUID new2027) {
+        switchOn(today(), old2026, new2027, true);
+    }
+
+    private void putBack(UUID old2026, UUID new2027) {
+        switchOn(java.time.LocalDate.of(2027, 1, 1), old2026, new2027, false);
+    }
 
     private UUID definition(String basis) {
         return jdbc.sql("""
@@ -58,10 +91,7 @@ class ChainSwitchTest extends IntegrationTest {
         assertThat(before.chainRoles).hasSize(3);
         UUID open = before.pending();
 
-        jdbc.sql("UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = :id")
-                .param("id", old2026).update();
-        jdbc.sql("UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = :id")
-                .param("id", new2027).update();
+        bringForward(old2026, new2027);
         try {
             // Raised after: bound to the 2027 chain, four steps, signed by the 2027 roles.
             GrnFlow after = new GrnFlow(fx, receiving);
@@ -81,11 +111,8 @@ class ChainSwitchTest extends IntegrationTest {
             before.post(open);
             assertThat(statusOf(open)).isEqualTo("POSTED");
         } finally {
-            // Put the switch back where the Board put it: shrink the new chain first so the two never overlap.
-            jdbc.sql("UPDATE workflow_definition SET effective_from = DATE '2027-01-01' WHERE id = :id")
-                    .param("id", new2027).update();
-            jdbc.sql("UPDATE workflow_definition SET effective_to = DATE '2027-01-01' WHERE id = :id")
-                    .param("id", old2026).update();
+            // Put the switch back where the Board put it.
+            putBack(old2026, new2027);
         }
     }
 
@@ -96,8 +123,7 @@ class ChainSwitchTest extends IntegrationTest {
         UUID old2026 = definition("DAO", "POLICY_2026");
         UUID new2027 = definition("DAO", "RESTRUCTURE_2027");
 
-        jdbc.sql("UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = :id").param("id", old2026).update();
-        jdbc.sql("UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = :id").param("id", new2027).update();
+        bringForward(old2026, new2027);
         try {
             var flow = new heritier.ntaganira.highbytes.wms.support.DispatchFlow(fx, receiving, dispatch, notes);
             // Inventory Transactions Officer, Director of Supply Chain, Director of Commercial (countersign), Internal Controller (release).
@@ -110,8 +136,7 @@ class ChainSwitchTest extends IntegrationTest {
             assertThat(jdbc.sql("SELECT SUM(signed_quantity) FROM stock_movement WHERE item_id = :item AND direction = 'OUT'")
                     .param("item", flow.grn.glass).query(BigDecimal.class).single()).isEqualByComparingTo("-20.000");
         } finally {
-            jdbc.sql("UPDATE workflow_definition SET effective_from = DATE '2027-01-01' WHERE id = :id").param("id", new2027).update();
-            jdbc.sql("UPDATE workflow_definition SET effective_to = DATE '2027-01-01' WHERE id = :id").param("id", old2026).update();
+            putBack(old2026, new2027);
         }
     }
 
@@ -122,8 +147,7 @@ class ChainSwitchTest extends IntegrationTest {
         UUID old2026 = definition("TRF", "POLICY_2026");
         UUID new2027 = definition("TRF", "RESTRUCTURE_2027");
 
-        jdbc.sql("UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = :id").param("id", old2026).update();
-        jdbc.sql("UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = :id").param("id", new2027).update();
+        bringForward(old2026, new2027);
         try {
             var flow = new heritier.ntaganira.highbytes.wms.support.TransferFlow(fx, receiving, transfers, receipts);
             // Warehouse Manager prepares, the Managing Director approves, the Internal Controller verifies.
@@ -137,8 +161,7 @@ class ChainSwitchTest extends IntegrationTest {
                     + "WHERE sb.item_id = :item AND l.code = 'RBV-BOND'")
                     .param("item", flow.grn.glass).query(BigDecimal.class).single()).isEqualByComparingTo("20");
         } finally {
-            jdbc.sql("UPDATE workflow_definition SET effective_from = DATE '2027-01-01' WHERE id = :id").param("id", new2027).update();
-            jdbc.sql("UPDATE workflow_definition SET effective_to = DATE '2027-01-01' WHERE id = :id").param("id", old2026).update();
+            putBack(old2026, new2027);
         }
     }
 

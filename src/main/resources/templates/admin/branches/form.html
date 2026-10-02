@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New branch' : 'Edit branch'">Branch</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">ADMINISTRATION · BRANCH</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New branch' : 'Edit ' + ${form.code}">New branch</h1>
+    <p class="page-sub" th:if="${form.new}">A new branch holds nothing and nobody works there yet. Its locations are
+      added under Master data, and people are given roles there from their user page.</p>
+  </div>
+
+  <div th:if="${#fields.hasErrors('${form}')}" class="alert alert-danger" role="alert">
+    <p th:each="e : ${#fields.errors('${form}')}" th:text="${e}" class="mb-0"></p>
+  </div>
+
+  <form th:action="${form.new} ? @{/admin/branches} : @{'/admin/branches/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <section class="hb-card hb-card-body" style="max-width: 48rem">
+      <div class="row g-3">
+        <div class="col-12 col-md-4">
+          <label for="code" class="form-label small fw-semibold" style="color: var(--color-heading)">
+            Code <span class="text-danger" th:if="${form.new}">*</span>
+          </label>
+          <input th:if="${form.new}" id="code" th:field="*{code}" class="form-control mono"
+                 th:classappend="${#fields.hasErrors('code')} ? 'is-invalid'"
+                 placeholder="GSY" autocomplete="off" maxlength="8">
+          <input th:unless="${form.new}" id="code" class="form-control mono bg-body-secondary"
+                 th:value="${form.code}" readonly>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('code')}" th:errors="*{code}">error</div>
+          <div class="form-text" th:if="${form.new}">Printed in every serial raised there, as in GRN-KGL-2026-0412.
+            It cannot change later.</div>
+          <div class="form-text" th:unless="${form.new}">Fixed: every serial raised there prints it.</div>
+        </div>
+
+        <div class="col-12 col-md-8">
+          <label for="name" class="form-label small fw-semibold" style="color: var(--color-heading)">
+            Name <span class="text-danger">*</span>
+          </label>
+          <input id="name" th:field="*{name}" class="form-control" maxlength="120"
+                 th:classappend="${#fields.hasErrors('name')} ? 'is-invalid'"
+                 placeholder="Gisenyi Retail Branch">
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('name')}" th:errors="*{name}">error</div>
+          <div class="form-text">The audit trail keeps the name used at the time.</div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label for="branchType" class="form-label small fw-semibold" style="color: var(--color-heading)">
+            Kind <span class="text-danger">*</span>
+          </label>
+          <select id="branchType" th:field="*{branchType}" class="form-select"
+                  th:classappend="${#fields.hasErrors('branchType')} ? 'is-invalid'"
+                  th:disabled="${form.hasHistory}">
+            <option th:each="t : ${branchTypes}" th:value="${t}" th:text="${t.label()}">Branch</option>
+          </select>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('branchType')}" th:errors="*{branchType}">error</div>
+          <div class="form-text" th:if="${form.hasHistory}">Fixed: documents have been raised or stock has moved here,
+            and each was judged against the branch as it was.</div>
+          <div class="form-text" th:unless="${form.hasHistory}">There is one main warehouse.</div>
+        </div>
+
+        <div class="col-6 col-md-4">
+          <label for="city" class="form-label small fw-semibold" style="color: var(--color-heading)">City</label>
+          <input id="city" th:field="*{city}" class="form-control" maxlength="80"
+                 th:classappend="${#fields.hasErrors('city')} ? 'is-invalid'" placeholder="Rubavu">
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('city')}" th:errors="*{city}">error</div>
+        </div>
+
+        <div class="col-6 col-md-2">
+          <label for="countryCode" class="form-label small fw-semibold" style="color: var(--color-heading)">
+            Country <span class="text-danger">*</span>
+          </label>
+          <input id="countryCode" th:field="*{countryCode}" class="form-control mono" maxlength="2"
+                 th:classappend="${#fields.hasErrors('countryCode')} ? 'is-invalid'" placeholder="RW">
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('countryCode')}" th:errors="*{countryCode}">error</div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <div class="form-check mt-md-4">
+            <input class="form-check-input" type="checkbox" th:field="*{bonded}" th:disabled="${form.hasHistory}"
+                   th:classappend="${#fields.hasErrors('bonded')} ? 'is-invalid'">
+            <label class="form-check-label" th:for="${#ids.prev('bonded')}">
+              Bonded: holds duty-suspended stock
+              <span class="text-body-secondary small d-block">Every receipt and release there carries a customs reference.</span>
+            </label>
+            <div class="invalid-feedback" th:if="${#fields.hasErrors('bonded')}" th:errors="*{bonded}">error</div>
+          </div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label for="customsRegime" class="form-label small fw-semibold" style="color: var(--color-heading)">Customs regime</label>
+          <input id="customsRegime" th:field="*{customsRegime}" class="form-control" maxlength="60"
+                 th:classappend="${#fields.hasErrors('customsRegime')} ? 'is-invalid'"
+                 placeholder="Public bonded warehouse">
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('customsRegime')}" th:errors="*{customsRegime}">error</div>
+          <div class="form-text">Required for a bonded branch; kept only for one.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Create branch' : 'Save changes'">Create branch</span>
+      </button>
+      <a th:href="${form.new} ? @{/admin/branches} : @{'/admin/branches/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+</div>
+</body>
+</html>

@@ -141,7 +141,15 @@ shape, so it is worth building carefully.
 - [ ] Daily Close, left for later: no escalation or notification for overdue days beyond the register and the
       sidebar badge; a day with no movements has no close of its own (locking a later day closes it); the
       exceptions are read live, so a locked day's CACHE line reflects the cache now, not then
-- [ ] Admin screens — workflow editor, branches, audit log viewer
+- [x] Admin screens — branches, Workflow Definitions, the audit log (V17, `admin/branch`, `admin/workflow`,
+      `admin/audit`). A chain's steps change only by migration and never once a document is bound to it; outside
+      a migration only a switchover still to come moves, both chains together, with a reason. A branch keeps its
+      code, its kind once it has a past, and closes only once finished with (no stock, nothing open, no transfer to
+      arrive, every day locked); nothing new starts at a closed one. The audit log reads only the entries recorded
+      at branches where the reader holds `audit.view`; entries at no branch need the right everywhere
+- [ ] Admin screens, left for later: no export of the audit log; a document's audit entry links to no page
+      (each type has its own); locations at an inactive branch are still offered on the location form, which the
+      database then refuses
 - [ ] Access review for the Internal Controller: who holds what, read-only,
       without admin rights
 - [ ] Second person for access changes (see the open decision below):
@@ -151,9 +159,10 @@ shape, so it is worth building carefully.
       application as a role with DML only (no TRUNCATE, no trigger DDL), and
       `in_migration()` also requires the owner. Today one superuser does both,
       so the migration flag guards against mistakes, not against the app
-- [ ] Before the workflow editor: guard `workflow_step` deletion and
-      `workflow_definition` date changes as access changes (they decide who
-      signs, and so who is operational)
+- [x] Before the workflow editor: guard `workflow_step` changes (V17: by
+      migration only, never once bound). Date changes no longer decide who is
+      operational (V10 made signing any chain operational), so they need no
+      access check
 - [ ] A refusal the database raises at commit (a race the service's own
       check did not see) shows a 500 and leaves no refusal record on the
       access screens (users, roles). Document actions already translate it

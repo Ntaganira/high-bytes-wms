@@ -30,7 +30,8 @@ public record AuditEntry(
         String branchName,
         LocalDateTime occurredAt,
         String clientAddress,
-        String reason
+        String reason,
+        String userAgent
 ) {
 
     /**

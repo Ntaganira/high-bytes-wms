@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Branches</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">ADMINISTRATION</p>
+      <h1 class="page-title">Branches</h1>
+      <p class="page-sub">Every place the company holds stock. A branch is configuration, never a code change; it is
+        deactivated, never deleted.</p>
+    </div>
+    <a th:href="@{/admin/branches/new}" class="btn btn-primary-action">
+      <i class="bi bi-plus-lg"></i> New branch
+    </a>
+  </div>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Branch</th>
+            <th scope="col">Kind</th>
+            <th scope="col">City</th>
+            <th scope="col" class="num">Locations</th>
+            <th scope="col" class="num">People</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="b : ${branches}" th:classappend="${!b.active()} ? 'opacity-75'">
+            <td>
+              <a th:href="@{'/admin/branches/' + ${b.id()}}" th:text="${b.name()}">Gahanga Main Warehouse</a>
+              <span class="d-block small text-body-secondary mono" th:text="${b.code()}">KGL</span>
+            </td>
+            <td th:text="${b.branchType().label()}">Main warehouse</td>
+            <td>
+              <span th:text="${b.city()} ?: '—'">Kigali</span>
+              <span class="text-body-secondary mono small" th:text="${b.countryCode()}">RW</span>
+            </td>
+            <td class="num" th:text="${b.locationCount()}">4</td>
+            <td class="num" th:text="${b.peopleCount()}">12</td>
+            <td>
+              <div class="d-flex flex-wrap gap-1">
+                <span th:replace="~{fragments/ui :: chip(${b.status()})}"></span>
+                <th:block th:if="${b.bonded()}"><span th:replace="~{fragments/ui :: chip('BONDED')}"></span></th:block>
+              </div>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(branches)}">
+            <td colspan="6">
+              <div th:replace="~{fragments/ui :: emptyState('bi-building', 'No branches', 'Create the first branch.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="text-body-secondary small mt-2">
+    Locations counts the active ones. People counts active accounts with a role in force at that branch alone;
+    someone whose role applies at every branch is not counted here.
+  </p>
+
+</div>
+</body>
+</html>

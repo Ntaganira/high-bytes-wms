@@ -14,6 +14,7 @@ package heritier.ntaganira.highbytes.wms.common.audit;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import heritier.ntaganira.highbytes.wms.branch.BranchView;
+import heritier.ntaganira.highbytes.wms.common.db.KigaliTime;
 import heritier.ntaganira.highbytes.wms.security.AppUserDetails;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -31,13 +32,18 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Types;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -64,16 +70,48 @@ public class AuditService {
                     :branchId, :branchName, :clientAddress, :userAgent, :reason)
             """;
 
-    private static final String BY_ENTITY = """
-            SELECT id, entity_name, entity_id, entity_label, document_id, action,
-                   before_state::text AS before_state, after_state::text AS after_state,
-                   actor_name, actor_username, actor_role, branch_name,
-                   occurred_at, client_address, reason
-              FROM audit_log
-             WHERE entity_name = :entityName AND entity_id = :entityId
-             ORDER BY occurred_at DESC, id DESC
+    private static final String COLUMNS = """
+            SELECT a.id, a.entity_name, a.entity_id, a.entity_label, a.document_id, a.action,
+                   a.before_state::text AS before_state, a.after_state::text AS after_state,
+                   a.actor_name, a.actor_username, a.actor_role, a.branch_name,
+                   a.occurred_at, a.client_address, a.reason, a.user_agent
+              FROM audit_log a
+            """;
+
+    private static final String BY_ENTITY = COLUMNS + """
+             WHERE a.entity_name = :entityName AND a.entity_id = :entityId
+             ORDER BY a.occurred_at DESC, a.id DESC
              LIMIT :limit
             """;
+
+    /**
+     * Only what the reader's right reaches: an entry recorded at a branch is
+     * read by whoever holds the right there; one recorded at no branch (a
+     * sign-in, the system's own work) only by whoever holds it everywhere.
+     */
+    private static final String IN_SCOPE = """
+               (:everywhere OR a.branch_id IN (:branches))
+            """;
+
+    private static final String SEARCH = COLUMNS + " WHERE " + IN_SCOPE + """
+               AND (:before::bigint IS NULL OR a.id < :before::bigint)
+               AND (:fromDate::date IS NULL
+                    OR a.occurred_at >= (:fromDate::date)::timestamp AT TIME ZONE 'Africa/Kigali')
+               AND (:toDate::date IS NULL
+                    OR a.occurred_at < (:toDate::date + 1)::timestamp AT TIME ZONE 'Africa/Kigali')
+               AND (:action::text IS NULL OR a.action = :action::text)
+               AND (:entityName::text IS NULL OR a.entity_name = :entityName::text)
+               AND (:entityId::uuid IS NULL OR a.entity_id = :entityId::uuid)
+               AND (:actor::text IS NULL OR lower(a.actor_username) = lower(:actor::text))
+               AND (:branchId::uuid IS NULL OR a.branch_id = :branchId::uuid)
+               AND (:text::text IS NULL
+                    OR a.entity_label ILIKE :text::text ESCAPE '\\'
+                    OR a.reason ILIKE :text::text ESCAPE '\\')
+             ORDER BY a.id DESC
+             LIMIT :limit
+            """;
+
+    private static final String BY_ID = COLUMNS + " WHERE a.id = :id AND " + IN_SCOPE;
 
     private final JdbcClient jdbc;
     private final ObjectMapper json;
@@ -262,26 +300,115 @@ public class AuditService {
                 .param("entityName", entityName)
                 .param("entityId", entityId, Types.OTHER)
                 .param("limit", limit)
-                .query((rs, n) -> {
-                    Map<String, Object> before = read(rs.getString("before_state"));
-                    Map<String, Object> after  = read(rs.getString("after_state"));
-                    return new AuditEntry(
-                            rs.getLong("id"),
-                            rs.getString("entity_name"),
-                            rs.getObject("entity_id", UUID.class),
-                            rs.getString("entity_label"),
-                            rs.getObject("document_id", UUID.class),
-                            rs.getString("action"),
-                            diff(before, after),
-                            rs.getString("actor_name"),
-                            rs.getString("actor_username"),
-                            rs.getString("actor_role"),
-                            rs.getString("branch_name"),
-                            rs.getTimestamp("occurred_at").toLocalDateTime(),
-                            rs.getString("client_address"),
-                            rs.getString("reason"));
-                })
+                .query(this::entry)
                 .list();
+    }
+
+    /**
+     * Whose entries a reader of the trail may see: all of them, or those
+     * recorded at the branches named. A right held at one branch reaches
+     * that branch's entries and no others.
+     */
+    public record Scope(boolean everywhere, Set<UUID> branchIds) {
+
+        public static Scope of(AppUserDetails user, String permission) {
+            boolean everywhere = user.grants().stream()
+                    .anyMatch(g -> g.branchId() == null && g.permissions().contains(permission));
+            Set<UUID> branches = new LinkedHashSet<>();
+            user.grants().stream()
+                    .filter(g -> g.branchId() != null && g.permissions().contains(permission))
+                    .forEach(g -> branches.add(g.branchId()));
+            return new Scope(everywhere, Set.copyOf(branches));
+        }
+
+        boolean empty() {
+            return !everywhere && branchIds.isEmpty();
+        }
+    }
+
+    /**
+     * What a reader looks for. Every field is optional; dates are Kigali
+     * days, inclusive. {@code before} pages backwards: entries older than
+     * that one.
+     */
+    public record Query(LocalDate from, LocalDate to, String action, String entityName, UUID entityId,
+                        String actor, UUID branchId, String text, Long before) {
+
+        public static Query entity(String entityName, UUID entityId) {
+            return new Query(null, null, null, entityName, entityId, null, null, null, null);
+        }
+    }
+
+    /** The entries matching, newest first, at most {@code limit}, of those the scope reaches. */
+    @Transactional(readOnly = true)
+    public List<AuditEntry> search(Query q, Scope scope, int limit) {
+        if (scope.empty()) return List.of();
+        return jdbc.sql(SEARCH)
+                .param("everywhere", scope.everywhere())
+                .param("branches", scopeBranches(scope))
+                .param("before", q.before(), Types.BIGINT)
+                .param("fromDate", q.from(), Types.DATE)
+                .param("toDate", q.to(), Types.DATE)
+                .param("action", blankToNull(q.action()))
+                .param("entityName", blankToNull(q.entityName()))
+                .param("entityId", q.entityId(), Types.OTHER)
+                .param("actor", blankToNull(q.actor()))
+                .param("branchId", q.branchId(), Types.OTHER)
+                .param("text", like(q.text()))
+                .param("limit", limit)
+                .query(this::entry)
+                .list();
+    }
+
+    /** One entry, when the scope reaches it. */
+    @Transactional(readOnly = true)
+    public Optional<AuditEntry> find(long id, Scope scope) {
+        if (scope.empty()) return Optional.empty();
+        return jdbc.sql(BY_ID)
+                .param("id", id)
+                .param("everywhere", scope.everywhere())
+                .param("branches", scopeBranches(scope))
+                .query(this::entry)
+                .optional();
+    }
+
+    // An empty IN () is not SQL. A scope reaching everywhere names no
+    // branch, so one that matches nothing stands in.
+    private static List<UUID> scopeBranches(Scope scope) {
+        return scope.branchIds().isEmpty() ? List.of(new UUID(0, 0)) : List.copyOf(scope.branchIds());
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /** A contains-pattern for ILIKE, with the reader's own % and _ taken literally. */
+    private static String like(String text) {
+        String t = blankToNull(text);
+        if (t == null) return null;
+        return "%" + t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+    }
+
+    private AuditEntry entry(ResultSet rs, int rowNum) throws SQLException {
+        Map<String, Object> before = read(rs.getString("before_state"));
+        Map<String, Object> after  = read(rs.getString("after_state"));
+        return new AuditEntry(
+                rs.getLong("id"),
+                rs.getString("entity_name"),
+                rs.getObject("entity_id", UUID.class),
+                rs.getString("entity_label"),
+                rs.getObject("document_id", UUID.class),
+                rs.getString("action"),
+                diff(before, after),
+                rs.getString("actor_name"),
+                rs.getString("actor_username"),
+                rs.getString("actor_role"),
+                rs.getString("branch_name"),
+                // Kigali time, whatever the server's clock is set to: the screens say CAT.
+                KigaliTime.read(rs, "occurred_at"),
+                rs.getString("client_address"),
+                rs.getString("reason"),
+                rs.getString("user_agent"));
     }
 
     /**

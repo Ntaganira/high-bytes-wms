@@ -79,7 +79,10 @@ under that definition** even if the effective date passes mid-process.
 | to 2026-12-31 | Finance → Asst WH Manager → WH Manager → Internal Controller |
 | from 2027-01-01 | Inventory Transactions Officer → Director Supply Chain → Director Commercial → Internal Controller |
 
-Never hard-code either chain. Moving the date is an `UPDATE` on one row.
+Never hard-code either chain. The date is data: Workflow Definitions moves a
+switchover still to come, both rows together, with a reason (V17). A chain's
+steps, roles and order change only by migration, and never once a document
+is bound to it; no chain is put in force, or out of it, for a day begun.
 
 ## Stack
 
@@ -106,7 +109,10 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 ├── security/      AppUserDetails, AccountStateFilter, SignInEvents, PasswordRules
 ├── admin/
 │   ├── user/      users, role grants and revocations, password reset, unlock
-│   └── role/      roles, the permission matrix, segregation rules (read-only)
+│   ├── role/      roles, the permission matrix, segregation rules (read-only)
+│   ├── branch/    branches: create, amend, deactivate once finished with
+│   ├── workflow/  the approval chains read whole; a switchover to come moved
+│   └── audit/     the audit log, searched, as far as the reader's right reaches
 ├── profile/       My profile, change password (forced for temporary ones)
 ├── dashboard/
 ├── masterdata/
@@ -249,6 +255,19 @@ made `daily_close`; V16 gave it its rules.
   own, so the order its days close in rests on nothing another test wrote.
   The close's figures and exceptions are the database's
   (`close_figures`, `close_exceptions`), never supplied.
+- **A chain moves only forward, and only as a migration otherwise** (V17).
+  Outside a migration a switchover moves to tomorrow at the earliest, both
+  chains together (the gap check runs at commit). A test that needs the 2027
+  chain in force today brings the switch forward as a migration would:
+  `set_config('highbytes.migration', 'on', true)` in one transaction, both
+  rows (`ChainSwitchTest.switchOn`, checks 27, 38 and 46). The same goes for
+  any fixture that adds a chain or a step.
+- **A branch closes only once finished with** (V17): no stock, no open
+  document, no transfer still to arrive, every day with movements locked;
+  the main branch never. Nothing new starts at an inactive branch (document,
+  location, grant, transfer to it). Its code never changes, its type is
+  fixed once it has a past, and there is one main branch, so a test creates
+  BRANCH-type branches with codes of its own.
 - **The access checks run at COMMIT** (deferred constraint triggers). A
   service asks `access_conflict()` first so the refusal carries its reason;
   a psql test must `SET CONSTRAINTS ALL IMMEDIATE`, as `verify-controls.sql`
@@ -305,8 +324,9 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
    database writes its figures and exceptions, the Internal Controller's
    countersignature locks it, days close in order; a nightly job prepares
    them (V16)
-9. Admin screens — ~~users, roles~~ done; workflow editor, branches and
-   the audit log viewer remain
+9. ~~Admin screens~~ — done; users and roles, then branches, Workflow
+   Definitions (read whole; only a switchover still to come moves) and the
+   audit log viewer (V17)
 
 ## Open questions for the client
 
@@ -366,6 +386,18 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 - Nor does any pair the Warehouse Manager with Finance. V15 keeps someone
   holding both from approving or rejecting a count they counted; should the
   pair be blocked outright?
+
+- **Who may move a switchover, and how far?** The System Administrator
+  (`admin.workflow`), with a reason, to any day still to come (chosen 2
+  October 2026; the steps stay migration-only). Nothing bounds the date: one
+  administrator could defer the Board's 2027 chain for years, or bring it to
+  tomorrow, for every document raised meanwhile. The client may want a
+  second signer (the Internal Controller), or a window around the Board's
+  date, or the date back in migrations only.
+- The audit log shows a reader the entries recorded at the branches where
+  they hold `audit.view`; sign-ins and the system's own work, recorded at no
+  branch, only to whoever holds it at every branch. Is that the reach the
+  client wants for an Internal Controller granted branch by branch?
 
 ## Source documents
 

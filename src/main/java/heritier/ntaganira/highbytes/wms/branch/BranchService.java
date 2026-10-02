@@ -46,6 +46,15 @@ public class BranchService {
         return jdbc.sql(ALL).query(this::map).list();
     }
 
+    /** Every branch there has been, active or not: for reading history, never for working in. */
+    public List<BranchView> everyBranch() {
+        return jdbc.sql("""
+                SELECT id, code, name, is_bonded, branch_type
+                  FROM branch
+                 ORDER BY is_active DESC, branch_type, name
+                """).query(this::map).list();
+    }
+
     public Optional<BranchView> findById(UUID id) {
         if (id == null) return Optional.empty();
         return jdbc.sql(BY_ID).param("id", id).query(this::map).optional();

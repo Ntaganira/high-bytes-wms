@@ -128,7 +128,10 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 ├── security/          user details, branch-scoped permissions, sign-in accounting
 ├── admin/
 │   ├── user/          users, role grants, password reset, unlock
-│   └── role/          roles and the permission matrix
+│   ├── role/          roles and the permission matrix
+│   ├── branch/        branches
+│   ├── workflow/      the approval chains, and moving a switchover to come
+│   └── audit/         the audit log viewer
 ├── profile/           my profile, change password
 ├── dashboard/
 ├── masterdata/
@@ -162,6 +165,7 @@ modules along the existing package seams.
 | `V14__returns_and_damage.sql` | Write-offs, transit losses, customer returns, quarantine release |
 | `V15__stock_counts.sql` | Blind counts, the verification count, the freeze, adjustment tickets |
 | `V16__daily_close.sql` | The daily close: reconciled by Finance, locked by the Internal Controller, in order |
+| `V17__administration.sql` | Approval chains frozen once bound and dated forward only; branches keep their code and close only when finished with |
 
 Never edit an applied migration. Add a new one.
 
@@ -199,11 +203,15 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 - Item master: list with search and filters, create, edit, view, deactivate
 - Locations and bins: list, create, edit, view, bin management
 - Audit trail on every master data change, with field-level before/after
+- Branches: create, amend, deactivate once finished with, reactivate
+- Workflow Definitions: every chain, version and step, the documents bound
+  to each; a switchover still to come moved with a reason
+- Audit log: search by day, action, record, person, branch and words, as
+  far as the reader's right reaches
 
 ## Not built yet
 
-Cutting (it waits on the client's off-cut decision), reports and KPIs, and
-the admin screens for workflows, branches and the audit log.
+Cutting (it waits on the client's off-cut decision), reports and KPIs.
 
 ## Two rules the UI enforces that the SRS does not state
 
