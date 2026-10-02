@@ -95,6 +95,7 @@ public class DocumentListService {
                AND (:text::text IS NULL OR d.serial_no ILIKE :text::text ESCAPE '\\'
                                         OR d.reference ILIKE :text::text ESCAPE '\\')
                AND (NOT :mine OR d.created_by = :user)
+               AND (:serial::text IS NULL OR lower(d.serial_no) = lower(:serial::text))
                AND (:before::uuid IS NULL
                     OR (d.created_at, d.id) < (SELECT x.created_at, x.id FROM document x WHERE x.id = :before::uuid))
              ORDER BY d.created_at DESC, d.id DESC
@@ -122,10 +123,32 @@ public class DocumentListService {
                 .param("to", q.to(), Types.DATE)
                 .param("text", like(q.text()), Types.VARCHAR)
                 .param("mine", q.mine())
+                .param("serial", null, Types.VARCHAR)
                 .param("before", q.before(), Types.OTHER)
                 .param("limit", Math.max(1, limit))
                 .query((rs, n) -> map(rs, user.permissions()))
                 .list();
+    }
+
+    /** The one document with exactly this serial, ignoring case, when the signed-in user may read it. */
+    @PreAuthorize("isAuthenticated()")
+    public java.util.Optional<DocumentRow> bySerial(String serial) {
+        AppUserDetails user = CurrentUser.get().orElse(null);
+        if (user == null || serial == null || serial.isBlank()) return java.util.Optional.empty();
+        return jdbc.sql(LIST)
+                .param("user", user.id(), Types.OTHER)
+                .param("type", null, Types.VARCHAR)
+                .param("status", null, Types.VARCHAR)
+                .param("branch", null, Types.OTHER)
+                .param("from", null, Types.DATE)
+                .param("to", null, Types.DATE)
+                .param("text", null, Types.VARCHAR)
+                .param("mine", false)
+                .param("serial", serial.trim(), Types.VARCHAR)
+                .param("before", null, Types.OTHER)
+                .param("limit", 1)
+                .query((rs, n) -> map(rs, user.permissions()))
+                .optional();
     }
 
     private static DocumentRow map(ResultSet rs, Set<String> rightsHere) throws SQLException {

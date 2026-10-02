@@ -124,6 +124,16 @@ class DocumentListTest extends IntegrationTest {
     }
 
     @Test
+    void aWholeSerialFindsItsOneDocumentOnlyForWhoeverMayReadIt() {
+        fx.actAs(reader);
+        assertThat(register.bySerial(" " + serial(posted).toLowerCase() + " ")).get()
+                .extracting(DocumentRow::id).isEqualTo(posted);
+        assertThat(register.bySerial(serial(posted).substring(0, 8))).isEmpty();
+        fx.actAs(fx.user("sales", "SALES"));
+        assertThat(register.bySerial(serial(posted))).isEmpty();
+    }
+
+    @Test
     void pagesFollowOnFromTheLastDocumentShown() {
         fx.actAs(flow.raiser());
         var mine = new DocumentListService.Query(null, null, null, null, null, null, true, null);

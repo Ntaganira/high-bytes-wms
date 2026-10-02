@@ -188,6 +188,13 @@ shape, so it is worth building carefully.
       rights where they work do not reach offers the branch switch, as the approval queue does
 - [ ] Documents, left for later: no export; no serial-gap report (a missing number is an incident: the register
       shows cancelled serials, not numbers never issued)
+- [x] Search (`search/`, `/search`): the top bar's box finds documents by serial or reference (through the
+      documents register, so only where the reader holds the type's view right at the document's branch), items
+      and locations (behind `item.view`), suppliers and customers (behind `partner.manage`). A section the reader
+      may not read is not searched at all. A serial typed whole opens its document at once. The reader's % and _
+      are characters, not wildcards
+- [ ] Search, left for later: no search of people, branches or the audit log (each is on its own admin screen);
+      the item list's own search box still treats % and _ as wildcards
 - [ ] Tickets, left for later: no export; a document's own page names its ticket without linking it; one branch at
       a time
 - [ ] Admin screens, left for later: no export of the audit log; a document's audit entry links to no page

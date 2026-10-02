@@ -200,6 +200,8 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 - Branch switcher, with bonded branches flagged
 - Dashboard: KPIs, movement chart, what awaits your signature, low stock —
   all reading the ledger
+- Search: a serial opens its document; otherwise documents, items,
+  locations, suppliers and customers, each only as far as your rights reach
 - All documents: every document you may read, at every branch, filtered by
   type, status, branch, date and serial, each saying where it stands
 - Transaction tickets: the register at the branch, and one ticket with what
