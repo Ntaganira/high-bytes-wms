@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New cutting order' : 'Edit ' + ${cut.serialNo}">Cutting order</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · RETAIL CUTTING ORDER · CUT-006</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New cutting order' : 'Edit ' + ${cut.serialNo}">New cutting order</h1>
+    <p class="page-sub" th:if="${form.new}">
+      Saved as a draft, dated today (Kigali time). Nothing is cut until the Warehouse Manager has verified the sizes
+      and the Internal Controller has released the order. Each size is filed as an item of its own, one per sheet and
+      exact size, made the first time that size is cut.
+    </p>
+  </div>
+
+  <form id="cut-form" th:action="${form.new} ? @{/cutting} : @{'/cutting/' + ${form.id}}"
+        th:object="${form}" method="post" novalidate>
+
+    <input type="hidden" th:field="*{version}">
+
+    <div th:if="${#fields.hasGlobalErrors()}" class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+      <i class="bi bi-exclamation-octagon-fill"></i>
+      <div><p th:each="e : ${#fields.globalErrors()}" th:text="${e}" class="mb-0"></p></div>
+    </div>
+
+    <div class="row g-3">
+
+      <div class="col-12 col-xl-8">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-person-lines-fill" aria-hidden="true"></i>
+              <h2 class="card-title">Customer and place</h2>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label for="customerId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Customer <span class="text-danger">*</span>
+              </label>
+              <select id="customerId" th:field="*{customerId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('customerId')} ? 'is-invalid'">
+                <option value="">— choose —</option>
+                <option th:each="c : ${customers}" th:value="${c.id()}" th:text="${c.label()}">CUS-1 — Customer</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('customerId')}" th:errors="*{customerId}">error</div>
+              <div class="form-text">Only active customers who are not blocked are listed.</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="locationId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Cut at <span class="text-danger">*</span>
+              </label>
+              <select id="locationId" th:field="*{locationId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('locationId')} ? 'is-invalid'"
+                      th:attr="hx-post=@{/cutting/sheet}" hx-include="#cut-form" hx-target="#cut-sheet"
+                      hx-swap="outerHTML" hx-trigger="change">
+                <option value="">— choose —</option>
+                <option th:each="l : ${locations}" th:value="${l.id()}" th:text="${l.label()}">KGL-CUT — Cutting floor</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('locationId')}" th:errors="*{locationId}">error</div>
+              <div class="form-text">The sheets are taken from here, and the pieces and off-cuts put back here.</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="customerReference" class="form-label small fw-semibold" style="color: var(--color-heading)">Customer order reference</label>
+              <input id="customerReference" th:field="*{customerReference}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('customerReference')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('customerReference')}" th:errors="*{customerReference}">error</div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label for="customsReference" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Customs reference <span class="text-danger" th:if="${bondedHere}">*</span>
+              </label>
+              <input id="customsReference" th:field="*{customsReference}" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('customsReference')} ? 'is-invalid'" autocomplete="off">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('customsReference')}" th:errors="*{customsReference}">error</div>
+              <div class="form-text">Required when the place or the branch is bonded.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-4">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-sticky" aria-hidden="true"></i>
+              <h2 class="card-title">Reference and notes</h2>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="reference" class="form-label small fw-semibold" style="color: var(--color-heading)">Reference</label>
+            <input id="reference" th:field="*{reference}" class="form-control"
+                   th:classappend="${#fields.hasErrors('reference')} ? 'is-invalid'" autocomplete="off">
+            <div class="invalid-feedback" th:if="${#fields.hasErrors('reference')}" th:errors="*{reference}">error</div>
+          </div>
+          <label for="notes" class="form-label small fw-semibold" style="color: var(--color-heading)">Notes</label>
+          <textarea id="notes" th:field="*{notes}" rows="3" class="form-control"
+                    th:classappend="${#fields.hasErrors('notes')} ? 'is-invalid'"></textarea>
+          <div class="invalid-feedback" th:if="${#fields.hasErrors('notes')}" th:errors="*{notes}">error</div>
+        </section>
+      </div>
+
+      <!-- The sheet. Redrawn by the server when the place or the sheet changes, so stock and bins are the place's. -->
+      <div class="col-12">
+        <section class="hb-card hb-card-body" id="cut-sheet" th:fragment="sheet" th:object="${form}">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-square" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">The sheet cut</h2>
+                <p class="card-sub">Whole sheets of one glass item, with its size on the item master. An off-cut is cut again like any sheet.</p>
+              </div>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label for="sheetItemId" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Sheet <span class="text-danger">*</span>
+              </label>
+              <select id="sheetItemId" th:field="*{sheetItemId}" class="form-select"
+                      th:classappend="${#fields.hasErrors('sheetItemId')} ? 'is-invalid'"
+                      th:attr="hx-post=@{/cutting/sheet}" hx-include="#cut-form" hx-target="#cut-sheet"
+                      hx-swap="outerHTML" hx-trigger="change">
+                <option value="">— choose —</option>
+                <option th:each="s : ${sheetOptions}" th:value="${s.id()}"
+                        th:text="${s.code()} + ' · ' + ${s.widthMm().stripTrailingZeros().toPlainString()} + ' × ' + ${s.heightMm().stripTrailingZeros().toPlainString()} + ' mm' + (${s.offcut()} ? ' · off-cut' : '') + (${s.onHand() == null} ? ' · being counted' : ' · ' + ${s.onHand().stripTrailingZeros().toPlainString()} + ' here')">GL-6CLR · 3210 × 2250 mm · 12 here</option>
+              </select>
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('sheetItemId')}" th:errors="*{sheetItemId}">error</div>
+            </div>
+            <div class="col-6 col-md-3">
+              <label for="sheetBinId" class="form-label small fw-semibold" style="color: var(--color-heading)">From bin</label>
+              <select id="sheetBinId" th:field="*{sheetBinId}" class="form-select">
+                <option value="">No bin</option>
+                <option th:each="b : ${bins}" th:value="${b.id()}" th:text="${b.code()}">C-01</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-3">
+              <label for="sheets" class="form-label small fw-semibold" style="color: var(--color-heading)">
+                Sheets <span class="text-danger">*</span>
+              </label>
+              <input id="sheets" th:field="*{sheets}" type="number" step="1" min="1" class="form-control mono"
+                     th:classappend="${#fields.hasErrors('sheets')} ? 'is-invalid'">
+              <div class="invalid-feedback" th:if="${#fields.hasErrors('sheets')}" th:errors="*{sheets}">error</div>
+            </div>
+          </div>
+          <p class="small text-body-secondary mt-2 mb-0" th:if="${!#lists.isEmpty(stock)}">
+            On hand here:
+            <span th:each="p, st : ${stock}" th:text="${p.place()} + ' ' + ${p.quantity().stripTrailingZeros().toPlainString()} + (${st.last} ? '' : ', ')">bin C-01 12</span>
+          </p>
+        </section>
+      </div>
+
+      <div class="col-12">
+        <section class="hb-card hb-card-body">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-scissors" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">Cut from it</h2>
+                <p class="card-sub">The customer's pieces, and any off-cut kept as stock. An off-cut under 300 mm on
+                  either side is waste: it is not kept, and its area counts as waste with whatever else is left. The
+                  sheets' cost is carried by what is cut and kept, so the signers see the waste before they sign.</p>
+              </div>
+            </div>
+          </div>
+
+          <div th:if="${#fields.hasErrors('outputs')}" class="alert alert-danger small" role="alert">
+            <p th:each="e : ${#fields.errors('outputs')}" th:text="${e}" class="mb-0"></p>
+          </div>
+
+          <!-- The rows are a fragment: htmx swaps it whole after the server has changed the list. -->
+          <div id="cut-outputs" th:fragment="outputs" th:object="${form}">
+            <div class="table-responsive">
+              <table class="table hb-table compact align-middle mb-2">
+                <thead>
+                  <tr>
+                    <th scope="col">#</th>
+                    <th scope="col">What</th>
+                    <th scope="col">Width (mm)</th>
+                    <th scope="col">Height (mm)</th>
+                    <th scope="col">How many</th>
+                    <th scope="col"><span class="visually-hidden">Remove</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr th:each="line, st : *{outputs}">
+                    <td class="mono" th:text="${st.count}">1</td>
+                    <td>
+                      <select th:field="*{outputs[__${st.index}__].kind}" class="form-select form-select-sm"
+                              th:attr="aria-label='What, line ' + ${st.count}">
+                        <option value="PIECE">Piece for the customer</option>
+                        <option value="OFFCUT">Off-cut kept</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input th:field="*{outputs[__${st.index}__].widthMm}" type="number" step="0.1" min="1"
+                             class="form-control form-control-sm mono" style="min-width: 6rem"
+                             th:classappend="${#fields.hasErrors('outputs[__${st.index}__].widthMm')} ? 'is-invalid'"
+                             th:attr="aria-label='Width, line ' + ${st.count}">
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('outputs[__${st.index}__].widthMm')}"
+                           th:errors="*{outputs[__${st.index}__].widthMm}">error</div>
+                    </td>
+                    <td>
+                      <input th:field="*{outputs[__${st.index}__].heightMm}" type="number" step="0.1" min="1"
+                             class="form-control form-control-sm mono" style="min-width: 6rem"
+                             th:classappend="${#fields.hasErrors('outputs[__${st.index}__].heightMm')} ? 'is-invalid'"
+                             th:attr="aria-label='Height, line ' + ${st.count}">
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('outputs[__${st.index}__].heightMm')}"
+                           th:errors="*{outputs[__${st.index}__].heightMm}">error</div>
+                    </td>
+                    <td>
+                      <input th:field="*{outputs[__${st.index}__].quantity}" type="number" step="1" min="1"
+                             class="form-control form-control-sm mono" style="min-width: 5rem"
+                             th:classappend="${#fields.hasErrors('outputs[__${st.index}__].quantity')} ? 'is-invalid'"
+                             th:attr="aria-label='How many, line ' + ${st.count}">
+                      <div class="invalid-feedback" th:if="${#fields.hasErrors('outputs[__${st.index}__].quantity')}"
+                           th:errors="*{outputs[__${st.index}__].quantity}">error</div>
+                    </td>
+                    <td>
+                      <button type="button" class="btn btn-sm btn-outline-danger"
+                              th:attr="hx-post=@{'/cutting/outputs/remove/' + ${st.index}},aria-label='Remove line ' + ${st.count}"
+                              hx-include="#cut-form" hx-target="#cut-outputs" hx-swap="outerHTML"
+                              th:disabled="${#lists.size(form.outputs) le 1}">
+                        <i class="bi bi-x-lg"></i>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-primary"
+                    th:attr="hx-post=@{/cutting/outputs/add}"
+                    hx-include="#cut-form" hx-target="#cut-outputs" hx-swap="outerHTML">
+              <i class="bi bi-plus-lg"></i> Add a size
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary-action">
+        <i class="bi bi-check-lg"></i>
+        <span th:text="${form.new} ? 'Save draft' : 'Save changes'">Save draft</span>
+      </button>
+      <a th:href="${form.new} ? @{/cutting} : @{'/cutting/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+
+  </form>
+
+</div>
+</body>
+</html>

@@ -89,7 +89,7 @@
           <span class="mono small" th:text="${#numbers.formatDecimal(ticket.value(), 1, 'COMMA', 2, 'POINT')} + ' RWF'">105,000.00 RWF</span>
         </div>
         <p class="small text-body-secondary" th:if="${ticket.countedMovements() > 0}"
-           th:text="${ticket.countedMovements()} + (${ticket.countedMovements() == 1} ? ' movement is' : ' movements are') + ' at a place being counted: nothing of it shows, and the value leaves it out, until the count''s verification is signed.'">
+           th:text="${ticket.countedMovements()} + (${ticket.countedMovements() == 1} ? ' movement is' : ' movements are') + ' at a place being counted: nothing of it shows, and the value leaves it out, until the verification of the count is signed.'">
           1 movement is at a place being counted.</p>
         <th:block th:if="${#lists.isEmpty(ticket.movements())}">
           <p class="text-body-secondary small mb-0">This ticket wrote no movement.</p>

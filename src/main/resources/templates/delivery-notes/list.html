@@ -32,7 +32,7 @@
       <table class="table hb-table compact mb-0">
         <thead>
           <tr>
-            <th scope="col">Authorization</th>
+            <th scope="col">Authorization or cutting order</th>
             <th scope="col">Customer</th>
             <th scope="col">From</th>
             <th scope="col" class="num">Lines</th>
@@ -42,8 +42,8 @@
         </thead>
         <tbody>
           <tr th:each="r : ${ready}">
-            <td><a class="doc-link" th:href="@{'/dispatch/' + ${r.id()}}" th:text="${r.serialNo()}">DAO-KGL-2026-0001</a>
-                <span th:replace="~{fragments/ui :: chip('RELEASED')}"></span></td>
+            <td><a class="doc-link" th:href="@{'/documents/' + ${r.id()}}" th:text="${r.serialNo()}">DAO-KGL-2026-0001</a>
+                <span th:replace="~{fragments/ui :: chip(${r.cuttingOrder()} ? 'POSTED' : 'RELEASED')}"></span></td>
             <td th:text="${r.customerName()}">Customer</td>
             <td class="mono">
               <span th:text="${r.locationCode()}">KGL-MAIN</span>
@@ -63,7 +63,7 @@
           </tr>
           <tr th:if="${#lists.isEmpty(ready)}">
             <td colspan="6">
-              <div th:replace="~{fragments/ui :: emptyState('bi-unlock', 'Nothing released and waiting', 'An authorization appears here once the Internal Controller has signed its release.')}"></div>
+              <div th:replace="~{fragments/ui :: emptyState('bi-unlock', 'Nothing released and waiting', 'An authorization appears here once the Internal Controller has signed its release; a cutting order once it is posted.')}"></div>
             </td>
           </tr>
         </tbody>
@@ -105,7 +105,7 @@
         <tbody>
           <tr th:each="n : ${notes}">
             <td><a class="doc-link" th:href="@{'/delivery-notes/' + ${n.id()}}" th:text="${n.serialNo()}">DN-KGL-2026-0001</a></td>
-            <td><a class="doc-link" th:href="@{'/dispatch/' + ${n.authorizationId()}}" th:text="${n.daoSerial()}">DAO-KGL-2026-0001</a></td>
+            <td><a class="doc-link" th:href="@{'/documents/' + ${n.authorizationId()}}" th:text="${n.daoSerial()}">DAO-KGL-2026-0001</a></td>
             <td th:text="${n.customerName()}">Customer</td>
             <td class="mono" th:text="${n.vehicleRegistration()}">RAD 123 A</td>
             <td th:text="${n.driverName()}">Driver</td>

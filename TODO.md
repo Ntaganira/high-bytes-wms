@@ -86,7 +86,27 @@ shape, so it is worth building carefully.
       comes first, and both take exactly the consignment's dispatch value (one shared rule, `ConsignmentShares`)
 - [ ] The 2027 transfer approver (Managing Director) is for the client to confirm; reversing a posted
       transfer or receipt is not built
-- [ ] Cutting — **blocked** on the off-cut identity decision
+- [x] Cutting (V18, `inventory/cutting/`): Finance raises an order for a customer, the sheets of one glass item at
+      one place and the sizes cut from them (the customer's pieces, the off-cuts kept); the Warehouse Manager
+      verifies, the Internal Controller releases, a second Finance officer posts. Posting takes the sheets out at
+      the ledger's average cost (CUT_CONSUME) and brings the cut in at its share by area (CUT_OUTPUT,
+      `cut_output_shares`, checked at commit); what is neither is waste. Each size is one item per parent sheet and
+      exact size, made the first time it is cut and audited. The pieces leave on a delivery note against the
+      posted order: the gate's rules (not its raiser, not its releaser, one load, exact quantity) apply as to an
+      authorization, and off-cuts never load. A return of cut glass is not taken by its raiser, signers or whoever
+      recorded the cut
+- [ ] Cutting, left for later: one sheet item and one bin per order on the form (the database allows several sheet
+      lines of one item); the cut comes in unbinned; no cutting drawing attached; no reversal of a posted order;
+      a piece cut for a customer can still leave under an ordinary authorization, which then takes the full chain;
+      the 300 mm minimum and the area split are the defaults the client is to confirm; no ceiling on waste (an
+      open question); at most 50 sizes an order, and a size made for a draft that is never posted stays on the
+      item master (deactivate it there)
+- [ ] Found reviewing cutting, older than it: the ledger's "not enough stock" message names what a place holds,
+      bin by bin, before the freeze trigger refuses a counted place, so posting a delivery note or a damage
+      report at a counted place that is short reads its book back (and the refusal is audited with it). Cutting
+      refuses a counted place first; `LedgerService.shortage` should do the same for everyone. And the dispatch
+      form's stock lookup (`DispatchLookupService.stockAt`) is not judged by the location's branch, as the cutting
+      lookups now are
 - [x] Returns & Damage — one DMG type, four kinds: write-off, loss in transit, customer return, quarantine
       release (V14, `inventory/damage/`). One chain (Warehouse Manager, Internal Controller, Managing Director),
       Finance posts. **Every report takes the full chain until the client sets the write-off threshold.**
@@ -269,8 +289,9 @@ shape, so it is worth building carefully.
 
 ## Client decisions still open
 
-- [ ] **Off-cut identity** — item code per remnant, or remnant pool per
-      parent? Blocks cutting.
+- [ ] **Cutting's defaults** (built 2 October 2026, to confirm): one item per parent sheet and exact size; cost by
+      area; off-cuts under 300 mm are waste; a second Finance officer posts; the pieces leave on a delivery note
+      against the posted order
 - [ ] Tolerance thresholds: count variance, damage, write-off approval
 - [ ] **Who posts a count's adjustment.** Finance approves the count, so a second Finance officer posts it
       (V15, `count.post`). A branch with one Finance officer needs cover from another branch. Confirm

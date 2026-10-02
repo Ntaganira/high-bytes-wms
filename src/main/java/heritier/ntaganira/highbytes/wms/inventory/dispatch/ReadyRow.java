@@ -14,7 +14,7 @@ package heritier.ntaganira.highbytes.wms.inventory.dispatch;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-/** A RELEASED authorization with no live delivery note: the gate's "ready to load" list. */
+/** A released authorization, or a posted cutting order, with no live delivery note: the gate's "ready to load" list. */
 public record ReadyRow(
         UUID id,
         String serialNo,
@@ -23,5 +23,11 @@ public record ReadyRow(
         boolean bonded,
         int lineCount,
         String releasedBy,
-        LocalDateTime releasedAt
-) {}
+        LocalDateTime releasedAt,
+        String kind
+) {
+
+    public boolean cuttingOrder() {
+        return "CUT".equals(kind);
+    }
+}

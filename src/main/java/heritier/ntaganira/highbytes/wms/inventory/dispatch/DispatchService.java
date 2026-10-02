@@ -63,7 +63,7 @@ import java.util.stream.Collectors;
  */
 @Service
 @Transactional(readOnly = true)
-public class DispatchService {
+public class DispatchService implements DeliveryAuthority {
 
     private static final String HEADER = """
             SELECT d.id, d.branch_id, b.name AS branch_name, b.is_bonded AS branch_bonded,
@@ -226,10 +226,29 @@ public class DispatchService {
      * whether goods may leave against it. Readable by anyone who may read
      * dispatch documents at the branch.
      */
+    @Override
     @PreAuthorize("hasAuthority('dispatch.view')")
     public ReleaseGate gateOf(UUID id) {
         DaoHeader header = find(id);
         return gate(header, documents.header(id), documents.chain(id));
+    }
+
+    @Override
+    public String typeCode() {
+        return DocumentKind.DAO.code();
+    }
+
+    @Override
+    @PreAuthorize("hasAuthority('dispatch.view')")
+    public DaoHeader asAuthorization(UUID id) {
+        return find(id);
+    }
+
+    @Override
+    @PreAuthorize("hasAuthority('dispatch.view')")
+    public List<DaoLineRow> loadableLines(UUID id) {
+        find(id);       // the right at the authorization's own branch
+        return lines(id);
     }
 
     ReleaseGate gate(DaoHeader h, DocumentHeader d, List<ChainStep> chain) {

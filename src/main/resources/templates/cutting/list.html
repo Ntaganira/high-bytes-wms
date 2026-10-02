@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Cutting Orders</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · CUT-006</p>
+      <h1 class="page-title">Cutting Orders</h1>
+      <p class="page-sub">Glass cut to a customer's sizes at <span th:text="${currentBranch?.name}">this branch</span>.
+        Nothing is cut until the Internal Controller releases the order; the sheets leave the ledger, and the pieces and
+        off-cuts come in, only when a second Finance officer posts it. The pieces then leave on a delivery note.</p>
+    </div>
+    <a th:href="@{/cutting/new}" class="btn btn-primary-action" sec:authorize="hasAuthority('cutting.create')">
+      <i class="bi bi-plus-lg"></i> New cutting order
+    </a>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/cutting}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3">
+        <label for="status" class="form-label small fw-semibold" style="color: var(--color-heading)">State</label>
+        <select id="status" name="status" class="form-select">
+          <option value="">All states</option>
+          <option th:each="s : ${statuses}" th:value="${s}" th:text="${s}"
+                  th:selected="${status != null and status == s}">PENDING</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-4 d-flex flex-column justify-content-end pb-1">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="awaitingMe" name="awaitingMe"
+                 value="true" th:checked="${awaitingMe}">
+          <label class="form-check-label small" for="awaitingMe">Awaiting my signature</label>
+        </div>
+      </div>
+      <div class="col-12 col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/cutting}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Serial</th>
+            <th scope="col">Date</th>
+            <th scope="col">Customer</th>
+            <th scope="col">Sheets cut</th>
+            <th scope="col" class="num">Pieces</th>
+            <th scope="col" class="num">Off-cuts</th>
+            <th scope="col">Raised by</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="o : ${orders}">
+            <td><a class="doc-link" th:href="@{'/cutting/' + ${o.id()}}" th:text="${o.serialNo()}">CUT-KGL-2026-0001</a></td>
+            <td class="mono" th:text="${#temporals.format(o.documentDate(), 'dd MMM yyyy')}">02 Oct 2026</td>
+            <td th:text="${o.customerName()}">Customer</td>
+            <td class="mono small">
+              <span th:text="${o.sheets().stripTrailingZeros().toPlainString()} + ' × ' + (${o.sheetCode()} ?: '—')">2 × GL-6CLR</span>
+              <span class="d-block text-body-secondary" th:text="'at ' + ${o.locationCode()}">at KGL-CUT</span>
+            </td>
+            <td class="num mono" th:text="${o.pieces()}">6</td>
+            <td class="num mono" th:text="${o.offcuts()}">1</td>
+            <td th:text="${o.createdByName()}">Name</td>
+            <td>
+              <span th:replace="~{fragments/ui :: chip(${o.displayState()})}"></span>
+              <span class="d-block small text-body-secondary" th:if="${o.awaitingRole() != null}">
+                awaiting <span th:text="${o.awaitingRole()}">Warehouse Manager</span>
+              </span>
+              <span class="d-block small fw-semibold" th:if="${o.awaitingMe()}" style="color: var(--color-warning)">your signature</span>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(orders)}">
+            <td colspan="8">
+              <div th:replace="~{fragments/ui :: emptyState('bi-scissors', 'No cutting orders match', 'Clear the filters, or raise the first cutting order.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

@@ -138,7 +138,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── item/          item master with glass attributes
 │   └── location/      locations, types, bins
 ├── document/          (next) the spine + workflow engine
-├── inventory/         ledger, receiving, dispatch, transfer, damage, count, stock; cutting next
+├── inventory/         ledger, receiving, dispatch, transfer, damage, count, cutting, stock, ticket
 └── reporting/         (next) daily close, KPIs, exports
 ```
 
@@ -166,6 +166,7 @@ modules along the existing package seams.
 | `V15__stock_counts.sql` | Blind counts, the verification count, the freeze, adjustment tickets |
 | `V16__daily_close.sql` | The daily close: reconciled by Finance, locked by the Internal Controller, in order |
 | `V17__administration.sql` | Approval chains frozen once bound and dated forward only; branches keep their code and close only when finished with |
+| `V18__cutting_orders.sql` | Cutting orders: each cut size an item, the cost split by area, off-cuts under 300 mm waste, the pieces out on a delivery note against the posted order |
 
 Never edit an applied migration. Add a new one.
 
@@ -217,12 +218,15 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
   to each; a switchover still to come moved with a reason
 - Audit log: search by day, action, record, person, branch and words, as
   far as the reader's right reaches
+- Cutting orders: sheets cut to a customer's sizes, each size an item of its
+  own, the sheets' cost split by area, off-cuts kept, the pieces out through
+  the gate on a delivery note
 - Stock: balances by item, an item place by place, and the ledger of
   movements; a place under a live count shows no quantity anywhere
 
 ## Not built yet
 
-Cutting (it waits on the client's off-cut decision), reports and KPIs.
+Reports and KPIs.
 
 ## Two rules the UI enforces that the SRS does not state
 

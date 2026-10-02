@@ -35,6 +35,8 @@ public enum DocumentKind {
     DMG("DMG", "damage", "Return & Damage Report"),
     /** Opened by the warehouse manager; a second Finance officer posts its adjustment (count.post). */
     CNT("CNT", "count", "Physical Stock Count"),
+    /** Prepared by Finance, released by the Internal Controller; a second Finance officer posts it (cutting.post). */
+    CUT("CUT", "cutting", "Retail Cutting Order"),
     TT("TT", "ticket", "Transaction Ticket");
 
     private final String code;

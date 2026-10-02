@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${cut.serialNo}">Cutting order</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${cut})}"></div>
+
+  <!-- May this glass be cut, and may its pieces leave? -->
+  <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · RETAIL CUTTING ORDER · CUT-006</p>
+      <h1 class="page-title">Cut for <span th:text="${cut.customerName}">Customer</span></h1>
+      <p class="page-sub">
+        Dated <span class="mono" th:text="${#temporals.format(cut.documentDate, 'dd MMM yyyy')}">02 Oct 2026</span>
+        at <span class="mono" th:text="${cut.locationCode}">KGL-CUT</span>
+        <span th:text="'· ' + ${cut.locationName}">· Cutting floor</span>
+      </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a th:if="${actions.canEdit}" sec:authorize="hasAuthority('cutting.create')"
+         th:href="@{'/cutting/' + ${cut.id} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit draft
+      </a>
+      <a th:if="${actions.canLoad}" sec:authorize="hasAuthority('dispatch.post')"
+         th:href="@{/delivery-notes/new(dao=${cut.id})}" class="btn btn-primary-action">
+        <i class="bi bi-truck"></i> Raise the delivery note
+      </a>
+      <a th:if="${gate.dnId != null}" sec:authorize="hasAuthority('dispatch.view')"
+         th:href="@{'/delivery-notes/' + ${gate.dnId}}" class="btn btn-outline-secondary">
+        <i class="bi bi-truck"></i> Delivery note <span th:text="${gate.dnSerial}">DN</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="alert alert-secondary d-flex align-items-start gap-2" role="status" th:if="${cut.status == 'CANCELLED'}">
+    <i class="bi bi-x-circle-fill"></i>
+    <div>
+      <strong>Cancelled</strong>
+      by <span th:text="${cut.cancelledByName}">Name</span>
+      on <span th:text="${#temporals.format(cut.cancelledAt, 'dd MMM yyyy HH:mm')}">02 Oct 10:00</span>.
+      Reason: <span th:text="${cut.cancelReason}">Reason</span>. The serial stays on the register.
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-person-lines-fill" aria-hidden="true"></i>
+            <h2 class="card-title">Order</h2>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customer</dt>
+          <dd class="col-7 col-md-3">
+            <span th:text="${cut.customerName}">Customer</span>
+            <span th:if="${cut.customerBlocked}"><span th:replace="~{fragments/ui :: chip('BLOCKED')}"></span></span>
+          </dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customer order</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${cut.customerReference} ?: '—'">PO-1</dd>
+
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Customs reference</dt>
+          <dd class="col-7 col-md-3 mono" th:text="${cut.customsReference} ?: '—'">—</dd>
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Reference</dt>
+          <dd class="col-7 col-md-3" th:text="${cut.reference} ?: '—'">—</dd>
+
+          <dt class="col-5 col-md-3 text-body-secondary fw-normal">Notes</dt>
+          <dd class="col-7 col-md-9" th:text="${cut.notes} ?: '—'">—</dd>
+        </dl>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-square" aria-hidden="true"></i>
+            <h2 class="card-title">The sheet cut</h2>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Item</th>
+                <th scope="col">Size (mm)</th>
+                <th scope="col" class="num">Thickness</th>
+                <th scope="col">Bin</th>
+                <th scope="col" class="num">Sheets</th>
+                <th scope="col" class="num">Area (m²)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="s : ${sheets}">
+                <td>
+                  <span class="mono" th:text="${s.itemCode()}">GL-6CLR</span>
+                  <span class="d-block small text-body-secondary" th:text="${s.description()}">Clear float 6 mm</span>
+                </td>
+                <td class="mono" th:text="${s.widthMm().stripTrailingZeros().toPlainString()} + ' × ' + ${s.heightMm().stripTrailingZeros().toPlainString()}">3210 × 2250</td>
+                <td class="num mono" th:text="${s.thicknessMm()} + ' mm'">6.00 mm</td>
+                <td class="mono" th:text="${s.binCode()} ?: '—'">C-01</td>
+                <td class="num mono" th:text="${s.quantity().stripTrailingZeros().toPlainString()}">2</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(s.sheetAreaM2().multiply(s.quantity()), 1, 'COMMA', 3, 'POINT')}">14.445</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-scissors" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Cut from it</h2>
+              <p class="card-sub">Each size is its own item, one per sheet and exact size, the longer side first.</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">What</th>
+                <th scope="col">Size (mm)</th>
+                <th scope="col" class="num">How many</th>
+                <th scope="col">Item</th>
+                <th scope="col" class="num">Area (m²)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="o : ${outputs}">
+                <td class="mono" th:text="${o.lineNo()}">1</td>
+                <td th:text="${o.piece()} ? 'Piece for the customer' : 'Off-cut kept'">Piece for the customer</td>
+                <td class="mono" th:text="${o.widthMm().stripTrailingZeros().toPlainString()} + ' × ' + ${o.heightMm().stripTrailingZeros().toPlainString()}">1200 × 800</td>
+                <td class="num mono" th:text="${o.quantity().stripTrailingZeros().toPlainString()}">6</td>
+                <td class="mono small" th:text="${o.itemCode()}">GL-6CLR-R-1200x800</td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(o.areaM2(), 1, 'COMMA', 3, 'POINT')}">5.760</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <dl class="row small mt-3 mb-0">
+          <dt class="col-6 col-md-3 text-body-secondary fw-normal">Sheet area</dt>
+          <dd class="col-6 col-md-3 mono" th:text="${#numbers.formatDecimal(areas.sheetM2(), 1, 'COMMA', 3, 'POINT')} + ' m²'">14.445 m²</dd>
+          <dt class="col-6 col-md-3 text-body-secondary fw-normal">Cut and kept</dt>
+          <dd class="col-6 col-md-3 mono" th:text="${#numbers.formatDecimal(areas.outputM2(), 1, 'COMMA', 3, 'POINT')} + ' m²'">12.000 m²</dd>
+          <dt class="col-6 col-md-3 text-body-secondary fw-normal">Waste (its cost is carried by what was cut)</dt>
+          <dd class="col-6 col-md-3 mono"
+              th:style="${areas.overCut()} ? 'color: var(--color-danger)' : null"
+              th:text="${#numbers.formatDecimal(areas.wasteM2(), 1, 'COMMA', 3, 'POINT')} + ' m²' + (${areas.wastePercent() != null} ? ' (' + ${areas.wastePercent()} + '%)' : '')">2.445 m² (16.9%)</dd>
+        </dl>
+        <p class="small mt-2 mb-0" style="color: var(--color-danger)" th:if="${areas.overCut()}">
+          More glass is cut than the sheets hold. The order cannot be submitted until the sizes or the sheets are corrected.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3" th:if="${posting != null}">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-journal-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Posted to the ledger</h2>
+              <p class="card-sub">
+                Tickets <span class="serial" th:text="${posting.consumeSerial()}">TT-KGL-2026-0001</span> (sheets out)
+                and <span class="serial" th:text="${posting.outputSerial()}">TT-KGL-2026-0002</span> (pieces and off-cuts in)
+                · posted by <span th:text="${cut.postedByName}">Name</span>
+                <span th:text="'on ' + ${#temporals.format(cut.postedAt, 'dd MMM yyyy HH:mm')}">on 02 Oct 11:00</span>.
+                What came in carries the sheets' value, split by area.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Movement</th>
+                <th scope="col">Line</th>
+                <th scope="col">Item</th>
+                <th scope="col" class="num">Quantity</th>
+                <th scope="col" class="num">Unit cost</th>
+                <th scope="col" class="num">Value</th>
+                <th scope="col" class="num">Balance after</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="m : ${posting.movements()}">
+                <td class="mono" th:text="${m.id()}">1</td>
+                <td class="mono" th:text="${m.lineNo()}">1</td>
+                <td class="mono small" th:text="${m.itemCode()}">GL-6CLR</td>
+                <td class="num mono" th:if="${m.counted()}" colspan="4">Being counted</td>
+                <td class="num mono" th:unless="${m.counted()}" th:text="(${m.direction() == 'OUT'} ? '−' : '+') + ${#numbers.formatDecimal(m.quantityBase(), 1, 'COMMA', 3, 'POINT')}">−2.000</td>
+                <td class="num mono" th:unless="${m.counted()}" th:text="${#numbers.formatDecimal(m.unitCost(), 1, 'COMMA', 4, 'POINT')}">80,000.0000</td>
+                <td class="num mono" th:unless="${m.counted()}" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">160,000.00</td>
+                <td class="num mono" th:unless="${m.counted()}" th:text="${#numbers.formatDecimal(m.runningBalance(), 1, 'COMMA', 3, 'POINT')}">10.000</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-pen" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Approval chain</h2>
+              <p class="card-sub" th:if="${chainInfo != null}">
+                Chain v<span th:text="${chainInfo.version}">1</span>, unchanged by the 2027 restructuring
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <ol th:replace="~{fragments/ui :: approvalChain(${chain})}"></ol>
+
+        <p class="small text-body-secondary mt-3 mb-0">
+          Raised by <span th:text="${cut.createdByName}">Name</span>
+          on <span th:text="${#temporals.format(cut.createdAt, 'dd MMM HH:mm')}">02 Oct 09:00</span>.
+          A second Finance officer posts it; the warehouse lets its pieces out at the gate. Whoever raised it or
+          signed its release does neither.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning" aria-hidden="true"></i>
+            <h2 class="card-title">What you can do</h2>
+          </div>
+        </div>
+
+        <form th:if="${actions.canSubmit}"
+              sec:authorize="hasAnyAuthority('cutting.create','cutting.verify','cutting.release')"
+              th:action="@{'/cutting/' + ${cut.id} + '/submit'}" method="post" class="mb-3">
+          <p class="small">Submitting signs step 1 for you
+            (<span th:text="${actions.nextStep?.actionLabel}">PREPARE</span> as
+            <span th:text="${actions.nextStep?.roleName}">Finance</span>).
+            After that the order can no longer be edited.</p>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-send"></i> Submit for signature</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.submitReason}" th:text="${actions.submitReason}">Reason</p>
+
+        <th:block th:if="${actions.canSign}"
+                  sec:authorize="hasAnyAuthority('cutting.create','cutting.verify','cutting.release')">
+          <form th:action="@{'/cutting/' + ${cut.id} + '/approve'}" method="post" class="mb-2">
+            <label for="approveComment" class="form-label small fw-semibold" style="color: var(--color-heading)">
+              Sign step <span th:text="${actions.nextStep.sequenceNo}">2</span>
+              (<span th:text="${actions.nextStep.roleName}">Role</span>)
+            </label>
+            <input id="approveComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                   placeholder="Comment (optional)" autocomplete="off">
+            <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-check2-circle"></i> Approve</button>
+          </form>
+          <details class="mb-3">
+            <summary class="small fw-semibold">Reject this order</summary>
+            <form th:action="@{'/cutting/' + ${cut.id} + '/reject'}" method="post" class="mt-2">
+              <label for="rejectComment" class="form-label small">Reason (required). A rejected order is final.</label>
+              <input id="rejectComment" name="comment" class="form-control form-control-sm mb-2" maxlength="1000"
+                     required autocomplete="off">
+              <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-x-octagon"></i> Reject</button>
+            </form>
+          </details>
+        </th:block>
+        <p class="small text-body-secondary" th:if="${actions.signReason}" th:text="${actions.signReason}">Reason</p>
+
+        <form th:if="${actions.canPost}" sec:authorize="hasAuthority('cutting.post')"
+              th:action="@{'/cutting/' + ${cut.id} + '/post'}" method="post" class="mb-3">
+          <p class="small">Posting records the cut: the sheets leave the ledger at their average cost, and the pieces
+            and off-cuts come in at that value, split by area. Post once the glass is cut.</p>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-journal-check"></i> Post the cut</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.postReason}" th:text="${actions.postReason}">Reason</p>
+
+        <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('cutting.create')">
+          <summary class="small fw-semibold">Cancel this order</summary>
+          <form th:action="@{'/cutting/' + ${cut.id} + '/cancel'}" method="post" class="mt-2">
+            <label for="cancelReason" class="form-label small">Reason (required). The serial stays on the register.</label>
+            <input id="cancelReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400"
+                   required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-slash-circle"></i> Cancel order</button>
+          </form>
+        </details>
+        <p class="small text-body-secondary" th:if="${actions.cancelReason}" th:text="${actions.cancelReason}">Reason</p>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canSubmit and !actions.canSign and !actions.canCancel and !actions.canEdit and !actions.canPost
+                    and !actions.canLoad and actions.submitReason == null and actions.signReason == null
+                    and actions.cancelReason == null and actions.postReason == null}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">History</h2>
+              <p class="card-sub">Every change, signature, refusal and cancellation, newest first</p>
+            </div>
+          </div>
+        </div>
+
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Changes to this order will be listed here.')}"></div>
+        </th:block>
+
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

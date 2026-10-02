@@ -35,6 +35,8 @@ SET CONSTRAINTS document_dmg_posted_moved_stock DEFERRED;
 SET CONSTRAINTS document_dmg_value_rule DEFERRED;
 SET CONSTRAINTS document_cnt_posted_moved_stock DEFERRED;
 SET CONSTRAINTS document_cnt_value_rule DEFERRED;
+SET CONSTRAINTS document_cut_posted_moved_stock DEFERRED;
+SET CONSTRAINTS document_cut_value_rule DEFERRED;
 
 INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
 VALUES ('_verify', 'Verification Fixture', 'x', TRUE, FALSE);
@@ -773,7 +775,8 @@ END $$;
 
 DO $$ BEGIN
   INSERT INTO role_permission (role_id, permission_id)
-  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_MDCOPY' AND p.code = 'cutting.release';
+  -- ticket.create: carried by no policy role yet (V18 placed cutting.release, this check's example until then).
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_MDCOPY' AND p.code = 'ticket.create';
   RAISE WARNING 'FAIL 18e  a right no policy role carries was handed out';
 EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18e  a right the policy has not placed cannot be handed out';
 END $$;
@@ -5058,6 +5061,290 @@ SELECT pg_temp.refuses('66r', 'a branch was deactivated with a day on which stoc
 SELECT pg_temp.close_day((SELECT id FROM branch WHERE code = '_VD'), kigali_today() - 6);
 SELECT pg_temp.accepts('66s', 'a branch with no stock, nothing open and every day locked is deactivated',
   $q$UPDATE branch SET is_active = FALSE WHERE code = '_VD'$q$);
+
+-- =====================================================================
+-- Cutting orders (V18): a cut size is an item of its own; the order cuts
+-- whole sheets of one item into pieces and off-cuts that fit, never more
+-- glass than the sheets hold and no off-cut that is waste; posting takes
+-- the sheets out and brings the cut in at its share by area; the pieces
+-- leave on a delivery note against the posted order, at the gate. Every
+-- refusal carries 23Z02 (a document control) or 23514 (malformed content).
+-- =====================================================================
+
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT b.id, '_VERIFY-CUTL', 'Verification cutting floor', 'CUTTING' FROM branch b WHERE b.code = 'KGL';
+INSERT INTO item (item_code, description, product_type, thickness_mm, width_mm, height_mm, base_uom_id)
+SELECT '_VERIFY-SHEET', 'Verification sheet 3000 x 2000', 'GLASS', 6.0, 3000, 2000, id FROM uom WHERE code = 'SHEET';
+SELECT pg_temp.stock_into('_VERIFY-CUT-IN', '_VERIFY-CUTL', 5, NULL, '_VERIFY-SHEET');
+
+CREATE FUNCTION pg_temp.sheet() RETURNS UUID AS $$
+    SELECT id FROM item WHERE item_code = '_VERIFY-SHEET';
+$$ LANGUAGE sql;
+
+-- A draft cutting order raised by the Finance holder (who signs PREPARE),
+-- cutting p_sheets sheets of _VERIFY-SHEET at _VERIFY-CUTL.
+CREATE FUNCTION pg_temp.make_cut(p_serial TEXT, p_sheets NUMERIC DEFAULT 2) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, p_serial, pg_temp.holder('FINANCE')
+      FROM document_type dt, branch b WHERE dt.code = 'CUT' AND b.code = 'KGL'
+    RETURNING id INTO d;
+    INSERT INTO cutting_order (document_id, customer_id, location_id)
+    SELECT d, c.id, l.id FROM customer c, location l WHERE c.code = '_VERIFY-CUST' AND l.code = '_VERIFY-CUTL';
+    INSERT INTO cutting_order_sheet (document_id, line_no, item_id, quantity) VALUES (d, 1, pg_temp.sheet(), p_sheets);
+    INSERT INTO fx VALUES (p_serial, d);
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+CREATE FUNCTION pg_temp.cut_out(p_doc UUID, p_line INT, p_kind TEXT, p_w NUMERIC, p_h NUMERIC, p_q NUMERIC) RETURNS VOID AS $$
+    INSERT INTO cutting_order_output (document_id, line_no, kind, width_mm, height_mm, quantity, item_id)
+    VALUES (p_doc, p_line, p_kind, p_w, p_h, p_q, cut_item_for(pg_temp.sheet(), p_w, p_h));
+$$ LANGUAGE sql;
+
+-- Post a released order as the second Finance officer: the sheets OUT at
+-- 1000 a sheet, the cut IN at its share by area (plus p_in_delta on line 1),
+-- each ticket posted.
+CREATE FUNCTION pg_temp.post_cut(p_cut UUID, p_serial TEXT, p_in_delta NUMERIC DEFAULT 0) RETURNS VOID AS $$
+DECLARE
+    poster UUID := pg_temp.fin2();
+    h   RECORD;
+    t   UUID;
+BEGIN
+    SELECT c.location_id, c.customs_reference, d.branch_id INTO h
+      FROM cutting_order c JOIN document d ON d.id = c.document_id WHERE c.document_id = p_cut;
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = p_cut;
+
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, h.branch_id, p_serial || '-OUT', poster FROM document_type dt WHERE dt.code = 'TT'
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id,
+                                    customs_reference)
+    VALUES (t, 'CUT_CONSUME', 'OUT', h.location_id, p_cut, h.customs_reference);
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+    SELECT t, s.line_no, s.item_id, s.quantity, i.base_uom_id, s.quantity, s.storage_bin_id
+      FROM cutting_order_sheet s JOIN item i ON i.id = s.item_id WHERE s.document_id = p_cut;
+    INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, storage_bin_id,
+                                direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                running_balance, business_date, posted_by)
+    SELECT tl.id, t, h.branch_id, tl.item_id, h.location_id, tl.storage_bin_id, 'OUT', tl.qty_base_uom,
+           -tl.qty_base_uom, 1000, tl.qty_base_uom * 1000, 0, kigali_today(), poster
+      FROM ticket_line tl WHERE tl.ticket_id = t ORDER BY tl.line_no;
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = t;
+
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, h.branch_id, p_serial || '-IN', poster FROM document_type dt WHERE dt.code = 'TT'
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, to_location_id, source_document_id,
+                                    customs_reference)
+    VALUES (t, 'CUT_OUTPUT', 'IN', h.location_id, p_cut, h.customs_reference);
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom)
+    SELECT t, o.line_no, o.item_id, o.quantity, i.base_uom_id, o.quantity
+      FROM cutting_order_output o JOIN item i ON i.id = o.item_id WHERE o.document_id = p_cut;
+    INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, storage_bin_id,
+                                direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                running_balance, business_date, posted_by)
+    SELECT tl.id, t, h.branch_id, tl.item_id, h.location_id, NULL, 'IN', tl.qty_base_uom, tl.qty_base_uom,
+           round((sh.expected + CASE WHEN tl.line_no = 1 THEN p_in_delta ELSE 0 END) / tl.qty_base_uom, 4),
+           sh.expected + CASE WHEN tl.line_no = 1 THEN p_in_delta ELSE 0 END, 0, kigali_today(), poster
+      FROM ticket_line tl JOIN cut_output_shares(p_cut) sh ON sh.line_no = tl.line_no
+     WHERE tl.ticket_id = t ORDER BY tl.line_no;
+    UPDATE document SET status = 'POSTED', posted_by = poster WHERE id = t;
+END $$ LANGUAGE plpgsql;
+
+-- A delivery note against a cutting order, raised by the Warehouse Manager holder.
+CREATE FUNCTION pg_temp.make_cut_dn(p_serial TEXT, p_cut UUID) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, p_serial, pg_temp.holder('WH_MANAGER')
+      FROM document_type dt, branch b WHERE dt.code = 'DN' AND b.code = 'KGL'
+    RETURNING id INTO d;
+    INSERT INTO delivery_note (document_id, cutting_order_id, vehicle_registration, driver_name)
+    VALUES (d, p_cut, 'RAA 000 A', 'Verification Driver');
+    INSERT INTO fx VALUES (p_serial, d);
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------
+-- 67. Cutting orders: sizes as items, what may be cut, the posting by
+--     area, and the gate
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE a UUID; b UUID;
+BEGIN
+    a := cut_item_for(pg_temp.sheet(), 1200, 800);
+    b := cut_item_for(pg_temp.sheet(), 800, 1200);
+    IF a = b AND (SELECT item_code FROM item WHERE id = a) = '_VERIFY-SHEET-R-1200x800'
+       AND (SELECT is_remnant AND cut_from_item_id = pg_temp.sheet() AND width_mm = 1200 AND height_mm = 800
+              FROM item WHERE id = a) THEN
+        RAISE NOTICE 'ok   67a  a cut size is one item per sheet and size, the longer side first, whichever way round';
+    ELSE
+        RAISE WARNING 'FAIL 67a  a cut size made two items, or one not filed under its sheet';
+    END IF;
+END $$;
+SELECT pg_temp.refuses('67b', 'a cut size was filed under another cut size',
+  $q$SELECT cut_item_for((SELECT id FROM item WHERE item_code = '_VERIFY-SHEET-R-1200x800'), 400, 400)$q$,
+  '23514', '%itself a cut size%');
+
+SELECT pg_temp.make_cut('_VERIFY-CUT-1');
+SELECT pg_temp.refuses('67c', 'an off-cut under 300 mm on a side was kept as stock',
+  $q$SELECT pg_temp.cut_out(pg_temp.fx_id('_VERIFY-CUT-1'), 1, 'OFFCUT', 1000, 250, 1)$q$, '23514', '%is waste%');
+SELECT pg_temp.refuses('67d', 'a piece larger than the sheet was cut from it',
+  $q$SELECT pg_temp.cut_out(pg_temp.fx_id('_VERIFY-CUT-1'), 1, 'PIECE', 3500, 100, 1)$q$, '23514', '%does not fit%');
+SELECT pg_temp.refuses('67e', 'a cut line named another item than its size',
+  $q$INSERT INTO cutting_order_output (document_id, line_no, kind, width_mm, height_mm, quantity, item_id)
+     VALUES (pg_temp.fx_id('_VERIFY-CUT-1'), 1, 'PIECE', 1000, 500, 1,
+             (SELECT id FROM item WHERE item_code = '_VERIFY-GLASS'))$q$, '23514', '%not the%cut size%');
+SELECT pg_temp.refuses('67f', 'a sheet with no size on the item master was cut',
+  $q$UPDATE cutting_order_sheet SET item_id = (SELECT id FROM item WHERE item_code = '_VERIFY-GLASS')
+      WHERE document_id = pg_temp.fx_id('_VERIFY-CUT-1')$q$, '23514', '%no sheet size%');
+SELECT pg_temp.refuses('67g', 'one order cut sheets of two items',
+  $q$INSERT INTO cutting_order_sheet (document_id, line_no, item_id, quantity)
+     VALUES (pg_temp.fx_id('_VERIFY-CUT-1'), 2, (SELECT id FROM item WHERE item_code = '_VERIFY-SHEET-R-1200x800'), 1)$q$,
+  '23514', '%one item%');
+
+SELECT pg_temp.cut_out(pg_temp.fx_id('_VERIFY-CUT-1'), 1, 'OFFCUT', 1800, 600, 1);
+SELECT pg_temp.refuses('67h', 'an order cutting no piece for the customer was submitted',
+  $q$UPDATE document SET status = 'PENDING' WHERE id = pg_temp.fx_id('_VERIFY-CUT-1')$q$, '23Z02', '%no piece%');
+SELECT pg_temp.cut_out(pg_temp.fx_id('_VERIFY-CUT-1'), 2, 'PIECE', 3000, 2000, 2);
+SELECT pg_temp.refuses('67i', 'an order cutting more glass than its sheets hold was submitted',
+  $q$UPDATE document SET status = 'PENDING' WHERE id = pg_temp.fx_id('_VERIFY-CUT-1')$q$,
+  '23Z02', '%No more glass can be cut than the sheets hold%');
+DELETE FROM cutting_order_output WHERE document_id = pg_temp.fx_id('_VERIFY-CUT-1') AND line_no = 2;
+SELECT pg_temp.cut_out(pg_temp.fx_id('_VERIFY-CUT-1'), 2, 'PIECE', 1200, 800, 6);
+SELECT pg_temp.accepts('67j', 'an order whose cut fits its sheets was submitted',
+  $q$UPDATE document SET status = 'PENDING' WHERE id = pg_temp.fx_id('_VERIFY-CUT-1')$q$);
+SELECT pg_temp.refuses('67k', 'a submitted order''s cut was changed',
+  $q$UPDATE cutting_order_output SET quantity = 7 WHERE document_id = pg_temp.fx_id('_VERIFY-CUT-1') AND line_no = 2$q$,
+  '23Z02', '%cannot change%');
+SELECT pg_temp.refuses('67l', 'a delivery note was raised against a cutting order not yet posted',
+  $q$SELECT pg_temp.make_cut_dn('_VERIFY-CDN-0', pg_temp.fx_id('_VERIFY-CUT-1'))$q$,
+  '23Z02', '%leave only once it is released by the Internal Controller and posted%');
+
+-- Two orders released through the whole chain: one posted at its shares, one a franc off.
+DO $$
+DECLARE c UUID;
+BEGIN
+    c := pg_temp.make_cut('_VERIFY-CUT-4');
+    PERFORM pg_temp.cut_out(c, 1, 'PIECE', 1200, 800, 6);
+    PERFORM pg_temp.cut_out(c, 2, 'OFFCUT', 1800, 600, 1);
+    UPDATE document SET status = 'PENDING' WHERE id = c;
+    PERFORM pg_temp.sign_upto(c, pg_temp.steps_in(c));
+    UPDATE document SET status = 'APPROVED' WHERE id = c;
+    c := pg_temp.make_cut('_VERIFY-CUT-5');
+    PERFORM pg_temp.cut_out(c, 1, 'PIECE', 1200, 800, 6);
+    PERFORM pg_temp.cut_out(c, 2, 'OFFCUT', 1800, 600, 1);
+    UPDATE document SET status = 'PENDING' WHERE id = c;
+    PERFORM pg_temp.sign_upto(c, pg_temp.steps_in(c));
+    UPDATE document SET status = 'APPROVED' WHERE id = c;
+END $$;
+SELECT pg_temp.refuses('67m', 'a cutting order was posted by the Finance officer who prepared it',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = pg_temp.fx_id('_VERIFY-CUT-4')$q$,
+  '23Z02', '%raised it%');
+SELECT pg_temp.refuses_at_commit('67n', 'a cut came in at more than its share by area of what its sheets left with',
+  $q$SELECT pg_temp.post_cut(pg_temp.fx_id('_VERIFY-CUT-5'), '_VERIFY-CUT-5T', 1)$q$,
+  'document_cut_value_rule', '%share by area%');
+SELECT pg_temp.accepts_at_commit('67o', 'a cutting order posted with its sheets out and its cut in at its shares by area',
+  $q$SELECT pg_temp.post_cut(pg_temp.fx_id('_VERIFY-CUT-4'), '_VERIFY-CUT-4T')$q$,
+  'document_cut_posted_moved_stock, document_cut_value_rule');
+DO $$
+DECLARE pieces NUMERIC; offcut NUMERIC;
+BEGIN
+    SELECT m.value INTO pieces FROM stock_movement m JOIN item i ON i.id = m.item_id
+     WHERE i.item_code = '_VERIFY-SHEET-R-1200x800' AND m.direction = 'IN';
+    SELECT m.value INTO offcut FROM stock_movement m JOIN item i ON i.id = m.item_id
+     WHERE i.item_code = '_VERIFY-SHEET-R-1800x600' AND m.direction = 'IN';
+    -- 2000 left; 5.76 m² of pieces and 1.08 m² of off-cut share it, the larger taking the rounding.
+    IF offcut = 315.79 AND pieces = 1684.21 THEN
+        RAISE NOTICE 'ok   67p  the sheets'' value is split by area to the franc and nothing is lost';
+    ELSE
+        RAISE WARNING 'FAIL 67p  the cut came in at % and % instead of 1684.21 and 315.79', pieces, offcut;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('67q', 'a cutting ticket answered as another kind of movement',
+  $q$WITH t AS (INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+                SELECT dt.id, b.id, '_VERIFY-CUT-BADTT', pg_temp.fin2() FROM document_type dt, branch b
+                 WHERE dt.code = 'TT' AND b.code = 'KGL' RETURNING id)
+     INSERT INTO transaction_ticket (document_id, movement_type, direction, to_location_id, source_document_id)
+     SELECT t.id, 'RECEIPT', 'IN', (SELECT id FROM location WHERE code = '_VERIFY-CUTL'), pg_temp.fx_id('_VERIFY-CUT-4')
+       FROM t$q$, '23Z02', '%leg of cutting order%');
+
+-- The gate: a note against the posted order loads its pieces, exactly, and never its off-cut.
+SELECT pg_temp.accepts('67r', 'a delivery note was raised against a posted cutting order',
+  $q$SELECT pg_temp.make_cut_dn('_VERIFY-CDN-1', pg_temp.fx_id('_VERIFY-CUT-4'))$q$);
+SELECT pg_temp.refuses('67s', 'an off-cut was loaded on a delivery note',
+  $q$INSERT INTO delivery_note_line (document_id, line_no, cutting_output_id, item_id, uom_id, quantity, qty_base_uom,
+                                     measured_thickness_mm)
+     SELECT pg_temp.fx_id('_VERIFY-CDN-1'), 1, o.id, o.item_id, i.base_uom_id, 1, 1, 6.0
+       FROM cutting_order_output o JOIN item i ON i.id = o.item_id
+      WHERE o.document_id = pg_temp.fx_id('_VERIFY-CUT-4') AND o.kind = 'OFFCUT'$q$, '23514', '%Off-cuts stay in stock%');
+INSERT INTO delivery_note_line (document_id, line_no, cutting_output_id, item_id, uom_id, quantity, qty_base_uom,
+                                measured_thickness_mm)
+SELECT pg_temp.fx_id('_VERIFY-CDN-1'), 1, o.id, o.item_id, i.base_uom_id, 5, 5, 6.0
+  FROM cutting_order_output o JOIN item i ON i.id = o.item_id
+ WHERE o.document_id = pg_temp.fx_id('_VERIFY-CUT-4') AND o.kind = 'PIECE';
+SELECT pg_temp.refuses('67t', 'a short load of a cutting order''s pieces left the gate',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('WH_MANAGER') WHERE id = pg_temp.fx_id('_VERIFY-CDN-1')$q$,
+  '23Z02', '%must equal the cutting order exactly%');
+UPDATE delivery_note_line SET quantity = 6, qty_base_uom = 6 WHERE document_id = pg_temp.fx_id('_VERIFY-CDN-1');
+SELECT pg_temp.refuses('67u', 'the cut glass was let out by the Finance officer who raised the order',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = pg_temp.fx_id('_VERIFY-CDN-1')$q$,
+  '23Z02', '%raised cutting order%');
+SELECT pg_temp.refuses('67z', 'the cut glass was let out by the Finance officer who posted the cut',
+  $q$UPDATE document SET status = 'POSTED', posted_by = pg_temp.fin2() WHERE id = pg_temp.fx_id('_VERIFY-CDN-1')$q$,
+  '23Z02', '%posted cutting order%');
+-- Accepted at the statement; the commit check is not forced here, as it would also judge earlier
+-- sections' notes, which are never committed. What moved is checked below instead.
+SELECT pg_temp.accepts('67v', 'the pieces left through the gate on the note, and its ticket moved them',
+  $q$DO $d$
+     DECLARE gate UUID := pg_temp.holder('WH_MANAGER'); t UUID; dn UUID := pg_temp.fx_id('_VERIFY-CDN-1');
+     BEGIN
+         UPDATE document SET status = 'POSTED', posted_by = gate WHERE id = dn;
+         INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+         SELECT dt.id, b.id, '_VERIFY-CDN-1-TT', gate FROM document_type dt, branch b WHERE dt.code = 'TT' AND b.code = 'KGL'
+         RETURNING id INTO t;
+         INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, source_document_id)
+         VALUES (t, 'DELIVERY', 'OUT', (SELECT id FROM location WHERE code = '_VERIFY-CUTL'), dn);
+         INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom)
+         SELECT t, l.line_no, l.item_id, l.quantity, l.uom_id, l.qty_base_uom FROM delivery_note_line l WHERE l.document_id = dn;
+         INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, direction,
+                                     quantity_base_uom, signed_quantity, unit_cost, value, running_balance, business_date, posted_by)
+         SELECT tl.id, t, (SELECT id FROM branch WHERE code = 'KGL'), tl.item_id, (SELECT id FROM location WHERE code = '_VERIFY-CUTL'),
+                'OUT', tl.qty_base_uom, -tl.qty_base_uom, 280.7017, 1684.21, 0, kigali_today(), gate
+           FROM ticket_line tl WHERE tl.ticket_id = t;
+         UPDATE document SET status = 'POSTED', posted_by = gate WHERE id = t;
+     END $d$$q$);
+DO $$ BEGIN
+    IF pg_temp.held('_VERIFY-CUTL', NULL, '_VERIFY-SHEET-R-1200x800') = 0
+       AND pg_temp.held('_VERIFY-CUTL', NULL, '_VERIFY-SHEET-R-1800x600') = 1
+       AND pg_temp.held('_VERIFY-CUTL', NULL, '_VERIFY-SHEET') = 3 THEN
+        RAISE NOTICE 'ok   67y  the sheets are gone, the pieces left at the gate, the off-cut stayed';
+    ELSE
+        RAISE WARNING 'FAIL 67y  the ledger does not show two sheets cut, six pieces gone and one off-cut kept';
+    END IF;
+END $$;
+DO $$ BEGIN
+    IF delivery_party_role(pg_temp.fin2(), pg_temp.fx_id('_VERIFY-CDN-1')) = 'cut'
+       AND delivery_party_role(pg_temp.holder('FINANCE'), pg_temp.fx_id('_VERIFY-CDN-1')) = 'authorized' THEN
+        RAISE NOTICE 'ok   67w  whoever raised or recorded a cut stands behind its delivery and takes no return of it';
+    ELSE
+        RAISE WARNING 'FAIL 67w  the people behind a cut delivery are not named as its parties';
+    END IF;
+END $$;
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+                WHERE r.code = 'INTERNAL_CTRL' AND p.code = 'cutting.release')
+       AND EXISTS (SELECT 1 FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+                    WHERE r.code = 'FINANCE' AND p.code = 'cutting.post')
+       AND NOT EXISTS (SELECT 1 FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+                        WHERE p.code = 'cutting.post' AND r.code <> 'FINANCE')
+       AND access_conflict_anywhere() IS NULL THEN
+        RAISE NOTICE 'ok   67x  the Internal Controller releases a cut, Finance alone posts it, and nobody is left in conflict';
+    ELSE
+        RAISE WARNING 'FAIL 67x  the cutting rights are not where the chain needs them, or leave someone in conflict';
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------
 -- 46. The chain switch for transfers is a row, and a document finishes

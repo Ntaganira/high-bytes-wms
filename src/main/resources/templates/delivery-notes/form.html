@@ -13,9 +13,9 @@
     <p class="eyebrow">DOCUMENTS · DELIVERY NOTE · THE GATE</p>
     <h1 class="page-title" th:text="${form.new} ? 'New delivery note' : 'Edit ' + ${dn.serialNo}">New delivery note</h1>
     <p class="page-sub">
-      Against <a class="doc-link" th:href="@{'/dispatch/' + ${dao.id}}" th:text="${dao.serialNo}">DAO-KGL-2026-0001</a>
+      Against <a class="doc-link" th:href="@{'/documents/' + ${dao.id}}" th:text="${dao.serialNo}">DAO-KGL-2026-0001</a>
       for <span th:text="${dao.customerName}">Customer</span>, from <span class="mono" th:text="${dao.locationCode}">KGL-MAIN</span>.
-      The load must equal the authorization exactly.
+      <span th:text="${gate.kind == 'CUT'} ? 'The load is the pieces of the cutting order, exactly; its off-cuts stay in stock.' : 'The load must equal the authorization exactly.'">The load must equal the authorization exactly.</span>
     </p>
   </div>
 
@@ -26,9 +26,9 @@
     <strong>This note cannot be raised.</strong>
     <span th:if="${gate.dnId != null}">
       <span th:text="${dao.serialNo}">DAO</span> already has a live delivery note,
-      <a class="doc-link" th:href="@{'/delivery-notes/' + ${gate.dnId}}" th:text="${gate.dnSerial}">DN</a>: one authorization is one load.
+      <a class="doc-link" th:href="@{'/delivery-notes/' + ${gate.dnId}}" th:text="${gate.dnSerial}">DN</a>: one authorization, or one cutting order, is one load.
     </span>
-    <span th:if="${gate.dnId == null}">Only a released authorization is loaded; the banner above says what is still missing.</span>
+    <span th:if="${gate.dnId == null}">Only a released authorization, or a posted cutting order, is loaded; the banner above says what is still missing.</span>
   </div>
 
   <form th:if="${loadable}" id="dn-form" th:action="${form.new} ? @{/delivery-notes} : @{'/delivery-notes/' + ${form.id}}"
@@ -196,7 +196,7 @@
         <i class="bi bi-check-lg"></i>
         <span th:text="${form.new} ? 'Save delivery note' : 'Save changes'">Save delivery note</span>
       </button>
-      <a th:href="${form.new} ? @{'/dispatch/' + ${dao.id}} : @{'/delivery-notes/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
+      <a th:href="${form.new} ? @{'/documents/' + ${dao.id}} : @{'/delivery-notes/' + ${form.id}}" class="btn btn-outline-secondary">Cancel</a>
     </div>
   </form>
 
