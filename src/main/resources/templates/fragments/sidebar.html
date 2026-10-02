@@ -31,6 +31,16 @@
       <i class="bi bi-house-door-fill"></i> Dashboard
     </a>
 
+    <!-- Shown to whoever reads a document here, or has a signature waiting anywhere. -->
+    <a th:href="@{/approvals}" class="side-link"
+       th:if="${awaitingYou > 0 or #authorization.expression('hasAnyAuthority(''receiving.view'',''dispatch.view'',''transfer.view'',''cutting.view'',''damage.view'',''count.view'',''ticket.view'')')}"
+       th:classappend="${activeNav == 'approvals'} ? 'active'"
+       th:attr="aria-current=${activeNav == 'approvals'} ? 'page' : null">
+      <i class="bi bi-pen"></i> Approval Queue
+      <span class="side-badge held" th:if="${awaitingYou > 0}" th:text="${awaitingYou}"
+            th:attr="aria-label='|' + ${awaitingYou} + ' awaiting your signature|'">0</span>
+    </a>
+
     <!-- Documents -->
     <th:block sec:authorize="hasAnyAuthority('receiving.view','dispatch.view','transfer.view','cutting.view','damage.view','ticket.view')">
       <button class="side-label" type="button" data-bs-toggle="collapse"

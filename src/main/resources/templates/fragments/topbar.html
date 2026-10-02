@@ -57,15 +57,22 @@
       </span>
     </span>
 
-    <div class="dropdown">
+    <div class="dropdown"
+         th:with="pendingTotal=${(navCounts == null ? 0 : navCounts.totalPending) + (awaitingYou == null ? 0 : awaitingYou)}">
       <button class="icon-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false"
-              th:attr="aria-label='|Notifications, ' + (${navCounts?.totalPending} ?: 0) + ' pending|'">
+              th:attr="aria-label='|Notifications, ' + ${pendingTotal} + ' pending|'">
         <i class="bi bi-bell"></i>
-        <span class="notif-badge" th:if="${navCounts?.totalPending > 0}"
-              th:text="${navCounts.totalPending}">0</span>
+        <span class="notif-badge" th:if="${pendingTotal > 0}"
+              th:text="${pendingTotal}">0</span>
       </button>
       <ul class="dropdown-menu dropdown-menu-end" style="min-width: 280px;">
         <li><h6 class="dropdown-header">Awaiting action</h6></li>
+        <li th:if="${awaitingYou != null and awaitingYou > 0}">
+          <a class="dropdown-item" th:href="@{/approvals}">
+            <i class="bi bi-pen"></i>
+            <span th:text="${awaitingYou} + ' awaiting your signature'">0 awaiting your signature</span>
+          </a>
+        </li>
         <li th:if="${navCounts?.releasesHeld > 0}">
           <a class="dropdown-item" th:href="@{/dispatch(status='HELD')}">
             <i class="bi bi-clipboard-check"></i>
@@ -84,7 +91,7 @@
             <span th:text="${navCounts.variancesOpen} + ' unresolved variances'">0</span>
           </a>
         </li>
-        <li th:if="${navCounts == null or navCounts.totalPending == 0}">
+        <li th:if="${pendingTotal == 0}">
           <span class="dropdown-item text-body-secondary">Nothing waiting on you.</span>
         </li>
       </ul>

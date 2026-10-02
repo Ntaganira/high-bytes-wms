@@ -41,14 +41,6 @@ public final class DashboardViews {
         }
     }
 
-    public record PendingApproval(UUID documentId,
-                                  String serialNo,
-                                  String status,
-                                  BigDecimal value,
-                                  String summary,
-                                  String awaitingRole,
-                                  long hoursWaiting) {}
-
     public record RecentMovement(UUID documentId,
                                  String serialNo,
                                  String documentType,

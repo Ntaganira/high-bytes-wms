@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Approval Queue</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS</p>
+    <h1 class="page-title">Approval Queue</h1>
+    <p class="page-sub">Every document whose next signature is yours to give, at every branch where you hold the
+      step's role, longest waiting first. Each one is read and signed on its own page.</p>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/approvals}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-4">
+        <label for="branch" class="form-label small fw-semibold" style="color: var(--color-heading)">Branch</label>
+        <select id="branch" name="branch" class="form-select">
+          <option value="">Every branch</option>
+          <option th:each="b : ${availableBranches}" th:value="${b.id()}" th:text="${b.name()}"
+                  th:selected="${branch != null and branch == b.id()}">Gahanga Main Warehouse</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-4">
+        <label for="type" class="form-label small fw-semibold" style="color: var(--color-heading)">Document</label>
+        <select id="type" name="type" class="form-select">
+          <option value="">Every type</option>
+          <option th:each="k : ${kinds}" th:value="${k.code()}" th:text="${k.title()}"
+                  th:selected="${type == k.code()}">Goods Received Note</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/approvals}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card hb-card-body">
+    <div class="card-head mb-3" th:if="${!#lists.isEmpty(rows)}">
+      <div class="card-title-row">
+        <i class="bi bi-pen" aria-hidden="true"></i>
+        <h2 class="card-title" th:text="${#lists.size(rows)} + (${#lists.size(rows) == 1} ? ' document awaits you' : ' documents await you')">
+          4 documents await you</h2>
+      </div>
+      <span class="small fw-semibold" style="color: var(--color-warning)" th:if="${overdue > 0}">
+        <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+        <span th:text="${overdue} + ' overdue'">1 overdue</span>
+      </span>
+    </div>
+
+    <th:block th:if="${#lists.isEmpty(rows)}">
+      <div th:replace="~{fragments/ui :: emptyState('bi-check2-circle', ${filtered} ? 'Nothing here waits on you' : 'Nothing waits on you', ${filtered} ? 'No document of that type or at that branch awaits your signature.' : 'A document appears here when its next step is one you may sign.')}"></div>
+    </th:block>
+
+    <div class="table-responsive" th:if="${!#lists.isEmpty(rows)}">
+      <table class="table hb-table align-middle">
+        <thead>
+        <tr>
+          <th scope="col">Document</th>
+          <th scope="col">Branch</th>
+          <th scope="col">Your step</th>
+          <th scope="col">Raised</th>
+          <th scope="col" class="text-end">Waiting</th>
+          <th scope="col"><span class="visually-hidden">Open</span></th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="r : ${rows}">
+          <td>
+            <a class="doc-link mono" th:if="${r.openHere()}" th:href="@{'/documents/' + ${r.documentId()}}"
+               th:text="${r.serialNo()}">GRN-KGL-2026-0412</a>
+            <span class="mono fw-semibold" th:unless="${r.openHere()}" th:text="${r.serialNo()}">GRN-RBV-2026-0007</span>
+            <div class="small text-body-secondary" th:text="${r.typeName()}">Goods Received Note</div>
+            <div class="small text-body-secondary" th:if="${r.reference()}" th:text="${r.reference()}">PO 2231</div>
+          </td>
+          <td>
+            <span th:text="${r.branchName()}">Gahanga Main Warehouse</span>
+            <div class="small text-body-secondary" th:if="${r.branchId() == currentBranch.id()}">where you are working</div>
+          </td>
+          <td>
+            <span class="fw-semibold" th:text="|Step ${r.step()} of ${r.steps()} · ${#strings.capitalize(#strings.toLowerCase(r.action()))}|">Step 2 of 4 · Verify</span>
+            <div class="small text-body-secondary" th:text="|as ${r.roleName()}|">as Warehouse Manager</div>
+          </td>
+          <td>
+            <span th:text="${r.raisedBy()}">Test storekeeper</span>
+            <div class="small text-body-secondary mono" th:text="${#temporals.format(r.documentDate(), 'dd MMM yyyy')}">02 Oct 2026</div>
+          </td>
+          <td class="text-end">
+            <span class="mono" th:text="${r.waited()}"
+                  th:style="${r.overdue()} ? 'color: var(--color-warning); font-weight: 700' : null">1 d 2 h</span>
+            <div class="small text-body-secondary" th:if="${r.escalateAfter() != null}"
+                 th:text="(${r.overdue()} ? 'over its ' : 'within ') + ${r.escalateAfter()} + ' h'">within 24 h</div>
+          </td>
+          <td class="text-end text-nowrap">
+            <a th:if="${r.openHere()}" class="btn btn-sm btn-outline-primary"
+               th:href="@{'/documents/' + ${r.documentId()}}">Open <i class="bi bi-arrow-right"></i></a>
+            <form th:unless="${r.openHere()}" method="post" th:action="@{/branch/switch}" class="m-0">
+              <input type="hidden" name="branchId" th:value="${r.branchId()}">
+              <input type="hidden" name="next" th:value="'/documents/' + ${r.documentId()}">
+              <button type="submit" class="btn btn-sm btn-outline-secondary"
+                      th:title="|Your rights here do not reach ${r.branchName()}: switch to it to sign|">
+                <i class="bi bi-arrow-left-right"></i> <span th:text="|Switch to ${r.branchCode()}|">Switch to RBV</span>
+              </button>
+            </form>
+          </td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="text-body-secondary small mt-2 mb-0">
+    <span th:if="${truncated}">The 200 that have waited longest are shown; filter by branch or type to see the rest. </span>
+    A step is overdue once it has waited longer than its chain allows. Waiting is counted from the last signature.
+  </p>
+
+</div>
+</body>
+</html>

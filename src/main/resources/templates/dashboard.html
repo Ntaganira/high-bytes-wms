@@ -165,15 +165,18 @@
 
         <div th:each="p : ${pendingApprovals}" class="border-top py-3">
           <div class="d-flex align-items-center gap-2 mb-1">
-            <a class="serial fw-semibold" th:href="@{'/documents/' + ${p.documentId}}" th:text="${p.serialNo}">DAO-KGL-2026-1187</a>
-            <span th:replace="~{fragments/ui :: chip(${p.status})}"></span>
-            <span class="ms-auto num small" th:text="${#numbers.formatDecimal(p.value, 0, 'COMMA', 0, 'POINT')}">8,420,000</span>
+            <a class="serial fw-semibold" th:if="${p.openHere()}" th:href="@{'/documents/' + ${p.documentId()}}"
+               th:text="${p.serialNo()}">DAO-KGL-2026-1187</a>
+            <span class="serial fw-semibold" th:unless="${p.openHere()}" th:text="${p.serialNo()}">DAO-RBV-2026-0007</span>
+            <span th:replace="~{fragments/ui :: chip('PENDING')}"></span>
+            <span class="ms-auto small text-body-secondary" th:if="${p.branchId() != currentBranch.id()}"
+                  th:text="${p.branchCode()}">RBV</span>
           </div>
-          <div class="small" th:text="${p.summary}">Ikirezi Construction · 84 sheets, clear float 6mm</div>
+          <div class="small" th:text="${p.typeName()}">Delivery Authorization Order</div>
           <div class="small d-flex align-items-center gap-2 mt-1"
-               th:style="${p.hoursWaiting >= 24} ? 'color: var(--color-warning)' : 'color: var(--color-muted)'">
+               th:style="${p.overdue()} ? 'color: var(--color-warning)' : 'color: var(--color-muted)'">
             <i class="bi bi-clock"></i>
-            <span th:text="${p.awaitingRole} + ' · ' + ${p.hoursWaiting} + ' hours'">Internal Controller · 26 hours</span>
+            <span th:text="|Step ${p.step()} · ${p.roleName()} · ${p.waited()}|">Step 4 · Internal Controller · 1 d 2 h</span>
           </div>
         </div>
 

@@ -11,6 +11,7 @@ package heritier.ntaganira.highbytes.wms.common.web;
  * </pre>
  */
 
+import heritier.ntaganira.highbytes.wms.approval.ApprovalQueueService;
 import heritier.ntaganira.highbytes.wms.branch.BranchService;
 import heritier.ntaganira.highbytes.wms.branch.BranchView;
 import heritier.ntaganira.highbytes.wms.common.db.KigaliTime;
@@ -79,10 +80,12 @@ public class GlobalModelAdvice {
 
     private final BranchService branches;
     private final JdbcClient jdbc;
+    private final ApprovalQueueService approvals;
 
-    public GlobalModelAdvice(BranchService branches, JdbcClient jdbc) {
+    public GlobalModelAdvice(BranchService branches, JdbcClient jdbc, ApprovalQueueService approvals) {
         this.branches = branches;
         this.jdbc = jdbc;
+        this.approvals = approvals;
     }
 
     @ModelAttribute("availableBranches")
@@ -136,6 +139,15 @@ public class GlobalModelAdvice {
      * triage before they click anything, and the main argument for a sidebar
      * over top navigation.
      */
+    /**
+     * How many documents wait on the signed-in user's signature, at every branch: the approval queue's badge.
+     * Theirs alone, so it says nothing about anyone else's work.
+     */
+    @ModelAttribute("awaitingYou")
+    public int awaitingYou(@AuthenticationPrincipal AppUserDetails user) {
+        return user == null ? 0 : approvals.count();
+    }
+
     @ModelAttribute("navCounts")
     public NavCounts navCounts(@AuthenticationPrincipal AppUserDetails user, HttpServletRequest request) {
         BranchView branch = currentBranch(user, request);

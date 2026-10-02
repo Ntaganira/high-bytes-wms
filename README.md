@@ -198,8 +198,11 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
   as the current password on a change, lock an account for 15 minutes;
   every sign-in, failure and sign-out is audited
 - Branch switcher, with bonded branches flagged
-- Dashboard: KPIs, movement chart, approval queue, low stock — all reading
-  the ledger
+- Dashboard: KPIs, movement chart, what awaits your signature, low stock —
+  all reading the ledger
+- Approval queue: every document waiting on your signature, at every branch
+  where you hold the step's role, longest waiting first, overdue steps
+  flagged
 - Item master: list with search and filters, create, edit, view, deactivate
 - Locations and bins: list, create, edit, view, bin management
 - Audit trail on every master data change, with field-level before/after
