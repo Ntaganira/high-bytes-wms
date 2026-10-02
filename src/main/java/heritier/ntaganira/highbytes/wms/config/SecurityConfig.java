@@ -113,10 +113,15 @@ public class SecurityConfig {
                 .requestMatchers("/daily-close/**")    .hasAuthority("close.view")
                 .requestMatchers("/reports/**")        .hasAuthority("report.view")
 
-                // Documents and approvals span every document type, so the
-                // gate is "can read at least one". Which documents a user may
-                // open is for the document service to decide, per type.
-                .requestMatchers("/documents/**", "/approvals/**").hasAnyAuthority(DOCUMENT_VIEW)
+                // Documents span every document type, so the gate is "can read
+                // at least one". Which documents a user may open is for the
+                // document service to decide, per type.
+                .requestMatchers("/documents/**").hasAnyAuthority(DOCUMENT_VIEW)
+                // The approval queue is the reader's own, at every branch they
+                // sign at, and its query judges each row by the reader's rights
+                // at that row's branch: signed in is enough, even working where
+                // they read no document.
+                .requestMatchers("/approvals/**").authenticated()
 
                 // /profile/** is everyone's own account: signed in is enough.
                 .anyRequest().authenticated())

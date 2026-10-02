@@ -154,6 +154,17 @@ shape, so it is worth building carefully.
       lookups now leave it out too
 - [ ] Stock screens, left for later: no export; one branch at a time (the branch switcher); a place in the
       ledger with no balance row at all is not listed (the daily close's CACHE check reports it)
+- [x] Approval queue (`approval/`, `/approvals`): every PENDING document whose next step the reader could sign now,
+      at every branch, by the rules signing applies (the step's role and right at the document's branch, not
+      signed already, not its raiser after step 1, on a count no part in it), longest waiting first, a step past
+      its `escalate_after_hours` flagged. Read-only: signing stays on each document's page. A document at a branch
+      whose screens the reader's rights here do not reach offers the branch switch, which then opens it
+      (`/branch/switch` follows `next` only to `/documents/{id}`). The sidebar carries it with a badge, the bell
+      names it, and the dashboard's panel reads the same service (its old query checked neither the step's right
+      nor a count's counters)
+- [ ] Approval queue, left for later: no queue of approved documents awaiting posting (each type's poster rules
+      differ: V14's parties, V15's counters); nothing escalates by itself or notifies anyone, an overdue step is
+      only shown; the badge's count runs on every page, as the navigation's counts do (cache it if it shows)
 - [ ] The blind book, what still shows it (accepted for now, 2 October 2026): a location or bin refuses a type
       change or deactivation while it holds stock, so probing that refusal says whether a counted place holds
       anything; the movements list pages by ledger id, so the gaps hint how many movements are hidden (movements

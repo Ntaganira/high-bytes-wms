@@ -11,7 +11,8 @@ package heritier.ntaganira.highbytes.wms.web;
  * </pre>
  */
 
-import heritier.ntaganira.highbytes.wms.dashboard.DashboardService;
+import heritier.ntaganira.highbytes.wms.approval.ApprovalQueueService;
+import heritier.ntaganira.highbytes.wms.approval.AwaitingSignature;
 import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingService;
 import heritier.ntaganira.highbytes.wms.security.AppUserDetails;
 import heritier.ntaganira.highbytes.wms.support.GrnFlow;
@@ -47,7 +48,7 @@ class ScreensTest extends IntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired ReceivingService receiving;
-    @Autowired DashboardService dashboard;
+    @Autowired ApprovalQueueService approvals;
 
     GrnFlow flow;
     AppUserDetails storekeeper;   // raises and prepares: receiving.view + receiving.create
@@ -134,25 +135,20 @@ class ScreensTest extends IntegrationTest {
 
     @Test
     void theDashboardListsAPendingReceiptForTheNextSignerAndNotForItsRaiser() throws Exception {
-        // The page shows only the five oldest waiting notes, and the shared test database holds many, so
-        // the queue is asked directly: it is the same query the page runs.
+        // The page shows only the five that have waited longest, and the shared test database holds many, so
+        // the queue is asked directly: it is the same service the page reads.
         AppUserDetails nextSigner = userDetails.reload(flow.stepUsers.get(1), fx.kigali()).orElseThrow();
         mvc.perform(as(nextSigner, get("/"))).andExpect(status().isOk());
         mvc.perform(as(storekeeper, get("/"))).andExpect(status().isOk());
 
-        var forNextSigner = dashboard.pendingFor(fx.kigali(), nextSigner.id(), nextSigner.roleIds());
-        assertThat(forNextSigner).isNotEmpty();
-        assertThat(forNextSigner).allMatch(p -> "HELD".equals(p.status()));
+        fx.actAs(nextSigner.id());
+        assertThat(approvals.awaiting(fx.kigali(), null, 100_000))
+                .extracting(AwaitingSignature::documentId).contains(pending).doesNotContain(draft, approved, posted);
 
         // The raiser signed step 1; every later step is for someone else, and a draft awaits no one.
-        var forRaiser = dashboard.pendingFor(fx.kigali(), storekeeper.id(), storekeeper.roleIds());
-        for (var waiting : forRaiser) {
-            assertThat(jdbc.sql("SELECT created_by FROM document WHERE id = :id")
-                    .param("id", waiting.documentId()).query(java.util.UUID.class).single())
-                    .isNotEqualTo(storekeeper.id());
-            assertThat(jdbc.sql("SELECT status FROM document WHERE id = :id")
-                    .param("id", waiting.documentId()).query(String.class).single()).isEqualTo("PENDING");
-        }
+        fx.actAs(storekeeper.id());
+        assertThat(approvals.awaiting(null, null, 100_000))
+                .extracting(AwaitingSignature::documentId).doesNotContain(pending, draft, approved, posted);
     }
 
     @Test

@@ -7,7 +7,7 @@ package heritier.ntaganira.highbytes.wms.dashboard;
  * - File       : DashboardService.java
  * - Date       : 2026-09-29
  * - Author     : NTAGANIRA Heritier
- * - Desc       : Dashboard reads: KPIs, pending approvals, recent movements, low stock, chart
+ * - Desc       : Dashboard reads: KPIs, recent movements, low stock, chart
  * </pre>
  */
 
@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -143,66 +142,6 @@ public class DashboardService {
 
     private String billions(BigDecimal value) {
         return value.divide(new BigDecimal("1000000000"), 2, RoundingMode.HALF_UP).toPlainString();
-    }
-
-    // ---- Approval queue ---------------------------------------------------
-
-    private static final String PENDING_FOR_USER = """
-            SELECT d.id, d.serial_no, d.status, d.created_at,
-                   dt.name AS doc_type,
-                   r.name  AS awaiting_role,
-                   ws.sequence_no
-              FROM document d
-              JOIN document_type dt        ON dt.id = d.document_type_id
-              JOIN workflow_definition wd  ON wd.id = d.workflow_definition_id
-              JOIN workflow_step ws        ON ws.workflow_definition_id = wd.id
-              JOIN role r                  ON r.id = ws.required_role_id
-             WHERE d.branch_id = :branchId
-               -- a draft awaits its raiser, not a signature; only a submitted document is waiting on someone
-               AND d.status = 'PENDING'
-               -- the raiser signs step 1 only, so a later step is not theirs
-               AND (d.created_by <> :userId
-                    OR ws.sequence_no = (SELECT MIN(fs.sequence_no) FROM workflow_step fs
-                                          WHERE fs.workflow_definition_id = wd.id))
-               -- the step is not yet signed
-               AND NOT EXISTS (SELECT 1 FROM document_approval da
-                                WHERE da.document_id = d.id AND da.workflow_step_id = ws.id)
-               -- every earlier mandatory step IS signed
-               AND NOT EXISTS (SELECT 1 FROM workflow_step earlier
-                                WHERE earlier.workflow_definition_id = wd.id
-                                  AND earlier.sequence_no < ws.sequence_no
-                                  AND earlier.is_mandatory
-                                  AND NOT EXISTS (SELECT 1 FROM document_approval da2
-                                                   WHERE da2.document_id = d.id
-                                                     AND da2.workflow_step_id = earlier.id))
-               -- the signed-in user holds the role the step requires
-               AND ws.required_role_id IN (:roleIds)
-               -- and has not already signed this document (FR-WF-05)
-               AND NOT EXISTS (SELECT 1 FROM document_approval da3
-                                WHERE da3.document_id = d.id AND da3.actor_user_id = :userId)
-             ORDER BY d.created_at
-             LIMIT 5
-            """;
-
-    public List<PendingApproval> pendingFor(UUID branchId, UUID userId, java.util.Set<UUID> roleIds) {
-        if (roleIds.isEmpty()) return List.of();
-        return jdbc.sql(PENDING_FOR_USER)
-                .param("branchId", branchId)
-                .param("userId", userId)
-                // a Collection, not an array: NamedParameterJdbcTemplate
-                // expands it into the IN list
-                .param("roleIds", roleIds)
-                .query((rs, n) -> new PendingApproval(
-                        rs.getObject("id", UUID.class),
-                        rs.getString("serial_no"),
-                        "HELD",
-                        BigDecimal.ZERO,
-                        rs.getString("doc_type"),
-                        rs.getString("awaiting_role"),
-                        ChronoUnit.HOURS.between(
-                                rs.getTimestamp("created_at").toInstant(),
-                                java.time.Instant.now())))
-                .list();
     }
 
     // ---- Recent movements ---------------------------------------------------
