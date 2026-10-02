@@ -171,6 +171,22 @@
 
 
 <!-- ===================================================================
+     Switch to a document's branch and open it: for a document whose
+     screens the reader's rights where they work do not reach. The switch
+     follows only a document's own address (DashboardController).
+     =================================================================== -->
+<form th:fragment="switchAndOpen(branchId, branchCode, branchName, documentId)"
+      method="post" th:action="@{/branch/switch}" class="m-0">
+  <input type="hidden" name="branchId" th:value="${branchId}">
+  <input type="hidden" name="next" th:value="'/documents/' + ${documentId}">
+  <button type="submit" class="btn btn-sm btn-outline-secondary"
+          th:title="|Your rights here do not reach ${branchName}: switch to it to open this|">
+    <i class="bi bi-arrow-left-right"></i> <span th:text="|Switch to ${branchCode}|">Switch to RBV</span>
+  </button>
+</form>
+
+
+<!-- ===================================================================
      Approval chain. Read top to bottom; the shape should be legible
      from across a desk.
      =================================================================== -->

@@ -120,7 +120,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── location/  locations, types, bins
 │   ├── supplier/  suppliers (Finance, partner.manage)
 │   └── customer/  customers, blocking (Finance, partner.manage)
-├── document/      the spine: serials, chain binding, submit, sign, cancel
+├── document/      the spine: serials, chain binding, submit, sign, cancel; the register of every document
 ├── approval/      the approval queue: what waits on the reader's signature, every branch
 ├── inventory/
 │   ├── ledger/    the only writer of stock_movement and stock_balance
