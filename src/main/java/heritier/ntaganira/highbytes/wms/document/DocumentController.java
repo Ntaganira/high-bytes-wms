@@ -7,20 +7,28 @@ package heritier.ntaganira.highbytes.wms.document;
  * - File       : DocumentController.java
  * - Date       : 2026-09-30
  * - Author     : NTAGANIRA Heritier
- * - Desc       : Sends a document address to the screen of the module that owns it
+ * - Desc       : The register of every document, and a document address sent to the screen that owns it
  * </pre>
  */
 
 import heritier.ntaganira.highbytes.wms.security.CurrentUser;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.sql.Types;
+import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
@@ -35,15 +43,75 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
  *
  * <p>Whether the visitor may see the document is decided by the screen it
  * lands on, for the document's own branch.
+ *
+ * <p>{@code /documents} is the register of every document the reader may
+ * read, at every branch ({@link DocumentListService}), read-only.
  */
 @Controller
 @RequestMapping("/documents")
 public class DocumentController {
 
-    private final JdbcClient jdbc;
+    static final int PAGE = 50;
 
-    public DocumentController(JdbcClient jdbc) {
+    private final JdbcClient jdbc;
+    private final DocumentListService register;
+
+    public DocumentController(JdbcClient jdbc, DocumentListService register) {
         this.jdbc = jdbc;
+        this.register = register;
+    }
+
+    @ModelAttribute("activeNav")
+    public String activeNav() {
+        return "documents";
+    }
+
+    @GetMapping
+    public String list(@RequestParam(required = false) String type,
+                       @RequestParam(required = false) String status,
+                       @RequestParam(required = false) UUID branch,
+                       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+                       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+                       @RequestParam(required = false) String q,
+                       @RequestParam(required = false) boolean mine,
+                       @RequestParam(required = false) UUID before,
+                       Model model) {
+        DocumentKind kind = Arrays.stream(DocumentKind.values()).filter(k -> k.code().equals(type))
+                .findFirst().orElse(null);
+        // List.of(...).contains(null) throws, so an empty filter is checked first.
+        String state = status != null && DocumentListService.STATUSES.contains(status) ? status : null;
+        String text = q == null || q.isBlank() ? null : q.trim();
+        var found = register.list(new DocumentListService.Query(kind, state, branch, from, to, text, mine, before),
+                PAGE + 1);
+        boolean more = found.size() > PAGE;
+        var rows = more ? found.subList(0, PAGE) : found;
+
+        var filters = UriComponentsBuilder.fromPath("/documents")
+                .queryParamIfPresent("type", Optional.ofNullable(kind == null ? null : kind.code()))
+                .queryParamIfPresent("status", Optional.ofNullable(state))
+                .queryParamIfPresent("branch", Optional.ofNullable(branch))
+                .queryParamIfPresent("from", Optional.ofNullable(from))
+                .queryParamIfPresent("to", Optional.ofNullable(to))
+                .queryParamIfPresent("q", Optional.ofNullable(text))
+                .queryParamIfPresent("mine", Optional.ofNullable(mine ? "true" : null));
+
+        model.addAttribute("documents", rows);
+        model.addAttribute("kinds", DocumentKind.values());
+        model.addAttribute("statuses", DocumentListService.STATUSES);
+        model.addAttribute("type", kind == null ? null : kind.code());
+        model.addAttribute("status", state);
+        model.addAttribute("branch", branch);
+        model.addAttribute("from", from);
+        model.addAttribute("to", to);
+        model.addAttribute("q", text);
+        model.addAttribute("mine", mine);
+        model.addAttribute("filtered", kind != null || state != null || branch != null || from != null
+                || to != null || text != null || mine);
+        model.addAttribute("newestUrl", before != null ? filters.cloneBuilder().encode().toUriString() : null);
+        model.addAttribute("olderUrl", more
+                ? filters.cloneBuilder().queryParam("before", rows.get(rows.size() - 1).id()).encode().toUriString()
+                : null);
+        return "documents/list";
     }
 
     @GetMapping("/{id}")

@@ -100,14 +100,9 @@
           <td class="text-end text-nowrap">
             <a th:if="${r.openHere()}" class="btn btn-sm btn-outline-primary"
                th:href="@{'/documents/' + ${r.documentId()}}">Open <i class="bi bi-arrow-right"></i></a>
-            <form th:unless="${r.openHere()}" method="post" th:action="@{/branch/switch}" class="m-0">
-              <input type="hidden" name="branchId" th:value="${r.branchId()}">
-              <input type="hidden" name="next" th:value="'/documents/' + ${r.documentId()}">
-              <button type="submit" class="btn btn-sm btn-outline-secondary"
-                      th:title="|Your rights here do not reach ${r.branchName()}: switch to it to sign|">
-                <i class="bi bi-arrow-left-right"></i> <span th:text="|Switch to ${r.branchCode()}|">Switch to RBV</span>
-              </button>
-            </form>
+            <th:block th:unless="${r.openHere()}">
+              <form th:replace="~{fragments/ui :: switchAndOpen(${r.branchId()}, ${r.branchCode()}, ${r.branchName()}, ${r.documentId()})}"></form>
+            </th:block>
           </td>
         </tr>
         </tbody>

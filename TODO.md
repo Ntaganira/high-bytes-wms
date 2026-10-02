@@ -180,6 +180,14 @@ shape, so it is worth building carefully.
       answers to and that document's signatures, so who authorised, executed and recorded one transaction are on
       one page. `/documents/{id}` of a ticket opens it there for whoever holds `ticket.view`, and its document
       otherwise
+- [x] Documents (`/documents`, `DocumentListService`): one register of every document the reader may read, of every
+      type and at every branch, listed only where they hold the type's view right at the document's branch;
+      filtered by type, status, branch, date, serial or reference and "raised by me", and paged. Each row says
+      where the document stands (the step awaited and its role, posted when and by whom, a cancellation's
+      reason) and never what it carries. A cancelled serial stays listed. A document whose screens the reader's
+      rights where they work do not reach offers the branch switch, as the approval queue does
+- [ ] Documents, left for later: no export; no serial-gap report (a missing number is an incident: the register
+      shows cancelled serials, not numbers never issued)
 - [ ] Tickets, left for later: no export; a document's own page names its ticket without linking it; one branch at
       a time
 - [ ] Admin screens, left for later: no export of the audit log; a document's audit entry links to no page
