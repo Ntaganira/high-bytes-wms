@@ -141,6 +141,8 @@ public class DispatchLookupService {
                 SELECT sb.item_id, sb.storage_bin_id, b.bin_code, sb.qty_on_hand
                   FROM stock_balance sb LEFT JOIN storage_bin b ON b.id = sb.storage_bin_id
                  WHERE sb.location_id = :location AND sb.item_id IN (:items) AND sb.qty_on_hand > 0
+                   -- A place under a live count shows no book, and nothing moves from it (V15).
+                   AND count_freezing(sb.item_id, sb.location_id) IS NULL
                  ORDER BY b.bin_code NULLS FIRST
                 """)
                 .param("location", locationId, Types.OTHER)

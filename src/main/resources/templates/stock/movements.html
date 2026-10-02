@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Stock Movements</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">INVENTORY</p>
+      <h1 class="page-title">Stock Movements</h1>
+      <p class="page-sub">The ledger at <span th:text="${currentBranch.name()}">Gahanga Main Warehouse</span>: every
+        movement, newest first, and the document it answers to. Nothing here is ever edited; a correction is a
+        reversing movement.</p>
+    </div>
+    <a th:href="@{/stock}" class="btn btn-outline-secondary"><i class="bi bi-box"></i> Balances</a>
+  </div>
+
+  <th:block th:replace="~{stock/fragments :: liveCounts(${liveCounts})}"></th:block>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/stock/movements}">
+    <input type="hidden" name="item" th:value="${item}" th:if="${item != null}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-2">
+        <label for="from" class="form-label small fw-semibold" style="color: var(--color-heading)">From</label>
+        <input id="from" name="from" type="date" class="form-control mono" th:value="${from}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="to" class="form-label small fw-semibold" style="color: var(--color-heading)">To</label>
+        <input id="to" name="to" type="date" class="form-control mono" th:value="${to}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="location" class="form-label small fw-semibold" style="color: var(--color-heading)">Location</label>
+        <select id="location" name="location" class="form-select">
+          <option value="">Every location</option>
+          <option th:each="l : ${locations}" th:value="${l.id()}" th:text="${l.code()}"
+                  th:selected="${location != null and location == l.id()}">KGL-MAIN</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="direction" class="form-label small fw-semibold" style="color: var(--color-heading)">Direction</label>
+        <select id="direction" name="direction" class="form-select">
+          <option value="">In and out</option>
+          <option value="IN" th:selected="${direction == 'IN'}">In</option>
+          <option value="OUT" th:selected="${direction == 'OUT'}">Out</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-2">
+        <label for="q" class="form-label small fw-semibold" style="color: var(--color-heading)">Search</label>
+        <input id="q" name="q" type="search" class="form-control" th:value="${q}" placeholder="Item or serial">
+      </div>
+      <div class="col-12 col-md-2 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/stock/movements}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+    <p class="small mb-0 mt-2" th:if="${item != null}">
+      Item: <span class="mono" th:text="${itemLabel} ?: ${item}">GL-CLR-6</span>
+      · <a th:href="@{/stock/movements}">any item</a>
+    </p>
+  </form>
+
+  <section class="hb-card hb-card-body">
+    <div th:replace="~{stock/fragments :: movementTable(${movements})}"></div>
+  </section>
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+    <p class="text-body-secondary small mb-0">Movements at a place under a live count are not listed until its
+      verification is signed. Dates are business dates in Kigali.</p>
+    <div class="d-flex gap-2">
+      <a th:if="${newestUrl}" th:href="@{${newestUrl}}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Newest</a>
+      <a th:if="${olderUrl}" th:href="@{${olderUrl}}" class="btn btn-sm btn-outline-secondary">
+        Older <i class="bi bi-arrow-right"></i></a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

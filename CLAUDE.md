@@ -127,7 +127,8 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── dispatch/  Delivery Authorizations, Delivery Notes (the gate)
 │   ├── transfer/  inter-branch transfers and their receipts (via TRANSIT)
 │   ├── damage/    write-offs, transit losses, customer returns, quarantine
-│   └── count/     stock counts (blind, verified, frozen) and the variance report
+│   ├── count/     stock counts (blind, verified, frozen) and the variance report
+│   └── stock/     stock balances by item and place, and the ledger, read-only
 │                  NOT BUILT — cutting
 └── reporting/
     └── close/     the daily close: reconciled by Finance, countersigned and
@@ -241,7 +242,16 @@ made `daily_close`; V16 gave it its rules.
   the count's trail, which the counters read, so no count refusal names a
   chosen line. `CountService.mapLine` is the one place a sheet is masked:
   a new read of count lines goes through it, or checks
-  `count_book_visible()`.
+  `count_book_visible()`. Any read of stock quantities, values or movements
+  leaves out the places where `count_freezing(item, location)` is not null:
+  the stock screens, the dashboard (value, received, the chart, low stock,
+  recent movements), the item list's totals, the location pages' item
+  counts and value, the document forms' stock lookups, and the balance
+  after on a posted GRN or DN. Left out, never subtracted, so no total
+  gives the book away. Which places are being counted is read from the
+  counts' sheets, never from the book, so an empty place reads like a full
+  one. What decides a control (a location or bin holding stock) still
+  counts every place.
 - **Who judges a count took no part in it** (V15). Whoever counted a line
   signs no step but the first, approving or rejecting, and takes no
   verification count; whoever verified signs only the verification. Once
@@ -343,12 +353,12 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 - How large is the verification sample? V15 recounts every line whose first
   count differs from the book and one in ten of the rest (at least one),
   chosen at random at submission. Changed by migration.
-- The book is absent from the count pages, but the Warehouse Manager holds
-  `stock.view`, so stock figures elsewhere (the dashboard, the daily close's
-  movements and exceptions, and the stock screens once built) stay readable
-  during a count. Should counters lose
-  them while a count is open? The random verification sample is what
-  catches a counter who copies the book.
+- The book is absent from the count pages, and every stock screen, the
+  dashboard, the item list and the document forms leave a place under a
+  live count out (2 October 2026). The daily close's movements and
+  exceptions still show them to whoever holds `close.view`, the Warehouse
+  Manager included. Should they be hidden there too? The random
+  verification sample is what catches a counter who copies the book.
 - Does a customer return need a Finance credit note before it is posted, and
   is it raised here or in the accounting system?
 - Nobody who signed an authorization raises the return of what it let out,

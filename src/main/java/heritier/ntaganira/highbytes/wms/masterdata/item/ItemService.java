@@ -57,6 +57,8 @@ public class ItemService {
                      JOIN location l ON l.id = sb.location_id
                     WHERE sb.item_id = i.id
                       AND (:branchId::uuid IS NULL OR l.branch_id = :branchId::uuid)
+                      -- Left out, never subtracted: a total must not give a blind count's book away (V15).
+                      AND count_freezing(sb.item_id, sb.location_id) IS NULL
               ) onhand ON TRUE
             """;
 

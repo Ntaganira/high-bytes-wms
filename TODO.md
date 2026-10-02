@@ -147,6 +147,19 @@ shape, so it is worth building carefully.
       code, its kind once it has a past, and closes only once finished with (no stock, nothing open, no transfer to
       arrive, every day locked); nothing new starts at a closed one. The audit log reads only the entries recorded
       at branches where the reader holds `audit.view`; entries at no branch need the right everywhere
+- [x] Stock screens (`inventory/stock/`): balances by item at the working branch, one item place by place (the
+      cache, with the ledger read beside it and a difference flagged), and the ledger of movements with the
+      document each answers to, filtered and paged. A place under a live count shows no quantity, value or
+      movement, and is left out of every total; the dashboard, the item list and the document forms' stock
+      lookups now leave it out too
+- [ ] Stock screens, left for later: no export; one branch at a time (the branch switcher); a place in the
+      ledger with no balance row at all is not listed (the daily close's CACHE check reports it)
+- [ ] The blind book, what still shows it (accepted for now, 2 October 2026): a location or bin refuses a type
+      change or deactivation while it holds stock, so probing that refusal says whether a counted place holds
+      anything; the movements list pages by ledger id, so the gaps hint how many movements are hidden (movements
+      at other branches leave gaps too); the daily close's movements and exceptions (the open question above);
+      and a count cancelled before its verification lifts the hiding, though the book was readable before the
+      count opened anyway. Frozen stock disappears from the quarantine and document-form lists without a note
 - [ ] Admin screens, left for later: no export of the audit log; a document's audit entry links to no page
       (each type has its own); locations at an inactive branch are still offered on the location form, which the
       database then refuses
@@ -225,9 +238,8 @@ shape, so it is worth building carefully.
 - [ ] **Who posts a count's adjustment.** Finance approves the count, so a second Finance officer posts it
       (V15, `count.post`). A branch with one Finance officer needs cover from another branch. Confirm
 - [ ] The verification sample: every differing line plus one in ten of the rest (V15, `count_sample_share`)
-- [ ] Whether counters lose `stock.view` while a count is open: the book is absent from the count pages, but
-      stock figures elsewhere (the dashboard, the daily close's movements and exceptions, the stock screens once
-      built) stay readable
+- [ ] Whether the daily close hides a place under a live count too: the stock screens, the dashboard, the item
+      list and the document forms now leave it out; the close's movements and exceptions still show it
 - [ ] **A count is never cancelled once its verification is signed** (V15): it is posted, or rejected by a
       signer who took no part in it. Stricter than the other documents, which their creator may cancel until
       posted. Confirm

@@ -138,7 +138,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── item/          item master with glass attributes
 │   └── location/      locations, types, bins
 ├── document/          (next) the spine + workflow engine
-├── inventory/         (next) receiving, dispatch, transfer, cutting, count
+├── inventory/         ledger, receiving, dispatch, transfer, damage, count, stock; cutting next
 └── reporting/         (next) daily close, KPIs, exports
 ```
 
@@ -208,6 +208,8 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
   to each; a switchover still to come moved with a reason
 - Audit log: search by day, action, record, person, branch and words, as
   far as the reader's right reaches
+- Stock: balances by item, an item place by place, and the ledger of
+  movements; a place under a live count shows no quantity anywhere
 
 ## Not built yet
 

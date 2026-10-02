@@ -175,7 +175,7 @@ public class Fixtures {
         jdbc.sql("INSERT INTO storage_bin (id, location_id, bin_code) VALUES (:id, :location, :code)")
                 .param("id", id, Types.OTHER)
                 .param("location", location(locationCode), Types.OTHER)
-                .param("code", binCode + "-" + id.toString().substring(0, 4).toUpperCase())
+                .param("code", binCode + "-" + id.toString().substring(0, 8).toUpperCase())
                 .update();
         return id;
     }
