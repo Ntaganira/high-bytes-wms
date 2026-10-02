@@ -239,7 +239,7 @@
                 <td class="num mono" th:text="${#numbers.formatDecimal(m.quantityBase(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
                 <td class="num mono" th:text="${#numbers.formatDecimal(m.unitCost(), 1, 'COMMA', 4, 'POINT')}">1,050.0000</td>
                 <td class="num mono" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">105,000.00</td>
-                <td class="num mono" th:text="${#numbers.formatDecimal(m.runningBalance(), 1, 'COMMA', 3, 'POINT')}">100.000</td>
+                <td class="num mono" th:text="${m.runningBalance() != null} ? ${#numbers.formatDecimal(m.runningBalance(), 1, 'COMMA', 3, 'POINT')} : 'Being counted'">100.000</td>
                 <td class="mono" th:text="${#temporals.format(m.businessDate(), 'dd MMM yyyy')}">30 Sep 2026</td>
               </tr>
             </tbody>

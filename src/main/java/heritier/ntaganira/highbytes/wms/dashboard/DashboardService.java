@@ -48,6 +48,8 @@ public class DashboardService {
               FROM stock_balance sb
               JOIN location l ON l.id = sb.location_id
              WHERE l.branch_id = :branchId
+               -- Left out, never subtracted: a total must not give a blind count's book away (V15).
+               AND count_freezing(sb.item_id, sb.location_id) IS NULL
             """;
 
     private static final String RECEIVED_SINCE = """
@@ -56,6 +58,7 @@ public class DashboardService {
              WHERE m.branch_id = :branchId
                AND m.direction = 'IN'
                AND m.business_date >= :since
+               AND count_freezing(m.item_id, m.location_id) IS NULL
             """;
 
     private static final String RECEIPT_NOTES_SINCE = """
@@ -93,9 +96,14 @@ public class DashboardService {
     /** The target the dashboard measures accuracy against. */
     static final BigDecimal ACCURACY_TARGET = new BigDecimal("99.0");
 
-    public Kpi kpis(UUID branchId) {
-        BigDecimal stockValue = jdbc.sql(STOCK_VALUE).param("branchId", branchId)
+    /** The value of the stock at the branch, places under a live count left out. */
+    public BigDecimal stockValue(UUID branchId) {
+        return jdbc.sql(STOCK_VALUE).param("branchId", branchId)
                 .query(BigDecimal.class).optional().orElse(BigDecimal.ZERO);
+    }
+
+    public Kpi kpis(UUID branchId) {
+        BigDecimal stockValue = stockValue(branchId);
 
         LocalDate weekAgo = LocalDate.now().minusDays(7);
 
@@ -208,6 +216,8 @@ public class DashboardService {
               JOIN document_type dt ON dt.id = d.document_type_id
               JOIN item i           ON i.id = m.item_id
              WHERE m.branch_id = :branchId
+               -- No movement at a place under a live count (V15).
+               AND count_freezing(m.item_id, m.location_id) IS NULL
              ORDER BY m.movement_at DESC
              LIMIT 6
             """;
@@ -238,6 +248,7 @@ public class DashboardService {
                AND i.reorder_level IS NOT NULL
                AND sb.qty_on_hand < i.reorder_level
                AND i.is_active
+               AND count_freezing(sb.item_id, sb.location_id) IS NULL
              ORDER BY (sb.qty_on_hand / NULLIF(i.reorder_level, 0))
              LIMIT 6
             """;
@@ -265,6 +276,7 @@ public class DashboardService {
               FROM generate_series(:from::date, :to::date, INTERVAL '1 day') AS d(day)
          LEFT JOIN stock_movement m
                 ON m.business_date = d.day::date AND m.branch_id = :branchId
+               AND count_freezing(m.item_id, m.location_id) IS NULL
              GROUP BY d.day
              ORDER BY d.day
             """;

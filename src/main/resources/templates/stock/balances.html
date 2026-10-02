@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Stock Balances</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">INVENTORY</p>
+      <h1 class="page-title">Stock Balances</h1>
+      <p class="page-sub">What each item holds at <span th:text="${currentBranch.name()}">Gahanga Main Warehouse</span>,
+        from the ledger. Switch branch in the top bar.</p>
+    </div>
+    <a th:href="@{/stock/movements}" class="btn btn-outline-secondary">
+      <i class="bi bi-list-ul"></i> Movements
+    </a>
+  </div>
+
+  <th:block th:replace="~{stock/fragments :: liveCounts(${liveCounts})}"></th:block>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/stock}">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-4">
+        <label for="q" class="form-label small fw-semibold" style="color: var(--color-heading)">Search</label>
+        <input id="q" name="q" type="search" class="form-control" th:value="${q}" placeholder="Item code or description">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="type" class="form-label small fw-semibold" style="color: var(--color-heading)">Product</label>
+        <select id="type" name="type" class="form-select">
+          <option value="">Any product</option>
+          <option th:each="t : ${productTypes}" th:value="${t}" th:text="${t.label()}"
+                  th:selected="${type == t.name()}">Glass</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="location" class="form-label small fw-semibold" style="color: var(--color-heading)">Location</label>
+        <select id="location" name="location" class="form-select">
+          <option value="">Every location</option>
+          <option th:each="l : ${locations}" th:value="${l.id()}" th:text="${l.code()}"
+                  th:selected="${location != null and location == l.id()}">KGL-MAIN</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="filter" name="filter" value="below-reorder"
+                 th:checked="${belowReorder}">
+          <label class="form-check-label small" for="filter">Below reorder level</label>
+        </div>
+      </div>
+      <div class="col-6 col-md-2 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/stock}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th scope="col" class="num">On hand</th>
+            <th scope="col" class="num">Value</th>
+            <th scope="col" class="num">Places</th>
+            <th scope="col" class="num">Reorder</th>
+            <th scope="col">Last movement</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="i : ${items}">
+            <td>
+              <a th:href="@{'/stock/items/' + ${i.itemId()}}" class="mono" th:text="${i.itemCode()}">GL-CLR-6</a>
+              <span class="d-block small" th:text="${i.description()}">Clear float 6mm 2140×3300</span>
+            </td>
+            <td class="num mono">
+              <span th:if="${i.places() > 0 or i.placesCounted() == 0}"
+                    th:text="${#numbers.formatDecimal(i.onHand(), 1, 'COMMA', 3, 'POINT')} + ' ' + ${i.uom()}">240.000 SHEET</span>
+              <span th:if="${i.places() == 0 and i.placesCounted() > 0}" class="text-body-secondary">—</span>
+              <span class="d-block small text-body-secondary" th:if="${i.placesCounted() > 0}"
+                    th:text="${i.placesCounted() == 1} ? '1 place being counted, not included' : ${i.placesCounted()} + ' places being counted, not included'">1 place being counted</span>
+            </td>
+            <td class="num mono" th:text="${#numbers.formatDecimal(i.value(), 1, 'COMMA', 2, 'POINT')}">240,000.00</td>
+            <td class="num" th:text="${i.places()}">3</td>
+            <td class="num">
+              <span class="mono" th:text="${i.reorderLevel() != null} ? ${#numbers.formatDecimal(i.reorderLevel(), 1, 'COMMA', 3, 'POINT')} : '—'">60.000</span>
+              <span class="d-block" th:if="${i.belowReorder()}"><span th:replace="~{fragments/ui :: chip('BLOCKED')}"></span></span>
+            </td>
+            <td class="mono small text-body-secondary"
+                th:text="${i.lastMovementAt() != null} ? ${#temporals.format(i.lastMovementAt(), 'dd MMM yyyy HH:mm')} : '—'">01 Oct 2026 14:02</td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(items)}">
+            <td colspan="6">
+              <div th:replace="~{fragments/ui :: emptyState('bi-box', 'No stock matches', 'Nothing is held here that matches. Clear the filters, or switch branch.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot th:unless="${#lists.isEmpty(items)}">
+          <tr>
+            <th scope="row">Total value listed</th>
+            <td></td>
+            <td class="num mono fw-semibold" th:text="${#numbers.formatDecimal(totalValue, 1, 'COMMA', 2, 'POINT')}">1,240,000.00</td>
+            <td colspan="3" class="small text-body-secondary" th:if="${anyCounted}">Places being counted are not included.</td>
+            <td colspan="3" th:unless="${anyCounted}"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <p class="text-body-secondary small mt-2">
+    <th:block th:if="${truncated}">The first <span th:text="${#lists.size(items)}">500</span> items are shown; narrow the
+      search to see the rest. </th:block>
+    Quantities are in each item's base unit. Below reorder flags an item whose stock here is under its reorder level;
+    an item with a place being counted is not judged until the count's verification is signed.
+  </p>
+
+</div>
+</body>
+</html>

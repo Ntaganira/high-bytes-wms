@@ -68,8 +68,6 @@ public class ErrorPages implements ErrorViewResolver {
     static final List<PlannedScreen> PLANNED = List.of(
             new PlannedScreen("/cutting",          "Cutting Orders",          "bi-scissors",           "cutting"),
             new PlannedScreen("/tickets",          "Transaction Tickets",     "bi-ticket-perforated",  "tickets"),
-            new PlannedScreen("/stock/movements",  "Stock Movements",         "bi-box",                "stock"),
-            new PlannedScreen("/stock",            "Stock Balances",          "bi-box",                "stock"),
             new PlannedScreen("/reports",          "Reports & KPIs",          "bi-bar-chart",          "reports"),
             new PlannedScreen("/approvals",        "Approval Queue",          "bi-check2-square",      null),
             new PlannedScreen("/documents",        "Documents",               "bi-file-earmark-text",  null),

@@ -243,7 +243,9 @@ public class ReceivingService {
                 .param("id", ticketId, Types.OTHER).query(String.class).single();
         List<GrnPosting.Movement> movements = jdbc.sql("""
                 SELECT m.id, tl.line_no, i.item_code, m.quantity_base_uom, m.unit_cost, m.value,
-                       m.running_balance, m.business_date
+                       -- The balance after is the place's book while nothing has moved since: none while counted (V15).
+                       CASE WHEN count_freezing(m.item_id, m.location_id) IS NULL THEN m.running_balance END AS running_balance,
+                       m.business_date
                   FROM stock_movement m
                   JOIN ticket_line tl ON tl.id = m.ticket_line_id
                   JOIN item i ON i.id = m.item_id

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${item.itemCode()}">Item stock</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">INVENTORY · STOCK</p>
+      <h1 class="page-title mono" th:text="${item.itemCode()}">GL-CLR-6</h1>
+      <p class="page-sub">
+        <span th:text="${item.description()}">Clear float 6mm 2140×3300</span> ·
+        at <span th:text="${currentBranch.name()}">Gahanga Main Warehouse</span>
+      </p>
+    </div>
+    <div class="d-flex gap-2">
+      <a th:href="@{/items/{id}(id=${item.itemId()})}" class="btn btn-outline-secondary" sec:authorize="hasAuthority('item.view')">
+        <i class="bi bi-grid-3x3-gap"></i> Item master</a>
+      <a th:href="@{/stock}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Stock balances</a>
+    </div>
+  </div>
+
+  <th:block th:replace="~{stock/fragments :: liveCounts(${liveCounts})}"></th:block>
+
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-lg-3">
+      <section class="hb-card hb-card-body">
+        <p class="small text-body-secondary mb-1">On hand here</p>
+        <p class="h4 mono mb-0" th:text="${#numbers.formatDecimal(item.onHand(), 1, 'COMMA', 3, 'POINT')} + ' ' + ${item.uom()}">240.000 SHEET</p>
+        <p class="small text-body-secondary mb-0" th:if="${item.placesCounted() > 0}">Places being counted not included</p>
+      </section>
+    </div>
+    <div class="col-6 col-lg-3">
+      <section class="hb-card hb-card-body">
+        <p class="small text-body-secondary mb-1">Value</p>
+        <p class="h4 mono mb-0" th:text="${#numbers.formatDecimal(item.value(), 1, 'COMMA', 2, 'POINT')}">240,000.00</p>
+      </section>
+    </div>
+    <div class="col-6 col-lg-3">
+      <section class="hb-card hb-card-body">
+        <p class="small text-body-secondary mb-1">Reorder level</p>
+        <p class="h4 mono mb-0" th:text="${item.reorderLevel() != null} ? ${#numbers.formatDecimal(item.reorderLevel(), 1, 'COMMA', 3, 'POINT')} : '—'">60.000</p>
+        <p class="small mb-0" th:if="${item.belowReorder()}" style="color: var(--color-danger)">Below it</p>
+      </section>
+    </div>
+    <div class="col-6 col-lg-3">
+      <section class="hb-card hb-card-body">
+        <p class="small text-body-secondary mb-1">Places</p>
+        <p class="h4 mono mb-0" th:text="${item.places() + item.placesCounted()}">3</p>
+      </section>
+    </div>
+  </div>
+
+  <section class="hb-card hb-card-body mb-3">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-geo-alt" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Where it is held</h2>
+          <p class="card-sub">Each location and bin; quantities from the balance the ledger keeps</p>
+        </div>
+      </div>
+    </div>
+    <div class="table-responsive" th:unless="${#lists.isEmpty(places)}">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Location</th><th scope="col">Bin</th>
+            <th scope="col" class="num">On hand</th><th scope="col" class="num">Average cost</th>
+            <th scope="col" class="num">Value</th><th scope="col">Last movement</th><th scope="col">Last counted</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="p : ${places}">
+            <td>
+              <span class="mono" th:text="${p.locationCode()}">KGL-MAIN</span>
+              <span class="d-block small text-body-secondary" th:text="${p.locationName()}">Main store</span>
+            </td>
+            <td class="mono" th:text="${p.binCode()} ?: '—'">A1-02</td>
+            <th:block th:if="${p.counted()}">
+              <td colspan="3" class="text-body-secondary small">
+                Being counted under <span class="mono" th:text="${p.countingSerial()}">CNT-KGL-2026-0003</span>: no
+                quantity is shown until its verification is signed.
+              </td>
+              <td class="text-body-secondary">—</td>
+            </th:block>
+            <th:block th:unless="${p.counted()}">
+              <td class="num mono">
+                <span th:text="${#numbers.formatDecimal(p.onHand(), 1, 'COMMA', 3, 'POINT')}">120.000</span>
+                <span class="d-block small" th:if="${p.cacheDiffers()}" style="color: var(--color-danger)"
+                      th:text="'Ledger reads ' + ${#numbers.formatDecimal(p.ledgerOnHand(), 1, 'COMMA', 3, 'POINT')}">Ledger reads 118.000</span>
+              </td>
+              <td class="num mono" th:text="${#numbers.formatDecimal(p.averageCost(), 1, 'COMMA', 4, 'POINT')}">1,000.0000</td>
+              <td class="num mono" th:text="${#numbers.formatDecimal(p.value(), 1, 'COMMA', 2, 'POINT')}">120,000.00</td>
+              <td class="mono small" th:text="${p.lastMovementAt() != null} ? ${#temporals.format(p.lastMovementAt(), 'dd MMM yyyy HH:mm')} : '—'">01 Oct 2026 14:02</td>
+            </th:block>
+            <td class="mono small" th:text="${p.lastCountedAt() != null} ? ${#temporals.format(p.lastCountedAt(), 'dd MMM yyyy')} : 'Never'">Never</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <th:block th:if="${#lists.isEmpty(places)}">
+      <div th:replace="~{fragments/ui :: emptyState('bi-box', 'None held here', 'This item holds no stock at this branch.')}"></div>
+    </th:block>
+    <p class="small text-body-secondary mt-2 mb-0" th:if="${#lists.contains(places.![cacheDiffers()], true)}">
+      Where the balance and the ledger disagree, the ledger is the record; the daily close reports the difference.</p>
+  </section>
+
+  <section class="hb-card hb-card-body">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-list-ul" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Movements here</h2>
+          <p class="card-sub">Newest first; none at a place being counted</p>
+        </div>
+      </div>
+      <a th:href="@{/stock/movements(item=${item.itemId()})}" class="view-all" th:if="${moreMovements}">All movements</a>
+    </div>
+    <div th:replace="~{stock/fragments :: movementTable(${movements})}"></div>
+  </section>
+
+</div>
+
+</body>
+</html>

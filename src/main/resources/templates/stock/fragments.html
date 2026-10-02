@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- ===================================================================
+     The counts under way at the branch, and what they hide. A count is
+     blind until its verification is signed (V15): the places it counts
+     show no quantity, value or movement, and are left out of every total.
+     =================================================================== -->
+<th:block th:fragment="liveCounts(counts)">
+  <div class="release-blocked mb-3" role="status" th:unless="${#lists.isEmpty(counts)}">
+    <i class="bi bi-eye-slash" aria-hidden="true"></i>
+    <div>
+      <strong th:text="${#lists.size(counts) == 1} ? 'A count is under way here' : ${#lists.size(counts)} + ' counts are under way here'">A count is under way here</strong>
+      <span>Until its verification is signed, the places it counts show no quantity, value or movement, and are left
+        out of every total: the count is blind.
+        <th:block th:each="c, it : ${counts}"><a th:href="@{'/counts/' + ${c.documentId()}}" class="mono" th:text="${c.serialNo()}">CNT-KGL-2026-0003</a>
+          (<span th:text="${c.scope() == 'FULL'} ? 'all of ' : 'items at '">all of </span><span class="mono" th:text="${c.locationCode()}">KGL-MAIN</span>)<span th:unless="${it.last}">, </span></th:block>.
+      </span>
+    </div>
+  </div>
+</th:block>
+
+<!-- ===================================================================
+     Ledger movements, newest first, with the document each answers to.
+     =================================================================== -->
+<div th:fragment="movementTable(movements)">
+  <div class="table-responsive" th:unless="${#lists.isEmpty(movements)}">
+    <table class="table hb-table mb-0">
+      <thead>
+        <tr>
+          <th scope="col">Date</th>
+          <th scope="col">Document</th>
+          <th scope="col">Item</th>
+          <th scope="col">Where</th>
+          <th scope="col" class="num">Quantity</th>
+          <th scope="col" class="num">Value</th>
+          <th scope="col" class="num">Balance after</th>
+          <th scope="col">Posted by</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="m : ${movements}">
+          <td class="mono small text-nowrap">
+            <span th:text="${#temporals.format(m.businessDate(), 'dd MMM yyyy')}">01 Oct 2026</span>
+            <span class="d-block text-body-secondary" th:text="${m.movementAt() != null} ? ${#temporals.format(m.movementAt(), 'HH:mm')} : ''">14:02</span>
+          </td>
+          <td>
+            <a th:href="@{'/documents/' + ${m.documentId()}}" class="mono" th:text="${m.serialNo()}">GRN-KGL-2026-0412</a>
+            <span class="d-block small text-body-secondary">
+              <span th:text="${m.documentType()}">Goods Received Note</span><th:block th:if="${m.movementType()}"> ·
+              <span class="mono" th:text="${m.movementType()}">RECEIPT</span></th:block>
+            </span>
+            <span class="d-block small text-body-secondary" th:if="${m.reversesMovementId() != null}"
+                  th:text="'Reverses movement ' + ${m.reversesMovementId()}">Reverses movement 812</span>
+          </td>
+          <td>
+            <a th:href="@{'/stock/items/' + ${m.itemId()}}" class="mono" th:text="${m.itemCode()}">GL-CLR-6</a>
+            <span class="d-block small" th:text="${m.itemDescription()}">Clear float 6mm</span>
+          </td>
+          <td class="mono small">
+            <span th:text="${m.locationCode()}">KGL-MAIN</span><span class="text-body-secondary" th:if="${m.binCode()}" th:text="' · ' + ${m.binCode()}"> · A1-02</span>
+          </td>
+          <td class="num mono" th:classappend="${m.direction() == 'OUT'} ? 'text-danger'"
+              th:text="${#numbers.formatDecimal(m.quantity(), 1, 'COMMA', 3, 'POINT')} + ' ' + ${m.uom()}">+240.000 SHEET</td>
+          <td class="num mono" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">240,000.00</td>
+          <td class="num mono" th:text="${#numbers.formatDecimal(m.runningBalance(), 1, 'COMMA', 3, 'POINT')}">480.000</td>
+          <td class="small" th:text="${m.postedBy()}">Jeanne Uwase</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <th:block th:if="${#lists.isEmpty(movements)}">
+    <div th:replace="~{fragments/ui :: emptyState('bi-list-ul', 'No movements', 'Nothing has moved here that matches.')}"></div>
+  </th:block>
+</div>
+
+</body>
+</html>

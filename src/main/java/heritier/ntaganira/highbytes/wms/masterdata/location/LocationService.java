@@ -50,12 +50,17 @@ public class LocationService {
                    l.location_type, l.is_bonded, l.is_sellable, l.is_active,
                    COALESCE(bins.n, 0)      AS bin_count,
                    COALESCE(stock.items, 0) AS distinct_items,
-                   COALESCE(stock.value, 0) AS total_value
+                   COALESCE(stock.value, 0) AS total_value,
+                   COALESCE(stock.held, 0) > 0 AS holds_stock
               FROM location l
               JOIN branch b ON b.id = l.branch_id
          LEFT JOIN LATERAL (SELECT COUNT(*) AS n FROM storage_bin sb
                              WHERE sb.location_id = l.id AND sb.is_active) bins ON TRUE
-         LEFT JOIN LATERAL (SELECT COUNT(*) AS items, SUM(sb.total_value) AS value
+         -- What is shown leaves out a place under a live count (V15); whether the location holds anything at
+         -- all still counts every place, since it decides what may change.
+         LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE count_freezing(sb.item_id, sb.location_id) IS NULL) AS items,
+                                   SUM(sb.total_value) FILTER (WHERE count_freezing(sb.item_id, sb.location_id) IS NULL) AS value,
+                                   COUNT(*) AS held
                               FROM stock_balance sb
                              WHERE sb.location_id = l.id AND sb.qty_on_hand <> 0) stock ON TRUE
             """;
@@ -95,9 +100,12 @@ public class LocationService {
     public List<BinRow> binsIn(UUID locationId) {
         return jdbc.sql("""
                 SELECT sb.id, sb.bin_code, sb.zone, sb.is_active,
-                       COALESCE(held.items, 0) AS distinct_items
+                       COALESCE(held.items, 0) AS distinct_items,
+                       COALESCE(held.n, 0) > 0 AS holds_stock
                   FROM storage_bin sb
-             LEFT JOIN LATERAL (SELECT COUNT(*) AS items FROM stock_balance b
+             LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE count_freezing(b.item_id, b.location_id) IS NULL) AS items,
+                                       COUNT(*) AS n
+                                  FROM stock_balance b
                                  WHERE b.storage_bin_id = sb.id AND b.qty_on_hand <> 0) held ON TRUE
                  WHERE sb.location_id = :locationId
                  ORDER BY sb.is_active DESC, sb.bin_code
@@ -108,7 +116,8 @@ public class LocationService {
                         rs.getString("bin_code"),
                         rs.getString("zone"),
                         rs.getBoolean("is_active"),
-                        rs.getInt("distinct_items")))
+                        rs.getInt("distinct_items"),
+                        rs.getBoolean("holds_stock")))
                 .list();
     }
 
@@ -355,12 +364,12 @@ public class LocationService {
                 rs.getInt("bin_count"),
                 rs.getInt("distinct_items"),
                 rs.getBigDecimal("total_value") == null
-                        ? BigDecimal.ZERO : rs.getBigDecimal("total_value"));
+                        ? BigDecimal.ZERO : rs.getBigDecimal("total_value"),
+                rs.getBoolean("holds_stock"));
     }
 
-    public record BinRow(UUID id, String binCode, String zone, boolean active, int distinctItems) {
-        public boolean holdsStock() { return distinctItems > 0; }
-    }
+    /** {@code distinctItems} leaves out places under a live count; {@code holdsStock} counts every place. */
+    public record BinRow(UUID id, String binCode, String zone, boolean active, int distinctItems, boolean holdsStock) {}
 
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public static class LocationNotFoundException extends RuntimeException {

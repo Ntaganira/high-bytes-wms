@@ -183,6 +183,8 @@ public class DamageLookupService {
                   JOIN uom bu ON bu.id = i.base_uom_id
              LEFT JOIN storage_bin b ON b.id = sb.storage_bin_id
                  WHERE sb.location_id = :location AND l.branch_id = :branch AND sb.qty_on_hand > 0
+                   -- A place under a live count shows no book, and nothing moves from it (V15).
+                   AND count_freezing(sb.item_id, sb.location_id) IS NULL
                  ORDER BY i.item_code, b.bin_code NULLS FIRST
                 """)
                 .param("location", locationId, Types.OTHER)
@@ -358,6 +360,8 @@ public class DamageLookupService {
                   JOIN uom bu     ON bu.id = i.base_uom_id
              LEFT JOIN storage_bin b ON b.id = sb.storage_bin_id
                  WHERE l.branch_id = :branch AND sb.qty_on_hand > 0
+                   -- A place under a live count shows no book, and nothing moves from it (V15).
+                   AND count_freezing(sb.item_id, sb.location_id) IS NULL
                  ORDER BY l.code, i.item_code, b.bin_code NULLS FIRST
                 """)
                 .param("branch", branchId, Types.OTHER)

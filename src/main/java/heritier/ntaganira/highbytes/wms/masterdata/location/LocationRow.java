@@ -27,9 +27,7 @@ public record LocationRow(
         boolean active,
         int binCount,
         int distinctItems,
-        BigDecimal totalValue
-) {
-    public boolean holdsStock() {
-        return distinctItems > 0;
-    }
-}
+        BigDecimal totalValue,
+        // Items and value leave out places under a live count (V15); whether it holds anything counts every place.
+        boolean holdsStock
+) {}
