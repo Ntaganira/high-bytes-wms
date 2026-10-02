@@ -283,8 +283,9 @@ class DispatchScreensTest extends IntegrationTest {
                 .andExpect(header().string("Location", "/delivery-notes/" + draftNote));
         UUID ticket = jdbc.sql("SELECT document_id FROM transaction_ticket WHERE source_document_id = :id")
                 .param("id", postedNote).query(UUID.class).single();
+        // The gate's Warehouse Manager reads tickets, so the ticket opens on its own page, which names the note.
         mvc.perform(as(gate, get("/documents/" + ticket)))
-                .andExpect(header().string("Location", "/delivery-notes/" + postedNote));
+                .andExpect(header().string("Location", "/tickets/" + ticket));
     }
 
     // ---- 403 for those who do not hold the right -----------------------------------------------

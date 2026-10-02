@@ -129,7 +129,8 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── transfer/  inter-branch transfers and their receipts (via TRANSIT)
 │   ├── damage/    write-offs, transit losses, customer returns, quarantine
 │   ├── count/     stock counts (blind, verified, frozen) and the variance report
-│   └── stock/     stock balances by item and place, and the ledger, read-only
+│   ├── stock/     stock balances by item and place, and the ledger, read-only
+│   └── ticket/    transaction tickets read: the register, one ticket and the signatures behind it
 │                  NOT BUILT — cutting
 └── reporting/
     └── close/     the daily close: reconciled by Finance, countersigned and
@@ -247,7 +248,8 @@ made `daily_close`; V16 gave it its rules.
   leaves out the places where `count_freezing(item, location)` is not null:
   the stock screens, the dashboard (value, received, the chart, low stock,
   recent movements), the item list's totals, the location pages' item
-  counts and value, the document forms' stock lookups, and the balance
+  counts and value, the document forms' stock lookups, the transaction
+  tickets (register and page: no quantity, value or balance), and the balance
   after on a posted GRN or DN. Left out, never subtracted, so no total
   gives the book away. Which places are being counted is read from the
   counts' sheets, never from the book, so an empty place reads like a full
