@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Search</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">SEARCH</p>
+    <h1 class="page-title" th:if="${tooShort}">Search</h1>
+    <h1 class="page-title" th:unless="${tooShort}">Results for <span class="mono" th:text="${q}">GRN-KGL</span></h1>
+    <p class="page-sub">Serials and references, item codes and descriptions, locations, suppliers and customers:
+      each searched only as far as your rights reach. A serial typed whole opens its document.</p>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/search}" role="search">
+    <div class="d-flex gap-2">
+      <label for="searchAgain" class="visually-hidden">Search</label>
+      <input id="searchAgain" name="q" type="search" class="form-control" th:value="${q}" minlength="2"
+             placeholder="Serial, item code, location, supplier or customer" autofocus>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> Search</button>
+    </div>
+  </form>
+
+  <th:block th:if="${tooShort}">
+    <section class="hb-card hb-card-body">
+      <div th:replace="~{fragments/ui :: emptyState('bi-search', 'Type at least two characters', 'A serial, an item code, a location, or part of a name.')}"></div>
+    </section>
+  </th:block>
+
+  <th:block th:if="${!tooShort and nothing}">
+    <section class="hb-card hb-card-body">
+      <div th:replace="~{fragments/ui :: emptyState('bi-search', 'Nothing found', 'Nothing you may read matches. Try fewer characters, or part of a serial.')}"></div>
+    </section>
+  </th:block>
+
+  <th:block th:unless="${tooShort}">
+
+    <section class="hb-card hb-card-body mb-3" th:if="${!#lists.isEmpty(documents)}">
+      <div class="card-head">
+        <div class="card-title-row">
+          <i class="bi bi-files" aria-hidden="true"></i>
+          <h2 class="card-title">Documents</h2>
+        </div>
+        <a class="view-all" th:href="@{/documents(q=${q})}">All matching documents</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table hb-table compact align-middle mb-0">
+          <tbody>
+          <tr th:each="d : ${documents}">
+            <td>
+              <a class="doc-link mono" th:if="${d.openHere()}" th:href="@{'/documents/' + ${d.id()}}"
+                 th:text="${d.serialNo()}">GRN-KGL-2026-0412</a>
+              <span class="mono fw-semibold" th:unless="${d.openHere()}" th:text="${d.serialNo()}">GRN-RBV-2026-0007</span>
+              <div class="small text-body-secondary" th:text="${d.typeName()} + ' · ' + ${d.branchName()}">Goods Received Note · Gahanga</div>
+            </td>
+            <td><span th:replace="~{fragments/ui :: chip(${d.status()})}"></span></td>
+            <td class="small" th:text="${d.standing()}">Posted 02 Oct 2026 by Finance</td>
+            <td class="text-end text-nowrap">
+              <th:block th:unless="${d.openHere()}">
+                <form th:replace="~{fragments/ui :: switchAndOpen(${d.branchId()}, ${d.branchCode()}, ${d.branchName()}, ${d.id()})}"></form>
+              </th:block>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small text-body-secondary mt-2 mb-0" th:if="${moreDocuments}">More match: the register lists them all.</p>
+    </section>
+
+    <th:block th:replace="~{::hits('Items', 'bi-grid-3x3-gap', ${items})}"></th:block>
+    <th:block th:replace="~{::hits('Locations', 'bi-geo-alt', ${locations})}"></th:block>
+    <th:block th:replace="~{::hits('Suppliers', 'bi-shop', ${suppliers})}"></th:block>
+    <th:block th:replace="~{::hits('Customers', 'bi-people', ${customers})}"></th:block>
+
+    <p class="small text-body-secondary" th:if="${moreItems}">More items match: narrow the words, or use the
+      <a th:href="@{/items(q=${q})}">item list</a>.</p>
+  </th:block>
+
+</div>
+<!-- One section of master-data hits: shown only when something was found. -->
+<th:block th:fragment="hits(title, icon, hits)">
+  <section class="hb-card hb-card-body mb-3" th:if="${!#lists.isEmpty(hits)}">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi" th:classappend="${icon}" aria-hidden="true"></i>
+        <h2 class="card-title" th:text="${title}">Items</h2>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table hb-table compact align-middle mb-0">
+        <tbody>
+        <tr th:each="h : ${hits}">
+          <td class="text-nowrap"><a class="doc-link mono" th:href="@{${h.href()}}" th:text="${h.code()}">GL-CF-6</a></td>
+          <td th:text="${h.name()}">Clear float 6 mm</td>
+          <td class="small text-body-secondary" th:text="${h.detail()}">Glass</td>
+          <td class="text-end">
+            <th:block th:if="${!h.active()}"><span th:replace="~{fragments/ui :: chip('INACTIVE')}"></span></th:block>
+          </td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</th:block>
+
+</body>
+</html>

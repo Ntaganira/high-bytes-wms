@@ -122,6 +122,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   └── customer/  customers, blocking (Finance, partner.manage)
 ├── document/      the spine: serials, chain binding, submit, sign, cancel; the register of every document
 ├── approval/      the approval queue: what waits on the reader's signature, every branch
+├── search/        the search box: documents and master data, as far as the reader's rights reach
 ├── inventory/
 │   ├── ledger/    the only writer of stock_movement and stock_balance
 │   ├── receiving/ Goods Received Notes
