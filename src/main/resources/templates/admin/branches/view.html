@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${branch.name()}">Branch</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">ADMINISTRATION · BRANCH</p>
+      <h1 class="page-title" th:text="${branch.name()}">BBF Public Bonded Warehouse</h1>
+      <p class="page-sub d-flex flex-wrap align-items-center gap-2">
+        <span class="mono" th:text="${branch.code()}">RBV</span>
+        <span th:replace="~{fragments/ui :: chip(${branch.status()})}"></span>
+        <th:block th:if="${branch.bonded()}"><span th:replace="~{fragments/ui :: chip('BONDED')}"></span></th:block>
+      </p>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-start gap-2">
+      <a th:href="@{'/admin/branches/' + ${branch.id()} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit details
+      </a>
+
+      <!-- Offered only when it could succeed; the database refuses the rest anyway. -->
+      <details class="inline-action" th:if="${branch.active() and blocker == null}">
+        <summary class="btn btn-outline-danger"><i class="bi bi-slash-circle"></i> Deactivate</summary>
+        <form th:action="@{'/admin/branches/' + ${branch.id()} + '/deactivate'}" method="post"
+              class="hb-card hb-card-body small" style="max-width: 24rem">
+          <label for="deactivateReason" class="form-label fw-semibold" style="color: var(--color-heading)">Reason</label>
+          <input id="deactivateReason" name="reason" class="form-control form-control-sm mb-2" required maxlength="400"
+                 placeholder="Lease ended; stock moved to Gahanga">
+          <p class="mb-2 text-body-secondary">Nothing new starts here once it closes: no document, location, role or
+            transfer. Its records stay, and it can be reactivated.</p>
+          <button type="submit" class="btn btn-sm btn-danger">Deactivate branch</button>
+        </form>
+      </details>
+      <form th:if="${!branch.active()}" th:action="@{'/admin/branches/' + ${branch.id()} + '/reactivate'}"
+            method="post" class="m-0">
+        <button type="submit" class="btn btn-outline-success"><i class="bi bi-arrow-counterclockwise"></i> Reactivate</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${branch.active() and blocker != null}">
+    <i class="bi bi-lock" aria-hidden="true"></i>
+    <div>
+      <strong>Not ready to close</strong>
+      <span th:text="${blocker}">BBF still holds stock.</span>
+    </div>
+  </div>
+
+  <div class="release-blocked mb-3" role="status" th:if="${!branch.active()}">
+    <i class="bi bi-slash-circle" aria-hidden="true"></i>
+    <div>
+      <strong>Closed</strong>
+      <span>Nothing new starts here: no document, location, role or transfer. Its documents, ledger and trail stay
+        on record.</span>
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-5">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-info-circle" aria-hidden="true"></i>
+            <h2 class="card-title">Details</h2>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-body-secondary fw-normal">Kind</dt>
+          <dd class="col-7" th:text="${branch.branchType().label()}">Bonded warehouse</dd>
+          <dt class="col-5 text-body-secondary fw-normal">City</dt>
+          <dd class="col-7"><span th:text="${branch.city()} ?: '—'">Rubavu</span>
+            <span class="mono text-body-secondary" th:text="${branch.countryCode()}">RW</span></dd>
+          <dt class="col-5 text-body-secondary fw-normal">Customs regime</dt>
+          <dd class="col-7" th:text="${branch.bonded()} ? ${branch.customsRegime()} : 'Not bonded'">Public bonded warehouse</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Code</dt>
+          <dd class="col-7"><span class="mono" th:text="${branch.code()}">RBV</span>
+            <span class="text-body-secondary">· fixed: serials print it</span></dd>
+          <dt class="col-5 text-body-secondary fw-normal">Kind and bonding</dt>
+          <dd class="col-7" th:text="${branch.hasHistory()} ? 'Fixed: documents have been raised or stock has moved here' : 'May still change: nothing has happened here yet'">Fixed</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Created</dt>
+          <dd class="col-7 mono" th:text="${#temporals.format(branch.createdAt(), 'dd MMM yyyy')}">29 Sep 2026</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-7">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-geo-alt" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Locations</h2>
+              <p class="card-sub">Added and changed by the Warehouse Manager, under Master data</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive" th:unless="${#lists.isEmpty(places)}">
+          <table class="table hb-table mb-0">
+            <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">State</th></tr></thead>
+            <tbody>
+              <tr th:each="p : ${places}" th:classappend="${!p.active()} ? 'opacity-75'">
+                <td class="mono" th:text="${p.code()}">RBV-BOND</td>
+                <td th:text="${p.name()}">Bonded store</td>
+                <td th:text="${#strings.capitalize(#strings.toLowerCase(p.locationType()))}">Bonded</td>
+                <td><span th:replace="~{fragments/ui :: chip(${p.active() ? 'ACTIVE' : 'INACTIVE'})}"></span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <th:block th:if="${#lists.isEmpty(places)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-geo-alt', 'No locations', 'Nothing can be received or held here until the Warehouse Manager adds a location. A transfer from here needs a TRANSIT location too.')}"></div>
+        </th:block>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-people" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Who works here</h2>
+              <p class="card-sub">Roles given at this branch alone, in force or due to start. A role given at every
+                branch applies here too and is not listed.</p>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive" th:unless="${#lists.isEmpty(people)}">
+          <table class="table hb-table mb-0">
+            <thead><tr><th scope="col">Person</th><th scope="col">Role</th><th scope="col">Until</th></tr></thead>
+            <tbody>
+              <tr th:each="p : ${people}">
+                <td>
+                  <a th:href="@{'/admin/users/' + ${p.userId()}}" th:text="${p.fullName()}">Jeanne Uwase</a>
+                  <span class="d-block small text-body-secondary mono" th:text="${p.username()}">juwase</span>
+                </td>
+                <td>
+                  <span th:text="${p.roleName()}">Warehouse Manager</span>
+                  <span class="d-block small text-body-secondary" th:if="${p.delegation()}">Leave cover</span>
+                </td>
+                <td class="mono" th:text="${p.validTo() != null} ? ${#temporals.format(p.validTo(), 'dd MMM yyyy')} : '—'">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <th:block th:if="${#lists.isEmpty(people)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-people', 'Nobody is given a role here alone', 'Roles are given from each person’s user page.')}"></div>
+        </th:block>
+      </section>
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Change history</h2>
+              <p class="card-sub">Every change to this branch, newest first</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No changes recorded', 'Changes to this branch will be listed here.')}"></div>
+        </th:block>
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

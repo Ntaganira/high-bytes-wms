@@ -376,12 +376,14 @@ EXCEPTION WHEN others THEN RAISE NOTICE 'ok    6b  audit log refuses DELETE';
 END $$;
 
 -- ---------------------------------------------------------------------
--- 7. Workflow definitions cannot overlap
+-- 7. Workflow definitions cannot overlap, not even by migration
 -- ---------------------------------------------------------------------
 DO $$ BEGIN
+  PERFORM set_config('highbytes.migration', 'on', true);
   INSERT INTO workflow_definition (document_type_id, version, effective_from, effective_to, basis)
   SELECT id, 999, DATE '2026-09-01', DATE '2027-06-01', 'POLICY_2026'
     FROM document_type WHERE code = 'DAO';
+  PERFORM set_config('highbytes.migration', 'off', true);
   RAISE WARNING 'FAIL  7   two workflow definitions cover the same day';
 EXCEPTION WHEN exclusion_violation THEN RAISE NOTICE 'ok    7   workflow definitions cannot overlap';
 END $$;
@@ -539,15 +541,21 @@ DO $$ BEGIN
 EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12e  an administrator cannot also manage master data';
 END $$;
 
--- A role that administers cannot be made a signer of an approval chain.
-DO $$ BEGIN
+-- A role that administers cannot be made a signer of an approval chain,
+-- not even by a migration, the only way a step is added (V17). The chain is
+-- one of the check's own, which no document is bound to whatever the date,
+-- so the access rule is what refuses.
+DO $$
+DECLARE t UUID; wd UUID;
+BEGIN
+  PERFORM set_config('highbytes.migration', 'on', true);
+  INSERT INTO document_type (code, name, moves_stock) VALUES ('_VFG', 'Verification signer type', FALSE)
+  RETURNING id INTO t;
+  INSERT INTO workflow_definition (document_type_id, version, effective_from, basis)
+  VALUES (t, 1, DATE '2026-01-01', 'POLICY_2026') RETURNING id INTO wd;
   INSERT INTO workflow_step (workflow_definition_id, sequence_no, required_role_id, action_label)
-  SELECT wd.id, 99, r.id, 'APPROVE'
-    FROM workflow_definition wd
-    JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'TRF'
-    JOIN role r ON r.code = '_VERIFY_MIXED'
-   ORDER BY wd.effective_from DESC
-   LIMIT 1;
+  SELECT wd, 1, r.id, 'APPROVE' FROM role r WHERE r.code = '_VERIFY_MIXED';
+  PERFORM set_config('highbytes.migration', 'off', true);
   RAISE WARNING 'FAIL 12g  an administration role was made to sign an approval step';
 EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   12g  an administration role cannot sign approval steps';
 END $$;
@@ -1396,12 +1404,15 @@ DECLARE d UUID; t UUID; wd UUID;
 BEGIN
     INSERT INTO document_type (code, name, moves_stock) VALUES ('_VFY', 'Verification non-stock type', FALSE)
     RETURNING id INTO t;
+    -- A chain is added only by a migration (V17).
+    PERFORM set_config('highbytes.migration', 'on', true);
     INSERT INTO workflow_definition (document_type_id, version, effective_from, basis)
     VALUES (t, 1, DATE '2026-01-01', 'POLICY_2026') RETURNING id INTO wd;
     INSERT INTO workflow_step (workflow_definition_id, sequence_no, required_role_id, action_label)
     SELECT wd, v.seq, r.id, v.act
       FROM (VALUES (1, 'WH_MANAGER', 'PREPARE'), (2, 'FINANCE', 'APPROVE')) AS v(seq, role_code, act)
       JOIN role r ON r.code = v.role_code;
+    PERFORM set_config('highbytes.migration', 'off', true);
     INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
     SELECT t, b.id, '_VERIFY-NONSTOCK-31', pg_temp.verify_user() FROM branch b WHERE b.code = 'KGL'
     RETURNING id INTO d;
@@ -4806,6 +4817,248 @@ SELECT pg_temp.refuses('64n', 'an open day was locked without being reconciled',
       WHERE id = pg_temp.close_row(kigali_today() - 1)$q$,
   '23Z02', '%is not a step%');
 
+-- =====================================================================
+-- The administration rules (V17): an approval chain's steps change only
+-- by migration and never once documents are bound to it; outside a
+-- migration only a switchover still to come moves. A branch keeps its
+-- code, and its type once it has a past, and closes only when finished.
+-- =====================================================================
+CREATE FUNCTION pg_temp.chain(p_type TEXT, p_basis TEXT) RETURNS UUID AS $$
+    SELECT wd.id FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
+     WHERE dt.code = p_type AND wd.basis = p_basis;
+$$ LANGUAGE sql;
+
+-- The 2027 switch is still to come; once it has passed there is none to move.
+CREATE FUNCTION pg_temp.before_switch(p_label TEXT) RETURNS BOOLEAN AS $$
+BEGIN
+    IF kigali_today() >= DATE '2026-12-31' THEN
+        RAISE NOTICE 'ok   % (skipped: the 2027 switch is too close to move)', p_label;
+        RETURN FALSE;
+    END IF;
+    RETURN TRUE;
+END $$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------
+-- 65. Approval chains: steps by migration only, never once bound; dates
+--     forward only, both chains of a switchover together
+-- ---------------------------------------------------------------------
+-- Cutting is not built: nothing is bound to its chain.
+SELECT pg_temp.refuses('65a', 'a step was added to a chain outside a migration',
+  $q$INSERT INTO workflow_step (workflow_definition_id, sequence_no, required_role_id, action_label)
+     SELECT pg_temp.chain('CUT', 'POLICY_2026'), 9, id, 'APPROVE' FROM role WHERE code = 'MANAGING_DIR'$q$,
+  '23Z02', '%reviewed migration%');
+SELECT pg_temp.refuses('65b', 'a chain''s signer was changed outside a migration',
+  $q$UPDATE workflow_step SET required_role_id = (SELECT id FROM role WHERE code = 'MANAGING_DIR')
+      WHERE workflow_definition_id = pg_temp.chain('CUT', 'POLICY_2026') AND sequence_no = 3$q$,
+  '23Z02', '%reviewed migration%');
+SELECT pg_temp.refuses('65c', 'a step was removed from a chain outside a migration',
+  $q$DELETE FROM workflow_step WHERE workflow_definition_id = pg_temp.chain('CUT', 'POLICY_2026') AND sequence_no = 2$q$,
+  '23Z02', '%reviewed migration%');
+DO $$
+BEGIN
+    PERFORM set_config('highbytes.migration', 'on', true);
+    UPDATE workflow_step SET action_label = 'VERIFY'
+     WHERE workflow_definition_id = (SELECT workflow_definition_id FROM document WHERE id = pg_temp.fx_id('g_ok'))
+       AND sequence_no = 1;
+    PERFORM set_config('highbytes.migration', 'off', true);
+    RAISE WARNING 'FAIL 65d  a migration changed a step of a chain documents are bound to';
+EXCEPTION WHEN OTHERS THEN
+    IF SQLSTATE = '23Z02' AND SQLERRM ILIKE '%bound to%never change%' THEN
+        RAISE NOTICE 'ok   65d  not even a migration changes a step of a chain documents are bound to';
+    ELSE
+        RAISE WARNING 'FAIL 65d  refused for another reason (%): %', SQLSTATE, SQLERRM;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('65e', 'a chain was added outside a migration',
+  $q$INSERT INTO workflow_definition (document_type_id, version, effective_from, basis)
+     SELECT id, 2, DATE '2030-01-01', 'RESTRUCTURE_2027' FROM document_type WHERE code = 'CUT'$q$,
+  '23Z02', '%reviewed migration%');
+SELECT pg_temp.refuses('65f', 'a chain was removed outside a migration',
+  $q$DELETE FROM workflow_definition WHERE id = pg_temp.chain('CUT', 'POLICY_2026')$q$,
+  '23Z02', '%reviewed migration%');
+DO $$
+BEGIN
+    PERFORM set_config('highbytes.migration', 'on', true);
+    DELETE FROM workflow_definition WHERE id = (SELECT workflow_definition_id FROM document WHERE id = pg_temp.fx_id('g_ok'));
+    PERFORM set_config('highbytes.migration', 'off', true);
+    RAISE WARNING 'FAIL 65g  a migration removed a chain documents are bound to';
+EXCEPTION WHEN OTHERS THEN
+    IF SQLSTATE = '23Z02' AND SQLERRM ILIKE '%never removed%' THEN
+        RAISE NOTICE 'ok   65g  not even a migration removes a chain documents are bound to';
+    ELSE
+        RAISE WARNING 'FAIL 65g  refused for another reason (%): %', SQLSTATE, SQLERRM;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('65h', 'a chain''s notes were rewritten outside a migration',
+  $q$UPDATE workflow_definition SET notes = 'Rewritten' WHERE id = pg_temp.chain('GRN', 'RESTRUCTURE_2027')$q$,
+  '23Z02', '%Only the dates%');
+-- A type whose switchover has passed (1 June 2026), made as a migration makes one.
+DO $$
+DECLARE t UUID;
+BEGIN
+    PERFORM set_config('highbytes.migration', 'on', true);
+    INSERT INTO document_type (code, name, moves_stock) VALUES ('_VFH', 'Verification history type', FALSE)
+    RETURNING id INTO t;
+    INSERT INTO workflow_definition (document_type_id, version, effective_from, effective_to, basis)
+    VALUES (t, 1, DATE '2026-01-01', DATE '2026-06-01', 'POLICY_2026'),
+           (t, 2, DATE '2026-06-01', NULL, 'RESTRUCTURE_2027');
+    PERFORM set_config('highbytes.migration', 'off', true);
+END $$;
+SELECT pg_temp.refuses('65i', 'a switchover that has passed was moved (the start of the chain in force)',
+  $q$UPDATE workflow_definition SET effective_from = DATE '2026-08-01'
+      WHERE document_type_id = (SELECT id FROM document_type WHERE code = '_VFH') AND version = 2$q$,
+  '23Z02', '%history%');
+SELECT pg_temp.refuses('65p', 'a switchover that has passed was moved (the end of the chain before it)',
+  $q$UPDATE workflow_definition SET effective_to = DATE '2026-08-01'
+      WHERE document_type_id = (SELECT id FROM document_type WHERE code = '_VFH') AND version = 1$q$,
+  '23Z02', '%history%');
+SELECT pg_temp.refuses('65k', 'an open-ended chain was given an end outside a migration',
+  $q$UPDATE workflow_definition SET effective_to = DATE '2031-01-01' WHERE id = pg_temp.chain('GRN', 'RESTRUCTURE_2027')$q$,
+  '23Z02', '%reviewed migration%');
+DO $$ BEGIN
+    IF NOT pg_temp.before_switch('65j') THEN RETURN; END IF;
+    PERFORM pg_temp.refuses('65j', 'a switchover was brought to today, a day already begun',
+      $q$UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = pg_temp.chain('GRN', 'POLICY_2026')$q$,
+      '23Z02', '%day already begun%');
+END $$;
+DO $$ BEGIN
+    IF NOT pg_temp.before_switch('65l') THEN RETURN; END IF;
+    PERFORM pg_temp.refuses('65l', 'one chain of a switchover moved alone, leaving days with no chain in force',
+      $q$UPDATE workflow_definition SET effective_from = DATE '2027-02-01' WHERE id = pg_temp.chain('GRN', 'RESTRUCTURE_2027')$q$,
+      '23Z02', '%would be in force%');
+END $$;
+DO $$
+DECLARE
+    v1 UUID := pg_temp.chain('GRN', 'POLICY_2026');
+    v2 UUID := pg_temp.chain('GRN', 'RESTRUCTURE_2027');
+BEGIN
+    IF NOT pg_temp.before_switch('65m') THEN RETURN; END IF;
+    -- Later: the new chain gives way first, so the two never overlap.
+    SET CONSTRAINTS workflow_definition_contiguous DEFERRED;
+    UPDATE workflow_definition SET effective_from = DATE '2027-02-01' WHERE id = v2;
+    UPDATE workflow_definition SET effective_to   = DATE '2027-02-01' WHERE id = v1;
+    SET CONSTRAINTS workflow_definition_contiguous IMMEDIATE;
+    -- And back: the old chain gives way first.
+    SET CONSTRAINTS workflow_definition_contiguous DEFERRED;
+    UPDATE workflow_definition SET effective_to   = DATE '2027-01-01' WHERE id = v1;
+    UPDATE workflow_definition SET effective_from = DATE '2027-01-01' WHERE id = v2;
+    SET CONSTRAINTS workflow_definition_contiguous IMMEDIATE;
+    RAISE NOTICE 'ok   65m  a switchover still to come moves, both chains together, and back';
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL 65m  a switchover still to come could not be moved (%): %', SQLSTATE, SQLERRM;
+END $$;
+-- A type whose one chain runs from a day to come until a later one, made
+-- as a migration makes one.
+DO $$
+DECLARE t UUID;
+BEGIN
+    PERFORM set_config('highbytes.migration', 'on', true);
+    INSERT INTO document_type (code, name, moves_stock) VALUES ('_VFE', 'Verification ending type', FALSE)
+    RETURNING id INTO t;
+    INSERT INTO workflow_definition (document_type_id, version, effective_from, effective_to, basis)
+    VALUES (t, 1, DATE '2030-01-01', DATE '2031-01-01', 'POLICY_2026');
+    PERFORM set_config('highbytes.migration', 'off', true);
+END $$;
+SELECT pg_temp.refuses('65n', 'the end of a chain that gives way to no other was moved outside a migration',
+  $q$UPDATE workflow_definition SET effective_to = DATE '2030-06-01'
+      WHERE document_type_id = (SELECT id FROM document_type WHERE code = '_VFE')$q$,
+  '23Z02', '%gives way to no other%');
+SELECT pg_temp.refuses('65o', 'the start of a chain that follows no other was moved outside a migration',
+  $q$UPDATE workflow_definition SET effective_from = DATE '2030-06-01'
+      WHERE document_type_id = (SELECT id FROM document_type WHERE code = '_VFE')$q$,
+  '23Z02', '%follows no other%');
+
+-- ---------------------------------------------------------------------
+-- 66. Branches: the code is fixed, the type once there is a past; one
+--     main branch; a branch closes only once finished with, and nothing
+--     new starts at a closed one
+-- ---------------------------------------------------------------------
+SELECT pg_temp.refuses('66a', 'a branch''s code was changed',
+  $q$UPDATE branch SET code = 'KGX' WHERE code = 'KGL'$q$, '23Z02', '%code never changes%');
+SELECT pg_temp.refuses('66b', 'a branch with a past was made bonded',
+  $q$UPDATE branch SET is_bonded = TRUE, customs_regime = 'Public bonded warehouse' WHERE code = 'KGL'$q$,
+  '23Z02', '%are fixed%');
+SELECT pg_temp.refuses('66c', 'a bonded-type branch was not bonded',
+  $q$INSERT INTO branch (code, name, branch_type) VALUES ('_VB', 'Verification Bonded Branch', 'BONDED')$q$, '23514');
+SELECT pg_temp.refuses('66d', 'a second main branch was created',
+  $q$INSERT INTO branch (code, name, branch_type) VALUES ('_VM', 'Verification Main Branch', 'MAIN')$q$, '23505');
+SELECT pg_temp.refuses('66e', 'a branch was named to read exactly like another (a Cyrillic letter)',
+  $q$INSERT INTO branch (code, name, branch_type) VALUES ('_VG', 'Gahanga Main W' || chr(1072) || 'rehouse', 'BRANCH')$q$,
+  '23514');
+SELECT pg_temp.refuses('66f', 'a branch was given another''s name',
+  $q$INSERT INTO branch (code, name, branch_type) VALUES ('_VG', 'GAHANGA MAIN WAREHOUSE', 'BRANCH')$q$, '23505');
+SELECT pg_temp.refuses('66g', 'the main branch was deactivated',
+  $q$UPDATE branch SET is_active = FALSE WHERE code = 'KGL'$q$, '23Z02', '%main branch%');
+SELECT pg_temp.refuses('66h', 'a branch holding stock was deactivated',
+  $q$UPDATE branch SET is_active = FALSE WHERE code = '_VC'$q$, '23Z02', '%still holds stock%');
+SELECT pg_temp.refuses('66i', 'a branch was deleted',
+  $q$DELETE FROM branch WHERE code = '_VC'$q$, '23Z02', '%never deleted%');
+
+-- A branch with no past yet.
+INSERT INTO branch (code, name, branch_type) VALUES ('_VN', 'Verification New Branch', 'BRANCH');
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT id, '_VERIFY-VN', 'Verification new store', 'WAREHOUSE' FROM branch WHERE code = '_VN';
+DO $$ BEGIN
+    UPDATE branch SET branch_type = 'BONDED', is_bonded = TRUE, customs_regime = 'Public bonded warehouse' WHERE code = '_VN';
+    UPDATE branch SET branch_type = 'BRANCH', is_bonded = FALSE, customs_regime = NULL WHERE code = '_VN';
+    RAISE NOTICE 'ok   66j  a branch with no past yet may change its type and whether it is bonded';
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL 66j  a branch with no past could not change type (%): %', SQLSTATE, SQLERRM;
+END $$;
+DO $$
+DECLARE
+    before UUID := (SELECT security_stamp FROM app_user WHERE username = '_verify');
+BEGIN
+    UPDATE branch SET is_active = FALSE WHERE code = '_VN';
+    IF (SELECT security_stamp FROM app_user WHERE username = '_verify') IS DISTINCT FROM before THEN
+        RAISE NOTICE 'ok   66k  a branch finished with is deactivated, and every session reloads where it may work';
+    ELSE
+        RAISE WARNING 'FAIL 66k  deactivating a branch left sessions as they were';
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL 66k  a branch with no past could not be deactivated (%): %', SQLSTATE, SQLERRM;
+END $$;
+SELECT pg_temp.refuses('66l', 'a document was raised at an inactive branch',
+  $q$SELECT pg_temp.make_grn('_VERIFY-VN-1', NULL, '_VN', '_VERIFY-VN')$q$, '23Z02', '%not active%');
+SELECT pg_temp.refuses('66m', 'a location was added at an inactive branch',
+  $q$INSERT INTO location (branch_id, code, name, location_type)
+     SELECT id, '_VERIFY-VN2', 'Verification second store', 'WAREHOUSE' FROM branch WHERE code = '_VN'$q$,
+  '23Z02', '%not active%');
+SELECT pg_temp.refuses('66n', 'a role was granted at an inactive branch',
+  $q$INSERT INTO user_role (user_id, role_id, branch_id, assigned_by)
+     SELECT pg_temp.holder('WH_MANAGER'), r.id, b.id, pg_temp.verify_user()
+       FROM role r, branch b WHERE r.code = 'WH_MANAGER' AND b.code = '_VN'$q$,
+  '23Z02', '%not active%');
+SELECT pg_temp.refuses('66o', 'a transfer was addressed to an inactive branch',
+  $q$SELECT pg_temp.make_trf('_VERIFY-T-VN', 20, NULL, 'KGL-MAIN', '_VERIFY-VN')$q$, '23Z02', '%not active%');
+SELECT pg_temp.accepts('66p', 'an inactive branch is reactivated',
+  $q$UPDATE branch SET is_active = TRUE WHERE code = '_VN'$q$);
+SELECT pg_temp.make_grn('_VERIFY-VN-2', NULL, '_VN', '_VERIFY-VN');
+SELECT pg_temp.refuses('66q', 'a branch with a document still open was deactivated',
+  $q$UPDATE branch SET is_active = FALSE WHERE code = '_VN'$q$, '23Z02', '%still open%');
+
+-- A branch whose stock came and went on a day not yet locked.
+INSERT INTO branch (code, name, branch_type) VALUES ('_VD', 'Verification Done Branch', 'BRANCH');
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT id, '_VERIFY-VD', 'Verification done store', 'WAREHOUSE' FROM branch WHERE code = '_VD';
+SELECT pg_temp.stock_on('_VERIFY-D-IN', '_VD', '_VERIFY-VD', 1, kigali_today() - 6, TRUE);
+DO $$
+DECLARE m RECORD;
+BEGIN
+    SELECT * INTO m FROM stock_movement WHERE branch_id = (SELECT id FROM branch WHERE code = '_VD');
+    PERFORM set_config('session_replication_role', 'replica', true);
+    INSERT INTO stock_movement (document_id, branch_id, item_id, location_id, direction, quantity_base_uom,
+                                signed_quantity, unit_cost, value, running_balance, business_date, posted_by)
+    VALUES (m.document_id, m.branch_id, m.item_id, m.location_id, 'OUT', m.quantity_base_uom,
+            -m.quantity_base_uom, m.unit_cost, m.value, 0, m.business_date, m.posted_by);
+    PERFORM set_config('session_replication_role', 'origin', true);
+END $$;
+SELECT pg_temp.refuses('66r', 'a branch was deactivated with a day on which stock moved not locked',
+  $q$UPDATE branch SET is_active = FALSE WHERE code = '_VD'$q$, '23Z02', '%not locked%');
+SELECT pg_temp.close_day((SELECT id FROM branch WHERE code = '_VD'), kigali_today() - 6);
+SELECT pg_temp.accepts('66s', 'a branch with no stock, nothing open and every day locked is deactivated',
+  $q$UPDATE branch SET is_active = FALSE WHERE code = '_VD'$q$);
+
 -- ---------------------------------------------------------------------
 -- 46. The chain switch for transfers is a row, and a document finishes
 --     under its chain. Skipped once the date passes.
@@ -4823,8 +5076,11 @@ BEGIN
     SELECT wd.id INTO new_def FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
      WHERE dt.code = 'TRF' AND wd.basis = 'RESTRUCTURE_2027';
 
+    -- The date arriving, simulated: only a migration brings a switch to today (V17).
+    PERFORM set_config('highbytes.migration', 'on', true);
     UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = old_def;
     UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = new_def;
+    PERFORM set_config('highbytes.migration', 'off', true);
 
     d := pg_temp.trf_at('_VERIFY-T-2027', 'PENDING');
     SELECT workflow_definition_id INTO bound FROM document WHERE id = d;
@@ -4872,8 +5128,11 @@ BEGIN
     SELECT wd.id INTO new_def FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
      WHERE dt.code = 'DAO' AND wd.basis = 'RESTRUCTURE_2027';
 
+    -- The date arriving, simulated: only a migration brings a switch to today (V17).
+    PERFORM set_config('highbytes.migration', 'on', true);
     UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = old_def;
     UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = new_def;
+    PERFORM set_config('highbytes.migration', 'off', true);
 
     d := pg_temp.dao_at('_VERIFY-D-2027', 'PENDING');
     SELECT workflow_definition_id INTO bound FROM document WHERE id = d;
@@ -4922,8 +5181,11 @@ BEGIN
     SELECT wd.id INTO new_def FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id
      WHERE dt.code = 'GRN' AND wd.basis = 'RESTRUCTURE_2027';
 
+    -- The date arriving, simulated: only a migration brings a switch to today (V17).
+    PERFORM set_config('highbytes.migration', 'on', true);
     UPDATE workflow_definition SET effective_to = kigali_today() WHERE id = old_def;
     UPDATE workflow_definition SET effective_from = kigali_today() WHERE id = new_def;
+    PERFORM set_config('highbytes.migration', 'off', true);
 
     d := pg_temp.make_grn('_VERIFY-G-2027', NULL);
     SELECT workflow_definition_id INTO bound FROM document WHERE id = d;

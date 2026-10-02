@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Workflow Definitions</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">ADMINISTRATION</p>
+    <h1 class="page-title">Workflow Definitions</h1>
+    <p class="page-sub">Who signs each document, in what order, and from when. A document binds to the chain in force on
+      the day it is raised, and finishes under it.</p>
+  </div>
+
+  <div class="release-blocked mb-3" role="status">
+    <i class="bi bi-shield-lock" aria-hidden="true"></i>
+    <div>
+      <strong>The steps are the policy's</strong>
+      <span>A chain's steps, the roles that sign them and their order change only by a reviewed migration, and never
+        once a document is bound to the chain. Whoever administers access does not decide who approves stock leaving.
+        What moves here is the day one version gives way to the next, while that day is still to come, with a reason
+        that is kept.</span>
+    </div>
+  </div>
+
+  <section class="hb-card hb-card-body mb-3" th:each="c : ${chains}">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-diagram-3" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title" th:text="${c.typeName()}">Goods Received Note</h2>
+          <p class="card-sub mono" th:text="${c.formReference()} + ' · ' + ${c.typeCode()}">GRN-001 · GRN</p>
+        </div>
+      </div>
+    </div>
+
+    <th:block th:each="v, it : ${c.versions()}">
+      <div class="chain-version" th:classappend="${v.state() == 'ENDED'} ? 'opacity-75'">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <strong th:text="'Version ' + ${v.version()}" style="color: var(--color-heading)">Version 1</strong>
+          <span th:replace="~{fragments/ui :: chip(${v.state()})}"></span>
+          <span class="mono small"
+                th:text="${#temporals.format(v.effectiveFrom(), 'dd MMM yyyy')} + ' – ' + (${v.lastDay() != null} ? ${#temporals.format(v.lastDay(), 'dd MMM yyyy')} : 'open')">01 Jul 2026 – 31 Dec 2026</span>
+          <span class="text-body-secondary small" th:text="${v.basis() == 'POLICY_2026'} ? '2026 Inventory Policy' : 'Board Paper HB/BD/2026/09-05'">2026 Inventory Policy</span>
+          <span class="text-body-secondary small ms-auto"
+                th:text="${v.boundCount()} == 0 ? 'No document bound yet' : ${v.boundCount()} + ' bound, ' + ${v.openCount()} + ' still open'">412 bound, 3 still open</span>
+        </div>
+        <ol class="list-unstyled mb-2">
+          <li th:each="s : ${v.steps()}" class="d-flex flex-wrap gap-2 align-items-baseline small py-1">
+            <span class="mono text-body-secondary" th:text="${s.sequenceNo()} + ' ·'">1 ·</span>
+            <span class="mono fw-semibold" th:text="${s.actionLabel()}">PREPARE</span>
+            <a th:href="@{'/admin/roles/' + ${s.roleId()}}" th:text="${s.roleName()}">Assistant Warehouse Manager</a>
+            <span class="text-body-secondary" th:unless="${s.mandatory()}">optional</span>
+          </li>
+          <li th:if="${#lists.isEmpty(v.steps())}" class="small text-body-secondary">No steps: nobody would have to sign.</li>
+        </ol>
+        <p class="small text-body-secondary mb-0" th:if="${v.notes()}" th:text="${v.notes()}">Notes.</p>
+      </div>
+
+      <!-- The switchover after this version, when the next one follows it. -->
+      <th:block th:each="sw : ${c.switchovers()}" th:if="${sw.endingId() == v.id()}">
+        <div class="chain-switchover">
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <i class="bi bi-arrow-down-circle" aria-hidden="true"></i>
+            <span>Version <span th:text="${sw.startingVersion()}">2</span> comes into force on
+              <strong class="mono" th:text="${#temporals.format(sw.date(), 'dd MMM yyyy')}">01 Jan 2027</strong></span>
+            <span class="text-body-secondary small" th:unless="${sw.movable()}">· passed, so it stays where it was</span>
+          </div>
+          <details class="inline-action mt-2" th:if="${sw.movable()}">
+            <summary class="btn btn-sm btn-outline-secondary"><i class="bi bi-calendar-event"></i> Move the switchover</summary>
+            <form th:action="@{'/admin/workflows/' + ${sw.endingId()} + '/switchover'}" method="post"
+                  class="hb-card hb-card-body small mt-2" style="max-width: 30rem">
+              <label th:for="'date-' + ${sw.endingId()}" class="form-label fw-semibold" style="color: var(--color-heading)">
+                First day under version <span th:text="${sw.startingVersion()}">2</span></label>
+              <input type="date" th:id="'date-' + ${sw.endingId()}" name="date" class="form-control form-control-sm mb-2 mono" required
+                     th:value="${sw.date()}" th:min="${sw.earliest()}" th:max="${sw.latest()}">
+              <label th:for="'reason-' + ${sw.endingId()}" class="form-label fw-semibold" style="color: var(--color-heading)">Reason</label>
+              <input th:id="'reason-' + ${sw.endingId()}" name="reason" class="form-control form-control-sm mb-2" required maxlength="400"
+                     placeholder="Board resolution of 12 November 2026 defers the restructure">
+              <p class="mb-2 text-body-secondary">Tomorrow at the earliest. Documents already raised finish under the
+                chain they began with; the new day decides only for documents raised from now on.</p>
+              <button type="submit" class="btn btn-sm btn-primary-action">Move it</button>
+            </form>
+          </details>
+        </div>
+      </th:block>
+    </th:block>
+  </section>
+
+  <section class="hb-card hb-card-body">
+    <div class="card-head">
+      <div class="card-title-row">
+        <i class="bi bi-clock-history" aria-hidden="true"></i>
+        <div>
+          <h2 class="card-title">Changes made here</h2>
+          <p class="card-sub">Every switchover moved, and every attempt refused, newest first</p>
+        </div>
+      </div>
+    </div>
+    <th:block th:if="${#lists.isEmpty(history)}">
+      <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'Nothing moved yet', 'The chains stand as the migrations set them.')}"></div>
+    </th:block>
+    <th:block th:each="entry : ${history}">
+      <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+    </th:block>
+  </section>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="'Audit entry ' + ${entry.id()}">Audit entry</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">ADMINISTRATION · AUDIT LOG</p>
+      <h1 class="page-title" th:text="${entry.entityLabel()} ?: ${subjectLabel}">Role · FINANCE</h1>
+      <p class="page-sub">
+        <span class="mono" th:text="${entry.action()}">UPDATE</span> ·
+        <span class="mono" th:text="${#temporals.format(entry.occurredAt(), 'dd MMMM yyyy HH:mm:ss')} + ' CAT'">02 October 2026 08:12:03 CAT</span>
+      </p>
+    </div>
+    <div class="d-flex gap-2">
+      <a th:if="${recordPath}" th:href="@{${recordPath}}" class="btn btn-outline-secondary">
+        <i class="bi bi-box-arrow-up-right"></i> Open the record</a>
+      <a th:href="@{/admin/audit}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Audit log</a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-xl-7">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-journal-text" aria-hidden="true"></i>
+            <h2 class="card-title">What was recorded</h2>
+          </div>
+        </div>
+        <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        <p class="small text-body-secondary mb-0" th:if="${#lists.isEmpty(entry.changes()) and entry.reason() == null}">
+          No field changed and no reason was given: the entry records that it happened.</p>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-info-circle" aria-hidden="true"></i>
+            <h2 class="card-title">The entry</h2>
+          </div>
+        </div>
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-body-secondary fw-normal">Entry</dt>
+          <dd class="col-7 mono" th:text="${entry.id()}">48211</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Record</dt>
+          <dd class="col-7" th:text="${subjectLabel}">Role</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Record id</dt>
+          <dd class="col-7 mono text-break" th:text="${entry.entityId()} ?: '—'">uuid</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Branch</dt>
+          <dd class="col-7" th:text="${entry.branchName()} ?: 'None'">Gahanga Main Warehouse</dd>
+          <dt class="col-5 text-body-secondary fw-normal">From</dt>
+          <dd class="col-7 mono" th:text="${entry.clientAddress()} ?: '—'">10.4.2.18</dd>
+          <dt class="col-5 text-body-secondary fw-normal">Browser</dt>
+          <dd class="col-7 text-break" th:text="${entry.userAgent()} ?: '—'">Mozilla/5.0</dd>
+        </dl>
+        <p class="small text-body-secondary mt-3 mb-0">Names, the role and the branch are as they read when this was
+          recorded; a later rename does not rewrite them.</p>
+      </section>
+    </div>
+
+    <div class="col-12" th:unless="${#lists.isEmpty(related)}">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Everything recorded about this record</h2>
+              <p class="card-sub">Newest first, as far as your right reaches</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:each="r : ${related}">
+          <div class="small mb-1">
+            <a th:href="@{'/admin/audit/' + ${r.id()}}" class="mono" th:text="'#' + ${r.id()}"
+               th:classappend="${r.id() == entry.id()} ? 'fw-bold'">#48211</a>
+          </div>
+          <div th:replace="~{fragments/ui :: auditEntry(${r})}"></div>
+        </th:block>
+      </section>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

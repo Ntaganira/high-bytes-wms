@@ -73,10 +73,7 @@ public class ErrorPages implements ErrorViewResolver {
             new PlannedScreen("/reports",          "Reports & KPIs",          "bi-bar-chart",          "reports"),
             new PlannedScreen("/approvals",        "Approval Queue",          "bi-check2-square",      null),
             new PlannedScreen("/documents",        "Documents",               "bi-file-earmark-text",  null),
-            new PlannedScreen("/search",           "Search",                  "bi-search",             null),
-            new PlannedScreen("/admin/workflows",  "Workflow Definitions",    "bi-diagram-3",          "workflows"),
-            new PlannedScreen("/admin/branches",   "Branches",                "bi-building",           "branches"),
-            new PlannedScreen("/admin/audit",      "Audit Log",               "bi-clock-history",      "audit"));
+            new PlannedScreen("/search",           "Search",                  "bi-search",             null));
 
     private final BranchService branches;
 

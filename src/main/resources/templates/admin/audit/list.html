@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Audit Log</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">ADMINISTRATION</p>
+    <h1 class="page-title">Audit Log</h1>
+    <p class="page-sub">Every change the system recorded, and every attempt it refused, newest first. Nothing here can be
+      changed or deleted: the database refuses it.</p>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/admin/audit}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-2">
+        <label for="from" class="form-label small fw-semibold" style="color: var(--color-heading)">From</label>
+        <input id="from" name="from" type="date" class="form-control mono" th:value="${from}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="to" class="form-label small fw-semibold" style="color: var(--color-heading)">To</label>
+        <input id="to" name="to" type="date" class="form-control mono" th:value="${to}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="subject" class="form-label small fw-semibold" style="color: var(--color-heading)">Record</label>
+        <select id="subject" name="subject" class="form-select">
+          <option value="">Any record</option>
+          <option th:each="s : ${subjects}" th:value="${s.entityName()}" th:text="${s.label()}"
+                  th:selected="${subject == s.entityName()}">Role</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="action" class="form-label small fw-semibold" style="color: var(--color-heading)">Action</label>
+        <select id="action" name="action" class="form-select">
+          <option value="">Any action</option>
+          <option th:each="a : ${actions}" th:value="${a}" th:text="${#strings.capitalize(#strings.toLowerCase(#strings.replace(a, '_', ' ')))}"
+                  th:selected="${action == a.name()}">Update</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="actor" class="form-label small fw-semibold" style="color: var(--color-heading)">By username</label>
+        <input id="actor" name="actor" class="form-control mono" th:value="${actor}" placeholder="juwase" autocomplete="off">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="branch" class="form-label small fw-semibold" style="color: var(--color-heading)">Branch</label>
+        <select id="branch" name="branch" class="form-select">
+          <option value="">Any branch</option>
+          <option th:each="b : ${branches}" th:value="${b.id()}" th:text="${b.name()}"
+                  th:selected="${branch != null and branch == b.id()}">Gahanga Main Warehouse</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-8">
+        <label for="q" class="form-label small fw-semibold" style="color: var(--color-heading)">Words</label>
+        <input id="q" name="q" type="search" class="form-control" th:value="${q}"
+               placeholder="A serial, a code, a name, or words from a reason">
+      </div>
+      <div class="col-12 col-md-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/admin/audit}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">When (CAT)</th>
+            <th scope="col">Who</th>
+            <th scope="col">Action</th>
+            <th scope="col">Record</th>
+            <th scope="col">Branch</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="e : ${entries}">
+            <td class="mono small text-nowrap">
+              <a th:href="@{'/admin/audit/' + ${e.id()}}" th:text="${#temporals.format(e.occurredAt(), 'dd MMM yyyy HH:mm:ss')}">02 Oct 2026 08:12:03</a>
+            </td>
+            <td>
+              <span th:text="${e.actorName()}">Jeanne Uwase</span>
+              <span class="d-block small text-body-secondary">
+                <span class="mono" th:text="${e.actorUsername()}">juwase</span><th:block th:if="${e.actorRole()}"> ·
+                <span th:text="${e.actorRole()}">Finance Department</span></th:block>
+              </span>
+            </td>
+            <td class="mono small" th:text="${e.action()}">UPDATE</td>
+            <td class="text-wrap" style="min-width: 16rem">
+              <span th:text="${e.entityLabel()} ?: ${e.entityName()}">Role · FINANCE</span>
+              <span class="d-block small text-body-secondary"
+                    th:if="${!#lists.isEmpty(e.changes())}"
+                    th:text="${#lists.size(e.changes())} == 1 ? '1 field changed' : ${#lists.size(e.changes())} + ' fields changed'">2 fields changed</span>
+              <span class="d-block small text-body-secondary text-truncate" style="max-width: 28rem"
+                    th:if="${e.reason()}" th:text="${e.reason()}">Reason.</span>
+            </td>
+            <td th:text="${e.branchName()} ?: '—'">Gahanga Main Warehouse</td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(entries)}">
+            <td colspan="5">
+              <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No entries match', 'Clear the filters, or widen the dates.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+    <p class="text-body-secondary small mb-0">
+      <th:block th:if="${everywhere}">Every branch's entries, and those recorded at no branch (sign-ins, the system's
+        own work).</th:block>
+      <th:block th:unless="${everywhere}">Only the entries recorded at the branches where you hold this right. Sign-ins
+        and the system's own work, recorded at no branch, are read by whoever holds it at every branch.</th:block>
+    </p>
+    <div class="d-flex gap-2">
+      <a th:if="${newestUrl}" th:href="@{${newestUrl}}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Newest</a>
+      <a th:if="${olderUrl}" th:href="@{${olderUrl}}" class="btn btn-sm btn-outline-secondary">
+        Older <i class="bi bi-arrow-right"></i></a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

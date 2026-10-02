@@ -17,7 +17,7 @@
       class="status-badge"
       th:classappend="'status-' + ${#strings.toLowerCase(status)}"
       th:with="icon=${
-        status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' or status == 'ACTIVE' ? 'bi-check-circle-fill' :
+        status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' or status == 'ACTIVE' or status == 'IN_FORCE' ? 'bi-check-circle-fill' :
         status == 'HELD'      or status == 'PENDING'  or status == 'SCHEDULED' or status == 'OPEN' ? 'bi-clock-fill' :
         status == 'RECONCILED' ? 'bi-pen-fill' :
         status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' or status == 'BLOCKED' ? 'bi-exclamation-octagon-fill' :
@@ -27,7 +27,7 @@
         status == 'TRANSIT'   or status == 'PROGRESS' ? 'bi-arrow-repeat' :
         status == 'BONDED'    or status == 'PROTECTED' or status == 'POLICY' ? 'bi-shield-lock-fill' :
         status == 'CANCELLED' or status == 'REVOKED'  ? 'bi-x-circle-fill' :
-        status == 'INACTIVE'  or status == 'EXPIRED'  ? 'bi-dash-circle-fill' :
+        status == 'INACTIVE'  or status == 'EXPIRED'  or status == 'ENDED' ? 'bi-dash-circle-fill' :
         status == 'ADMINISTER' ? 'bi-person-gear' :
         status == 'TRANSACT'  ? 'bi-pen-fill' :
         status == 'CONFIGURE' ? 'bi-sliders' :
