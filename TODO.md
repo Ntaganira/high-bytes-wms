@@ -170,7 +170,18 @@ shape, so it is worth building carefully.
       anything; the movements list pages by ledger id, so the gaps hint how many movements are hidden (movements
       at other branches leave gaps too); the daily close's movements and exceptions (the open question above);
       and a count cancelled before its verification lifts the hiding, though the book was readable before the
-      count opened anyway. Frozen stock disappears from the quarantine and document-form lists without a note
+      count opened anyway. Frozen stock disappears from the quarantine and document-form lists without a note.
+      Each document's own page still shows what it moved (only a GRN's or DN's balance after is withheld), so
+      a counter who opens every receipt, delivery, transfer and damage report at a place can still add up its
+      book; the ticket register, which lists them all, shows nothing of a counted place
+- [x] Transaction tickets (`inventory/ticket/`, `/tickets`): the register of the tickets the working branch's
+      documents wrote, filtered by date, movement, direction and serial (the ticket's, its document's or the
+      customs reference) and paged; one ticket with its lines, the ledger movements it wrote, the document it
+      answers to and that document's signatures, so who authorised, executed and recorded one transaction are on
+      one page. `/documents/{id}` of a ticket opens it there for whoever holds `ticket.view`, and its document
+      otherwise
+- [ ] Tickets, left for later: no export; a document's own page names its ticket without linking it; one branch at
+      a time
 - [ ] Admin screens, left for later: no export of the audit log; a document's audit entry links to no page
       (each type has its own); locations at an inactive branch are still offered on the location form, which the
       database then refuses

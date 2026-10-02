@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Transaction Tickets</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS</p>
+    <h1 class="page-title">Transaction Tickets</h1>
+    <p class="page-sub">Every ticket the documents of <span th:text="${currentBranch.name()}">Gahanga Main Warehouse</span>
+      wrote when they were posted, newest first. A ticket is never raised by hand: it is the record of what one
+      approved document moved, and the ledger's movements answer to it.</p>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{/tickets}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-2">
+        <label for="from" class="form-label small fw-semibold" style="color: var(--color-heading)">From</label>
+        <input id="from" name="from" type="date" class="form-control mono" th:value="${from}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="to" class="form-label small fw-semibold" style="color: var(--color-heading)">To</label>
+        <input id="to" name="to" type="date" class="form-control mono" th:value="${to}">
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="movement" class="form-label small fw-semibold" style="color: var(--color-heading)">Movement</label>
+        <select id="movement" name="movement" class="form-select">
+          <option value="">Any movement</option>
+          <option th:each="m : ${movements}" th:value="${m.name()}" th:text="${m.label()}"
+                  th:selected="${movement == m.name()}">Receipt</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label for="direction" class="form-label small fw-semibold" style="color: var(--color-heading)">Direction</label>
+        <select id="direction" name="direction" class="form-select">
+          <option value="">In and out</option>
+          <option value="IN" th:selected="${direction == 'IN'}">In</option>
+          <option value="OUT" th:selected="${direction == 'OUT'}">Out</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-2">
+        <label for="q" class="form-label small fw-semibold" style="color: var(--color-heading)">Search</label>
+        <input id="q" name="q" type="search" class="form-control" th:value="${q}"
+               placeholder="Serial or customs ref.">
+      </div>
+      <div class="col-12 col-md-2 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{/tickets}" class="btn btn-outline-secondary">Clear</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="hb-card hb-card-body">
+    <th:block th:if="${#lists.isEmpty(tickets)}">
+      <div th:replace="~{fragments/ui :: emptyState('bi-ticket-perforated', ${filtered} ? 'No ticket matches' : 'No tickets yet', ${filtered} ? 'Widen the dates or clear a filter.' : 'A ticket appears here when a receipt, delivery, transfer, damage report or count is posted.')}"></div>
+    </th:block>
+
+    <div class="table-responsive" th:if="${!#lists.isEmpty(tickets)}">
+      <table class="table hb-table align-middle">
+        <thead>
+        <tr>
+          <th scope="col">Ticket</th>
+          <th scope="col">Movement</th>
+          <th scope="col">From → to</th>
+          <th scope="col">Answers to</th>
+          <th scope="col" class="num">Lines</th>
+          <th scope="col" class="num">Value (RWF)</th>
+          <th scope="col">Posted</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="t : ${tickets}">
+          <td>
+            <a class="doc-link mono" th:href="@{'/tickets/' + ${t.id()}}" th:text="${t.serialNo()}">TT-KGL-2026-0001</a>
+          </td>
+          <td>
+            <span th:text="${t.movement() != null} ? ${t.movement().label()} : '—'">Receipt</span>
+            <div class="small text-body-secondary" th:text="${t.direction()}">IN</div>
+          </td>
+          <td class="mono small">
+            <span th:text="${t.fromCode()} ?: '—'">KGL-MAIN</span> → <span th:text="${t.toCode()} ?: '—'">—</span>
+          </td>
+          <td>
+            <a class="doc-link mono" th:if="${t.sourceId() != null}" th:href="@{'/documents/' + ${t.sourceId()}}"
+               th:text="${t.sourceSerial()}">GRN-KGL-2026-0412</a>
+            <div class="small text-body-secondary" th:text="${t.sourceTypeName()}">Goods Received Note</div>
+          </td>
+          <td class="num mono" th:text="${t.lineCount()}">2</td>
+          <td class="num mono">
+            <span th:text="${#numbers.formatDecimal(t.value(), 1, 'COMMA', 2, 'POINT')}">105,000.00</span>
+            <div class="small text-body-secondary" th:if="${t.countedMovements() > 0}"
+                 th:text="${t.countedMovements()} + ' being counted, not included'">1 being counted, not included</div>
+          </td>
+          <td>
+            <span th:text="${t.postedByName()} ?: '—'">Test finance</span>
+            <div class="small text-body-secondary mono" th:if="${t.postedAt() != null}"
+                 th:text="${#temporals.format(t.postedAt(), 'dd MMM yyyy HH:mm')}">02 Oct 2026 10:20</div>
+          </td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+    <p class="text-body-secondary small mb-0">Values are the ledger's, at the cost each movement was posted at. A
+      movement at a place under a live count is left out until the count's verification is signed. Times are
+      Kigali's.</p>
+    <div class="d-flex gap-2">
+      <a th:if="${newestUrl}" th:href="@{${newestUrl}}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Newest</a>
+      <a th:if="${olderUrl}" th:href="@{${olderUrl}}" class="btn btn-sm btn-outline-secondary">
+        Older <i class="bi bi-arrow-right"></i></a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

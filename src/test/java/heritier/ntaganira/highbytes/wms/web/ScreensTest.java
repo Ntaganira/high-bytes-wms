@@ -160,6 +160,9 @@ class ScreensTest extends IntegrationTest {
                 .param("id", posted).query(UUID.class).single();
         mvc.perform(as(storekeeper, get("/documents/" + ticket)))
                 .andExpect(header().string("Location", "/receiving/" + posted));
+        // Finance reads tickets: the ticket opens on its own page.
+        mvc.perform(as(finance, get("/documents/" + ticket)))
+                .andExpect(header().string("Location", "/tickets/" + ticket));
     }
 
     // ---- 403 for those who do not ----------------------------------------------

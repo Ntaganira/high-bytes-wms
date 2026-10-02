@@ -11,6 +11,7 @@ package heritier.ntaganira.highbytes.wms.document;
  * </pre>
  */
 
+import heritier.ntaganira.highbytes.wms.security.CurrentUser;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,9 +28,10 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 /**
  * {@code /documents/{id}} is the address the dashboard, the approval queue and
  * the search box use for any document. Each document type has its own screen;
- * this sends the visitor there. A transaction ticket is shown through the
- * document it answers to. A type whose screen is not built yet stays a 404,
- * which {@code ErrorPages} words as "not built yet".
+ * this sends the visitor there. A transaction ticket opens on its own page
+ * for whoever reads tickets here, and otherwise through the document it
+ * answers to. A type whose screen is not built yet stays a 404, which
+ * {@code ErrorPages} words as "not built yet".
  *
  * <p>Whether the visitor may see the document is decided by the screen it
  * lands on, for the document's own branch.
@@ -48,7 +50,8 @@ public class DocumentController {
     @Transactional(readOnly = true)
     public String open(@PathVariable UUID id) {
         var target = jdbc.sql("""
-                SELECT COALESCE(src.id, d.id) AS id, COALESCE(sdt.code, dt.code) AS code
+                SELECT COALESCE(src.id, d.id) AS id, COALESCE(sdt.code, dt.code) AS code, dt.code AS own_code,
+                       d.branch_id
                   FROM document d
                   JOIN document_type dt ON dt.id = d.document_type_id
              LEFT JOIN transaction_ticket t ON t.document_id = d.id AND dt.code = 'TT'
@@ -57,9 +60,17 @@ public class DocumentController {
                  WHERE d.id = :id
                 """)
                 .param("id", id, Types.OTHER)
-                .query((rs, n) -> new String[]{rs.getObject("id", UUID.class).toString(), rs.getString("code")})
+                .query((rs, n) -> new String[]{rs.getObject("id", UUID.class).toString(), rs.getString("code"),
+                        rs.getString("own_code"), rs.getString("branch_id")})
                 .optional()
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
+
+        // The ticket page needs ticket.view where the reader works (its URL rule) and at the ticket's own branch.
+        boolean readsTickets = CurrentUser.get().map(u -> u.has("ticket.view")).orElse(false)
+                && CurrentUser.holdsAt("ticket.view", UUID.fromString(target[3]));
+        if ("TT".equals(target[2]) && readsTickets) {
+            return "redirect:/tickets/" + id;
+        }
 
         switch (target[1]) {
             case "GRN" -> { return "redirect:/receiving/" + target[0]; }

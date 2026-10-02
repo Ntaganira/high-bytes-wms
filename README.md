@@ -200,6 +200,8 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 - Branch switcher, with bonded branches flagged
 - Dashboard: KPIs, movement chart, what awaits your signature, low stock —
   all reading the ledger
+- Transaction tickets: the register at the branch, and one ticket with what
+  it moved, its ledger movements, and the document and signatures behind it
 - Approval queue: every document waiting on your signature, at every branch
   where you hold the step's role, longest waiting first, overdue steps
   flagged

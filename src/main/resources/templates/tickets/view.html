@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${t.serialNo()}">Transaction ticket</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+    <div class="d-flex align-items-center gap-3">
+      <span class="serial fs-6 fw-semibold" th:text="${t.serialNo()}">TT-KGL-2026-0001</span>
+      <span th:replace="~{fragments/ui :: chip(${t.status()})}"></span>
+    </div>
+    <div class="text-body-secondary small ms-auto">
+      <span th:text="${t.branchName()}">Gahanga Main Warehouse</span>
+      <span class="mx-1">·</span>
+      <span class="mono" th:text="${#temporals.format(t.documentDate(), 'dd MMM yyyy')}">02 Oct 2026</span>
+    </div>
+  </div>
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · TRANSACTION TICKET · F-05</p>
+    <h1 class="page-title">
+      <span th:text="${t.movement() != null} ? ${t.movement().label()} : 'Movement'">Receipt</span>
+      <span class="text-body-secondary fw-normal" th:text="'· ' + ${t.direction()}">· IN</span>
+    </h1>
+    <p class="page-sub">
+      <th:block th:if="${t.fromCode() != null}">From <span class="mono" th:text="${t.fromCode()}">KGL-MAIN</span>
+        <span th:text="${t.fromName()}">Gahanga main store</span></th:block>
+      <th:block th:if="${t.fromCode() != null and t.toCode() != null}"> · </th:block>
+      <th:block th:if="${t.toCode() != null}">into <span class="mono" th:text="${t.toCode()}">KGL-MAIN</span>
+        <span th:text="${t.toName()}">Gahanga main store</span></th:block>
+      <th:block th:if="${t.customsReference() != null}"> · customs
+        <span class="mono" th:text="${t.customsReference()}">C-2026-118</span></th:block>
+    </p>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-list-ol" aria-hidden="true"></i>
+            <h2 class="card-title">What moved</h2>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+            <tr>
+              <th scope="col">Line</th>
+              <th scope="col">Item</th>
+              <th scope="col" class="num">Quantity</th>
+              <th scope="col" class="num">In base unit</th>
+              <th scope="col">Bin</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="l : ${ticket.lines()}">
+              <td class="mono" th:text="${l.lineNo()}">1</td>
+              <td>
+                <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+                <div class="small text-body-secondary" th:text="${l.description()}">Clear float 6 mm</div>
+              </td>
+              <td class="num mono" th:if="${l.counted()}" colspan="2">Being counted</td>
+              <td class="num mono" th:unless="${l.counted()}" th:text="${#numbers.formatDecimal(l.quantity(), 1, 'COMMA', 3, 'POINT')} + ' ' + ${l.uomCode()}">4.000 BOX</td>
+              <td class="num mono" th:unless="${l.counted()}" th:text="${#numbers.formatDecimal(l.quantityBase(), 1, 'COMMA', 3, 'POINT')} + ' ' + ${l.baseUomCode()}">50.000 SHEET</td>
+              <td class="mono" th:text="${l.binCode()} ?: '—'">B-01</td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-journal-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">In the ledger</h2>
+              <p class="card-sub">The movements this ticket wrote. They are never edited; a correction is a
+                reversing movement.</p>
+            </div>
+          </div>
+          <span class="mono small" th:text="${#numbers.formatDecimal(ticket.value(), 1, 'COMMA', 2, 'POINT')} + ' RWF'">105,000.00 RWF</span>
+        </div>
+        <p class="small text-body-secondary" th:if="${ticket.countedMovements() > 0}"
+           th:text="${ticket.countedMovements()} + (${ticket.countedMovements() == 1} ? ' movement is' : ' movements are') + ' at a place being counted: nothing of it shows, and the value leaves it out, until the count''s verification is signed.'">
+          1 movement is at a place being counted.</p>
+        <th:block th:if="${#lists.isEmpty(ticket.movements())}">
+          <p class="text-body-secondary small mb-0">This ticket wrote no movement.</p>
+        </th:block>
+        <div class="table-responsive" th:if="${!#lists.isEmpty(ticket.movements())}">
+          <table class="table hb-table compact mb-0">
+            <thead>
+            <tr>
+              <th scope="col">Movement</th>
+              <th scope="col">Line</th>
+              <th scope="col">Item</th>
+              <th scope="col">Place</th>
+              <th scope="col" class="num">Quantity</th>
+              <th scope="col" class="num">Unit cost</th>
+              <th scope="col" class="num">Value</th>
+              <th scope="col" class="num">Balance after</th>
+              <th scope="col">Business date</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="m : ${ticket.movements()}">
+              <td class="mono">
+                <span th:text="${m.id()}">1</span>
+                <div class="small text-body-secondary" th:if="${m.reversesId() != null}"
+                     th:text="'reverses ' + ${m.reversesId()}">reverses 7</div>
+              </td>
+              <td class="mono" th:text="${m.lineNo()}">1</td>
+              <td class="mono" th:text="${m.itemCode()}">GL-CF-6</td>
+              <td class="mono small">
+                <span th:text="${m.locationCode()}">KGL-MAIN</span><span th:if="${m.binCode() != null}" th:text="' · ' + ${m.binCode()}"> · B-01</span>
+              </td>
+              <td class="num mono" th:if="${m.counted()}" colspan="4">Being counted</td>
+              <td class="num mono" th:unless="${m.counted()}" th:text="(${m.direction() == 'OUT'} ? '−' : '+') + ${#numbers.formatDecimal(m.quantityBase(), 1, 'COMMA', 3, 'POINT')}">+50.000</td>
+              <td class="num mono" th:unless="${m.counted()}" th:text="${#numbers.formatDecimal(m.unitCost(), 1, 'COMMA', 4, 'POINT')}">2,100.0000</td>
+              <td class="num mono" th:unless="${m.counted()}" th:text="${#numbers.formatDecimal(m.value(), 1, 'COMMA', 2, 'POINT')}">105,000.00</td>
+              <td class="num mono" th:unless="${m.counted()}" th:text="${#numbers.formatDecimal(m.runningBalance(), 1, 'COMMA', 3, 'POINT')}">50.000</td>
+              <td class="mono" th:text="${#temporals.format(m.businessDate(), 'dd MMM yyyy')}">02 Oct 2026</td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-12 col-xl-4">
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-file-earmark-check" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Answers to</h2>
+              <p class="card-sub">No ticket moves stock without the approved document behind it.</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:if="${t.sourceId() != null}">
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <a class="doc-link mono fw-semibold" th:href="@{'/documents/' + ${t.sourceId()}}"
+               th:text="${t.sourceSerial()}">GRN-KGL-2026-0412</a>
+            <span th:replace="~{fragments/ui :: chip(${t.sourceStatus()})}"></span>
+          </div>
+          <p class="small text-body-secondary" th:text="${t.sourceTypeName()}">Goods Received Note</p>
+          <th:block th:if="${!#lists.isEmpty(ticket.sourceChain())}">
+            <ol th:replace="~{fragments/ui :: approvalChain(${ticket.sourceChain()})}"></ol>
+          </th:block>
+        </th:block>
+        <p class="small text-body-secondary mb-0" th:if="${t.sourceId() == null}">No document is recorded behind this
+          ticket.</p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-person-check" aria-hidden="true"></i>
+            <h2 class="card-title">Recorded by</h2>
+          </div>
+        </div>
+        <p class="small mb-1">Posted by <strong th:text="${t.postedByName()} ?: '—'">Test finance</strong>
+          <span class="mono" th:if="${t.postedAt() != null}"
+                th:text="'on ' + ${#temporals.format(t.postedAt(), 'dd MMM yyyy HH:mm')}">on 02 Oct 2026 10:20</span>.</p>
+        <p class="small text-body-secondary mb-0">Who may post is the document's own rule, judged by the database when
+          it was posted: the ticket and its movements were written in that same transaction.</p>
+      </section>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
