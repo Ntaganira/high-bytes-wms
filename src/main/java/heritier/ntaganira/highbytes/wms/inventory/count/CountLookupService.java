@@ -134,8 +134,11 @@ public class CountLookupService {
                           FROM delivery_authorization a WHERE a.location_id = :location
                         UNION ALL
                         SELECT n.document_id, 'loaded from it, not yet through the gate'
-                          FROM delivery_note n JOIN delivery_authorization a ON a.document_id = n.authorization_id
-                         WHERE a.location_id = :location
+                          FROM delivery_note n JOIN delivery_note_authority na ON na.note_id = n.document_id
+                         WHERE na.location_id = :location
+                        UNION ALL
+                        SELECT c.document_id, 'to be cut at it'
+                          FROM cutting_order c WHERE c.location_id = :location
                         UNION ALL
                         SELECT t.document_id, 'to be dispatched from it'
                           FROM transfer_order t WHERE t.from_location_id = :location

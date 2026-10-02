@@ -533,6 +533,10 @@ th.num, td.num { text-align: right; }
 .release-gate.gate-written_off {
   border-color: var(--color-warning); background: var(--color-warning-light); color: var(--badge-held-text);
 }
+/* Cutting orders: released by the Internal Controller, not yet cut and posted. */
+.release-gate.gate-approved {
+  border-color: var(--color-warning); background: var(--color-warning-light); color: var(--badge-held-text);
+}
 .release-gate.gate-posted {
   border-color: var(--color-success); background: var(--color-success-light); color: var(--badge-completed-text);
 }

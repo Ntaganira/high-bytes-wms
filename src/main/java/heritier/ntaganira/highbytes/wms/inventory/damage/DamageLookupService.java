@@ -258,9 +258,9 @@ public class DamageLookupService {
                        (SELECT COUNT(*) FROM delivery_note_line l
                          WHERE l.document_id = d.id AND l.qty_base_uom > delivery_line_returned(l.id)) AS n
                   FROM document d
-                  JOIN delivery_note n          ON n.document_id = d.id
-                  JOIN delivery_authorization a ON a.document_id = n.authorization_id
-                  JOIN customer c               ON c.id = a.customer_id
+                  JOIN delivery_note n            ON n.document_id = d.id
+                  JOIN delivery_note_authority na ON na.note_id = n.document_id
+                  JOIN customer c                 ON c.id = na.customer_id
                  WHERE d.branch_id = :branch AND d.status = 'POSTED'
                    AND EXISTS (SELECT 1 FROM delivery_note_line l
                                 WHERE l.document_id = d.id AND l.qty_base_uom > delivery_line_returned(l.id))

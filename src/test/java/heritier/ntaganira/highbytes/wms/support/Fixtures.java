@@ -39,6 +39,11 @@ public class Fixtures {
         this.userDetails = userDetails;
     }
 
+    /** The test database, for a flow's own reads and set-up. */
+    public JdbcClient jdbc() {
+        return jdbc;
+    }
+
     public UUID branch(String code) {
         return jdbc.sql("SELECT id FROM branch WHERE code = :code").param("code", code)
                 .query(UUID.class).single();

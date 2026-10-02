@@ -66,7 +66,6 @@ public class ErrorPages implements ErrorViewResolver {
 
     /** Checked in order, so a longer path must come before its prefix. */
     static final List<PlannedScreen> PLANNED = List.of(
-            new PlannedScreen("/cutting",          "Cutting Orders",          "bi-scissors",           "cutting"),
             new PlannedScreen("/reports",          "Reports & KPIs",          "bi-bar-chart",          "reports"));
 
     private final BranchService branches;

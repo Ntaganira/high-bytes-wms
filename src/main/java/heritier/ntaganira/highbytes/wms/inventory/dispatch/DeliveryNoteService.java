@@ -72,19 +72,22 @@ public class DeliveryNoteService {
                    d.created_by, cu.full_name AS created_by_name, d.created_at, d.posted_at,
                    d.posted_by, pu.full_name AS posted_by_name,
                    d.cancelled_at, xu.full_name AS cancelled_by_name, d.cancel_reason,
-                   n.authorization_id, dao.serial_no AS dao_serial, dao.status AS dao_status,
+                   na.authority_id AS authorization_id, na.authority_kind,
+                   dao.serial_no AS dao_serial, dao.status AS dao_status,
                    dao.created_by AS dao_created_by, dcu.full_name AS dao_created_by_name,
+                   dao.posted_by AS authority_posted_by,
                    c.name AS customer_name,
-                   a.location_id, l.code AS location_code, l.name AS location_name, l.is_bonded AS location_bonded,
-                   a.customs_reference,
+                   na.location_id, l.code AS location_code, l.name AS location_name, l.is_bonded AS location_bonded,
+                   na.customs_reference,
                    n.vehicle_registration, n.driver_name, n.driver_phone, n.driver_id_no
               FROM document d
-              JOIN document_type dt         ON dt.id = d.document_type_id AND dt.code = 'DN'
-              JOIN delivery_note n          ON n.document_id = d.id
-              JOIN document dao             ON dao.id = n.authorization_id
-              JOIN delivery_authorization a ON a.document_id = n.authorization_id
-              JOIN customer c               ON c.id = a.customer_id
-              JOIN location l               ON l.id = a.location_id
+              JOIN document_type dt           ON dt.id = d.document_type_id AND dt.code = 'DN'
+              JOIN delivery_note n            ON n.document_id = d.id
+              -- The note's authority: its delivery authorization, or its cutting order (V18).
+              JOIN delivery_note_authority na ON na.note_id = n.document_id
+              JOIN document dao               ON dao.id = na.authority_id
+              JOIN customer c                 ON c.id = na.customer_id
+              JOIN location l                 ON l.id = na.location_id
               JOIN branch b                 ON b.id = d.branch_id
               JOIN app_user cu              ON cu.id = d.created_by
               JOIN app_user dcu             ON dcu.id = dao.created_by
@@ -94,13 +97,14 @@ public class DeliveryNoteService {
             """;
 
     private static final String LINES = """
-            SELECT dl.id, dl.line_no, dl.authorization_line_id, al.line_no AS dao_line_no,
+            SELECT dl.id, dl.line_no, COALESCE(dl.authorization_line_id, dl.cutting_output_id) AS authorization_line_id,
+                   al.line_no AS dao_line_no,
                    dl.item_id, i.item_code, i.description, i.product_type, i.thickness_mm,
                    dl.uom_id, u.code AS uom_code, bu.code AS base_uom_code,
                    dl.quantity, dl.qty_base_uom, dl.storage_bin_id, sb.bin_code, dl.measured_thickness_mm,
                    delivery_line_returned(dl.id) AS returned_base
               FROM delivery_note_line dl
-              JOIN delivery_authorization_line al ON al.id = dl.authorization_line_id
+              JOIN delivery_authority_line al ON al.id = COALESCE(dl.authorization_line_id, dl.cutting_output_id)
               JOIN item i  ON i.id = dl.item_id
               JOIN uom u   ON u.id = dl.uom_id
               JOIN uom bu  ON bu.id = i.base_uom_id
@@ -124,18 +128,18 @@ public class DeliveryNoteService {
 
     private final JdbcClient jdbc;
     private final DocumentService documents;
-    private final DispatchService dispatch;
+    private final List<DeliveryAuthority> authorities;
     private final DispatchLookupService lookups;
     private final LedgerService ledger;
     private final BranchService branches;
     private final PartyCheck parties;
 
-    public DeliveryNoteService(JdbcClient jdbc, DocumentService documents, DispatchService dispatch,
+    public DeliveryNoteService(JdbcClient jdbc, DocumentService documents, List<DeliveryAuthority> authorities,
                                DispatchLookupService lookups, LedgerService ledger, BranchService branches,
                                PartyCheck parties) {
         this.jdbc = jdbc;
         this.documents = documents;
-        this.dispatch = dispatch;
+        this.authorities = authorities;
         this.lookups = lookups;
         this.ledger = ledger;
         this.branches = branches;
@@ -144,11 +148,15 @@ public class DeliveryNoteService {
 
     // ---- reads -----------------------------------------------------------
 
-    /** Released authorizations at the branch with no live delivery note: what the gate may load now. */
+    /**
+     * What the gate may load now at the branch: released authorizations, and posted cutting orders whose pieces
+     * are in stock, with no live delivery note.
+     */
     @PreAuthorize("hasAuthority('dispatch.post')")
     public List<ReadyRow> readyToLoad(UUID branchId) {
         return jdbc.sql("""
-                SELECT d.id, d.serial_no, c.name AS customer_name, l.code AS location_code,
+                SELECT * FROM (
+                SELECT 'DAO' AS kind, d.id, d.serial_no, c.name AS customer_name, l.code AS location_code,
                        (b.is_bonded OR l.is_bonded) AS bonded,
                        (SELECT COUNT(*) FROM delivery_authorization_line dl WHERE dl.document_id = d.id) AS line_count,
                        rel.actor_name, rel.decided_at
@@ -165,27 +173,44 @@ public class DeliveryNoteService {
                  WHERE d.branch_id = :branch AND d.status = 'APPROVED'
                    AND NOT EXISTS (SELECT 1 FROM delivery_note n JOIN document dn ON dn.id = n.document_id
                                     WHERE n.authorization_id = d.id AND dn.status <> 'CANCELLED')
-                 ORDER BY d.approved_at
+                UNION ALL
+                -- A cutting order's pieces load once it is posted: they are in the ledger only then (V18).
+                SELECT 'CUT', d.id, d.serial_no, c.name, l.code, (b.is_bonded OR l.is_bonded),
+                       (SELECT COUNT(*) FROM cutting_order_output o WHERE o.document_id = d.id AND o.kind = 'PIECE'),
+                       pu.full_name, d.posted_at
+                  FROM document d
+                  JOIN document_type dt ON dt.id = d.document_type_id AND dt.code = 'CUT'
+                  JOIN cutting_order co ON co.document_id = d.id
+                  JOIN branch b         ON b.id = d.branch_id
+                  JOIN customer c       ON c.id = co.customer_id
+                  JOIN location l       ON l.id = co.location_id
+             LEFT JOIN app_user pu      ON pu.id = d.posted_by
+                 WHERE d.branch_id = :branch AND d.status = 'POSTED'
+                   AND NOT EXISTS (SELECT 1 FROM delivery_note n JOIN document dn ON dn.id = n.document_id
+                                    WHERE n.cutting_order_id = d.id AND dn.status <> 'CANCELLED')
+                ) ready
+                 ORDER BY ready.decided_at
                 """)
                 .param("branch", branchId, Types.OTHER)
                 .query((rs, n) -> new ReadyRow(rs.getObject("id", UUID.class), rs.getString("serial_no"),
                         rs.getString("customer_name"), rs.getString("location_code"), rs.getBoolean("bonded"),
-                        rs.getInt("line_count"), rs.getString("actor_name"), KigaliTime.read(rs, "decided_at")))
+                        rs.getInt("line_count"), rs.getString("actor_name"), KigaliTime.read(rs, "decided_at"),
+                        rs.getString("kind")))
                 .list();
     }
 
     @PreAuthorize("hasAuthority('dispatch.view')")
     public List<DnRow> list(UUID branchId, String status) {
         return jdbc.sql("""
-                SELECT d.id, d.serial_no, d.status, n.authorization_id, dao.serial_no AS dao_serial,
+                SELECT d.id, d.serial_no, d.status, na.authority_id AS authorization_id, dao.serial_no AS dao_serial,
                        c.name AS customer_name, n.vehicle_registration, n.driver_name,
                        cu.full_name AS created_by_name, d.created_at, d.posted_at
                   FROM document d
-                  JOIN document_type dt         ON dt.id = d.document_type_id AND dt.code = 'DN'
-                  JOIN delivery_note n          ON n.document_id = d.id
-                  JOIN document dao             ON dao.id = n.authorization_id
-                  JOIN delivery_authorization a ON a.document_id = n.authorization_id
-                  JOIN customer c               ON c.id = a.customer_id
+                  JOIN document_type dt           ON dt.id = d.document_type_id AND dt.code = 'DN'
+                  JOIN delivery_note n            ON n.document_id = d.id
+                  JOIN delivery_note_authority na ON na.note_id = n.document_id
+                  JOIN document dao               ON dao.id = na.authority_id
+                  JOIN customer c                 ON c.id = na.customer_id
                   JOIN app_user cu              ON cu.id = d.created_by
                  WHERE d.branch_id = :branch AND (:status::text IS NULL OR d.status = :status)
                  ORDER BY d.created_at DESC LIMIT 300
@@ -232,13 +257,17 @@ public class DeliveryNoteService {
                 .list();
     }
 
-    /** The authorization the form is for, with the gate, the stock and the bins beside it. */
+    /**
+     * The authority the form is for (a delivery authorization, or a posted cutting order), with the gate, the
+     * stock and the bins beside it.
+     */
     @PreAuthorize("hasAuthority('dispatch.post')")
     public Context contextFor(UUID authorizationId) {
         CurrentUser.requireAt("dispatch.post", documents.header(authorizationId).branchId());   // a read: refused, not recorded
-        DaoHeader dao = dispatch.find(authorizationId);
-        List<DaoLineRow> daoLines = dispatch.lines(authorizationId);
-        return new Context(dao, daoLines, dispatch.gateOf(authorizationId),
+        DeliveryAuthority authority = authorityOf(authorizationId);
+        DaoHeader dao = authority.asAuthorization(authorizationId);
+        List<DaoLineRow> daoLines = authority.loadableLines(authorizationId);
+        return new Context(dao, daoLines, authority.gateOf(authorizationId),
                 lookups.stockAt(dao.locationId(), daoLines.stream().map(DaoLineRow::itemId).collect(Collectors.toSet())),
                 lookups.binsOf(dao.locationId()));
     }
@@ -286,7 +315,7 @@ public class DeliveryNoteService {
     public Detail detail(UUID id) {
         DnHeader header = find(id);
         List<DnLineRow> lines = lines(id);
-        ReleaseGate gate = dispatch.gateOf(header.authorizationId());
+        ReleaseGate gate = authorityOf(header.authorizationId()).gateOf(header.authorizationId());
         Map<UUID, List<StockAt>> stock = "DRAFT".equals(header.status())
                 ? lookups.stockAt(header.locationId(),
                         lines.stream().map(DnLineRow::itemId).collect(Collectors.toSet()))
@@ -356,24 +385,27 @@ public class DeliveryNoteService {
     // ---- writes ----------------------------------------------------------
 
     /**
-     * Raises a note against a released authorization. The database refuses an
-     * authorization that is not fully signed, one that already has a live
-     * note, and a line that is not the authorization's.
+     * Raises a note against a released authorization or a posted cutting order. The database refuses an authority
+     * that is not fully signed (or, a cutting order, not yet posted), one that already has a live note, and a line
+     * that is not the authority's.
      */
     @Transactional
     @PreAuthorize("hasAuthority('dispatch.post')")
     public UUID create(DnForm form) {
         documents.requireRight(documents.header(form.getAuthorizationId()), "dispatch.post", "Raise a delivery note");
-        DaoHeader dao = dispatch.find(form.getAuthorizationId());
+        DeliveryAuthority authority = authorityOf(form.getAuthorizationId());
+        DaoHeader dao = authority.asAuthorization(form.getAuthorizationId());
+        boolean cut = DocumentKind.CUT.code().equals(authority.typeCode());
         try {
             OpenedDocument opened = documents.open(DocumentKind.DN, dao.branchId(), dao.serialNo(), null, null);
             jdbc.sql("""
-                    INSERT INTO delivery_note (document_id, authorization_id, vehicle_registration, driver_name,
-                                               driver_phone, driver_id_no)
-                    VALUES (:id, :dao, :vehicle, :driver, :phone, :idNo)
+                    INSERT INTO delivery_note (document_id, authorization_id, cutting_order_id, vehicle_registration,
+                                               driver_name, driver_phone, driver_id_no)
+                    VALUES (:id, :dao, :cut, :vehicle, :driver, :phone, :idNo)
                     """)
                     .param("id", opened.id(), Types.OTHER)
-                    .param("dao", dao.id(), Types.OTHER)
+                    .param("dao", cut ? null : dao.id(), Types.OTHER)
+                    .param("cut", cut ? dao.id() : null, Types.OTHER)
                     .params(headerParams(form))
                     .update();
             insertLines(opened.id(), form.getLines());
@@ -501,7 +533,7 @@ public class DeliveryNoteService {
 
         documents.auditPosted(d, AuditSnapshot.of()
                 .field("Status", "DRAFT", "POSTED")
-                .value("Authorization", h.daoSerial())
+                .value(h.againstCuttingOrder() ? "Cutting order" : "Authorization", h.daoSerial())
                 .value("Transaction ticket", ticket.serialNo())
                 .value("Vehicle", h.vehicleRegistration())
                 .value("Driver", h.driverName())
@@ -511,6 +543,14 @@ public class DeliveryNoteService {
     }
 
     // ---- helpers ---------------------------------------------------------
+
+    /** The source of truth for a note's authority, by the authority's own document type. */
+    private DeliveryAuthority authorityOf(UUID authorityId) {
+        String code = documents.header(authorityId).kind().code();
+        return authorities.stream().filter(a -> a.typeCode().equals(code)).findFirst()
+                .orElseThrow(() -> new ControlRefusedException("A delivery note is raised against a delivery "
+                        + "authorization or a posted cutting order, and nothing else."));
+    }
 
     private DnActions actionsFor(DnHeader h, ReleaseGate gate) {
         UUID branch = h.branchId();
@@ -524,12 +564,17 @@ public class DeliveryNoteService {
         if (draft && poster) {
             UUID me = CurrentUser.id();
             if (me != null && me.equals(h.daoCreatedBy())) {
-                postReason = "You raised authorization " + h.daoSerial() + ", so you cannot post its delivery note. "
+                postReason = "You raised " + (h.againstCuttingOrder() ? "cutting order " : "authorization ")
+                        + h.daoSerial() + ", so you cannot post its delivery note. "
                         + "Whoever authorizes a delivery does not also let it out of the gate.";
+            } else if (h.againstCuttingOrder() && me != null && me.equals(h.authorityPostedBy())) {
+                postReason = "You posted cutting order " + h.daoSerial() + ", so you cannot post its delivery note. "
+                        + "Whoever records a cut does not also let what was cut out of the gate.";
             } else if (releaseSignerReason(h.daoSerial(), me, documents.chain(h.authorizationId())) != null) {
                 postReason = releaseSignerReason(h.daoSerial(), me, documents.chain(h.authorizationId()));
             } else if (!gate.released()) {
-                postReason = "Authorization " + h.daoSerial() + " is not released, so nothing may leave.";
+                postReason = (h.againstCuttingOrder() ? "Cutting order " : "Authorization ") + h.daoSerial()
+                        + (h.againstCuttingOrder() ? " is not posted" : " is not released") + ", so nothing may leave.";
             } else {
                 canPost = true;
             }
@@ -570,23 +615,24 @@ public class DeliveryNoteService {
 
     /**
      * Lines numbered by position. Item and unit are read from the
-     * authorization line the row serves; the base quantity follows from the
-     * quantity and the unit's factor, rounded half up to three places, as the
-     * database checks it.
+     * authority's line the row serves (an authorization line, or a piece of a
+     * cutting order); the base quantity follows from the quantity and the
+     * unit's factor, rounded half up to three places, as the database checks it.
      */
     private void insertLines(UUID documentId, List<DnLineForm> lines) {
         int lineNo = 0;
         for (DnLineForm line : lines) {
             lineNo++;
-            record Serves(UUID item, UUID uom, BigDecimal factor, String code) {}
+            record Serves(UUID item, UUID uom, BigDecimal factor, String code, String kind) {}
             Serves serves = jdbc.sql("""
-                    SELECT al.item_id, al.uom_id, uom_factor_to_base(al.item_id, al.uom_id) AS factor, i.item_code
-                      FROM delivery_authorization_line al JOIN item i ON i.id = al.item_id
+                    SELECT al.item_id, al.uom_id, uom_factor_to_base(al.item_id, al.uom_id) AS factor, i.item_code,
+                           al.authority_kind
+                      FROM delivery_authority_line al JOIN item i ON i.id = al.item_id
                      WHERE al.id = :id
                     """)
                     .param("id", line.getAuthorizationLineId(), Types.OTHER)
                     .query((rs, n) -> new Serves(rs.getObject("item_id", UUID.class), rs.getObject("uom_id", UUID.class),
-                            rs.getBigDecimal("factor"), rs.getString("item_code")))
+                            rs.getBigDecimal("factor"), rs.getString("item_code"), rs.getString("authority_kind")))
                     .optional()
                     .orElseThrow(() -> new ControlRefusedException(
                             "A line names an authorization line that does not exist."));
@@ -594,14 +640,17 @@ public class DeliveryNoteService {
                 throw new ControlRefusedException("Item " + serves.code() + " has no conversion from its unit to "
                         + "its base unit, so the stock quantity cannot be worked out.");
             }
+            boolean piece = "CUT".equals(serves.kind());
             jdbc.sql("""
-                    INSERT INTO delivery_note_line (document_id, line_no, authorization_line_id, item_id, uom_id,
-                                                    quantity, qty_base_uom, storage_bin_id, measured_thickness_mm)
-                    VALUES (:doc, :lineNo, :authLine, :item, :uom, :quantity, :base, :bin, :thickness)
+                    INSERT INTO delivery_note_line (document_id, line_no, authorization_line_id, cutting_output_id,
+                                                    item_id, uom_id, quantity, qty_base_uom, storage_bin_id,
+                                                    measured_thickness_mm)
+                    VALUES (:doc, :lineNo, :authLine, :cutLine, :item, :uom, :quantity, :base, :bin, :thickness)
                     """)
                     .param("doc", documentId, Types.OTHER)
                     .param("lineNo", (short) lineNo)
-                    .param("authLine", line.getAuthorizationLineId(), Types.OTHER)
+                    .param("authLine", piece ? null : line.getAuthorizationLineId(), Types.OTHER)
+                    .param("cutLine", piece ? line.getAuthorizationLineId() : null, Types.OTHER)
                     .param("item", serves.item(), Types.OTHER)
                     .param("uom", serves.uom(), Types.OTHER)
                     .param("quantity", line.getQuantity())
@@ -664,7 +713,9 @@ public class DeliveryNoteService {
                 rs.getString("vehicle_registration"),
                 rs.getString("driver_name"),
                 rs.getString("driver_phone"),
-                rs.getString("driver_id_no"));
+                rs.getString("driver_id_no"),
+                rs.getString("authority_kind"),
+                rs.getObject("authority_posted_by", UUID.class));
     }
 
     @ResponseStatus(HttpStatus.NOT_FOUND)

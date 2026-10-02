@@ -348,9 +348,9 @@ public class DamageService {
                 SELECT d.id, d.serial_no, d.branch_id, b.name AS branch_name, d.status, c.name AS detail
                   FROM document d
                   JOIN document_type dt         ON dt.id = d.document_type_id AND dt.code = 'DN'
-                  JOIN delivery_note n          ON n.document_id = d.id
-                  JOIN delivery_authorization a ON a.document_id = n.authorization_id
-                  JOIN customer c               ON c.id = a.customer_id
+                  JOIN delivery_note n            ON n.document_id = d.id
+                  JOIN delivery_note_authority na ON na.note_id = n.document_id
+                  JOIN customer c                 ON c.id = na.customer_id
                   JOIN branch b                 ON b.id = d.branch_id
                  WHERE d.id = :id
                 """)
@@ -378,9 +378,7 @@ public class DamageService {
         }
         if (kind == DamageKind.CUSTOMER_RETURN && noteId != null) {
             return jdbc.sql("""
-                    SELECT a.customs_reference
-                      FROM delivery_note n JOIN delivery_authorization a ON a.document_id = n.authorization_id
-                     WHERE n.document_id = :id
+                    SELECT na.customs_reference FROM delivery_note_authority na WHERE na.note_id = :id
                     """)
                     .param("id", noteId, Types.OTHER)
                     .query(String.class).optional().orElse(null);

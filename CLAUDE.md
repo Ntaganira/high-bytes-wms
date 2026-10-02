@@ -130,9 +130,10 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── transfer/  inter-branch transfers and their receipts (via TRANSIT)
 │   ├── damage/    write-offs, transit losses, customer returns, quarantine
 │   ├── count/     stock counts (blind, verified, frozen) and the variance report
+│   ├── cutting/   cutting orders: sheets cut to a customer's sizes, off-cuts kept,
+│                  the pieces out through the gate
 │   ├── stock/     stock balances by item and place, and the ledger, read-only
 │   └── ticket/    transaction tickets read: the register, one ticket and the signatures behind it
-│                  NOT BUILT — cutting
 └── reporting/
     └── close/     the daily close: reconciled by Finance, countersigned and
                    locked by the Internal Controller; the nightly Quartz job
@@ -140,7 +141,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 ```
 
 The spine and the ledger (V3, V4) serve every module. A document module's
-own tables come with its own migration (V11–V15); cutting has none yet. V4
+own tables come with its own migration (V11–V15, V18 for cutting). V4
 made `daily_close`; V16 gave it its rules.
 
 ## Conventions
@@ -216,16 +217,17 @@ made `daily_close`; V16 gave it its rules.
   commit (`access_conflict_anywhere()`), so a migration that makes someone's
   roles conflict fails.
 - **Each document module's migration places its rights on the Board role
-  that owns them.** Until then a right such as `cutting.release`,
-  `damage.approve` for a new signer, or `ticket.create` is carried by no
+  that owns them.** Until then a right such as `ticket.create`,
+  `ticket.countersign`, or `damage.approve` for a new signer, is carried by no
   policy role, so no role created at runtime may carry it either. Placing it
-  is what lets the segregation rules judge who else may hold it. V11–V13
-  placed the receiving, dispatch and transfer rights; the COO still holds
+  is what lets the segregation rules judge who else may hold it. V11–V15
+  and V18 placed the receiving, dispatch, transfer, damage, count and
+  cutting rights; the COO still holds
   none, and gets its rights the same way. Give a right to the role whose step it
   signs, and ask the client when the chain does not say.
 - **A new stock-moving document widens two lists together.** Stock moves
   only through a transaction ticket whose source is a type `ticket_guard`
-  handles (GRN, DN, TRF, TRR, DMG and CNT today), and the ledger finds the approving document
+  handles (GRN, DN, TRF, TRR, DMG, CNT and CUT today), and the ledger finds the approving document
   by walking `document_support_link` (V12). A module that moves stock adds
   its type to both in its migration, or its tickets are refused. (The view
   already links every ticket to its source; a document that relates to no
@@ -276,6 +278,19 @@ made `daily_close`; V16 gave it its rules.
   `set_config('highbytes.migration', 'on', true)` in one transaction, both
   rows (`ChainSwitchTest.switchOn`, checks 27, 38 and 46). The same goes for
   any fixture that adds a chain or a step.
+- **A cut size is an item of its own** (V18). `cut_item_for(parent, w, h)`
+  finds or makes the one item for a parent sheet and exact size, the longer
+  side first, filed under the parent with `is_remnant`; cutting an off-cut
+  again files what comes of it under the same parent. A size made for the
+  first time is audited as an item created by the order. A sheet is cut
+  only when it is glass counted by the sheet with a size on the item master.
+- **A delivery note answers to a delivery authorization or a posted
+  cutting order** (V18): `authorization_id` or `cutting_order_id`, one of
+  the two, and each line to an authorization line or a piece of the order.
+  Read the note's customer, place and customs reference through
+  `delivery_note_authority`, and what it may load through
+  `delivery_authority_line`; a new join straight to
+  `delivery_authorization` misses every cut delivery.
 - **A branch closes only once finished with** (V17): no stock, no open
   document, no transfer still to arrive, every day with movements locked;
   the main branch never. Nothing new starts at an inactive branch (document,
@@ -328,7 +343,8 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 3. ~~Delivery Authorization + Delivery Note~~ — done; the release gate (V12)
 4. ~~Transfers~~ — done; goods in transit, each consignment at its own
    cost (V13)
-5. Cutting — needs the off-cut identity decision first (see Open questions)
+5. ~~Cutting~~ — done; sheets cut to a customer's sizes, each size an item,
+   the cost split by area, the pieces out through the gate (V18)
 6. ~~Returns & Damage~~ — done; write-off, transit loss, customer return,
    quarantine release, each through the full chain and posted by Finance (V14)
 7. ~~Counts + Variances~~ — done; blind first count, blind verification
@@ -344,9 +360,22 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 
 ## Open questions for the client
 
-- **Off-cut identity**: a distinct item code per remnant (traceable, grows
-  the item master fast) or a remnant pool per parent item (lighter, weaker
-  traceability)? Blocks the cutting module.
+- **Cutting (V18), built on defaults chosen 2 October 2026 for the client
+  to confirm.** Off-cut identity: one item per parent sheet and exact size
+  (`<parent>-R-<long>x<short>`), reused for the same size, rather than a
+  code per piece or a pool per parent. Cost: the sheets' value split across
+  the pieces and kept off-cuts by area, kerf and scrap absorbed. An off-cut
+  under 300 mm on either side is waste (`cut_offcut_minimum_mm`). A second
+  Finance officer posts the order. The pieces leave through the gate on a
+  delivery note raised against the posted order, not under a separate
+  delivery authorization; whoever raised the order, signed its release or
+  posted it does not let them out.
+- **How much waste may a cutting order declare?** Waste moves no stock of
+  its own: the sheets' cost is carried by what was cut and kept, so an order
+  cutting one small piece from a whole sheet loads the sheet's value onto
+  that piece. The three signers see the waste in square metres and percent;
+  nothing caps it. A ceiling (above it, the remainder recorded as off-cuts or
+  written off on a damage report) is the client's threshold to set.
 - Tolerance thresholds for count variances, damage and write-off approval.
   Until they are set, every damage report and every count takes all three
   signatures, however small.

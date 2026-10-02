@@ -15,8 +15,10 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * A delivery note's header as the screens read it, with the authorization it
- * delivers already joined. The getters at the bottom exist because
+ * A delivery note's header as the screens read it, with the authority it
+ * delivers already joined: a delivery authorization, or a posted cutting
+ * order ({@code authorityKind} DAO or CUT; the {@code dao*} fields are that
+ * authority's). The getters at the bottom exist because
  * {@code fragments/ui :: documentHeader} reads bean properties.
  */
 public record DnHeader(
@@ -50,8 +52,14 @@ public record DnHeader(
         String vehicleRegistration,
         String driverName,
         String driverPhone,
-        String driverIdNo
+        String driverIdNo,
+        String authorityKind,
+        UUID authorityPostedBy
 ) {
+
+    public boolean againstCuttingOrder() {
+        return "CUT".equals(authorityKind);
+    }
 
     public boolean bonded() {
         return branchBonded || locationBonded;

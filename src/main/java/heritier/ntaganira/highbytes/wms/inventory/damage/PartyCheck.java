@@ -72,6 +72,7 @@ public class PartyCheck {
             case "released"   -> "You let the goods of " + subject + " out, posting it at the gate";
             case "loaded"     -> "You drew up " + subject;
             case "authorized" -> "You raised the authorization behind " + subject;
+            case "cut"        -> "You recorded the cutting behind " + subject;
             case "approved"   -> "You signed the authorization behind " + subject;
             default           -> "You are a party to " + subject;
         };

@@ -20,7 +20,8 @@
       <p class="eyebrow">DOCUMENTS · DELIVERY NOTE · DN-005</p>
       <h1 class="page-title">Delivery to <span th:text="${dn.customerName}">Customer</span></h1>
       <p class="page-sub">
-        Against <a class="doc-link" th:href="@{'/dispatch/' + ${dn.authorizationId}}" th:text="${dn.daoSerial}">DAO-KGL-2026-0001</a>,
+        Against <span th:if="${dn.againstCuttingOrder()}">cutting order</span>
+        <a class="doc-link" th:href="@{'/documents/' + ${dn.authorizationId}}" th:text="${dn.daoSerial}">DAO-KGL-2026-0001</a>,
         from <span class="mono" th:text="${dn.locationCode}">KGL-MAIN</span>
         <span th:text="'· ' + ${dn.locationName}">· Gahanga main store</span>
       </p>
