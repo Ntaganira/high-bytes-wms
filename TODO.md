@@ -129,7 +129,18 @@ shape, so it is worth building carefully.
       catches a counter who copies the book; the client may want the next count opened by someone else
 - [ ] Counts: the trail and the count's view show that a line was added as found, which tells the verifier the
       book held nothing at that place. Kept: knowing a surplus place's book was nothing anchors no recount
-- [ ] Daily Close — reconcile and lock, with the Quartz job
+- [x] Daily Close — one close per branch per day that is over (V16, `reporting/close/`). Finance reconciles: the
+      database writes opening, receipts, dispatches, adjustments, closing and the movement count from the ledger,
+      and counts the exceptions (an opening that differs from the last locked close, a place below zero, a
+      stock-moving document approved but not on the ledger by the day's end, the balance cache differing from the
+      ledger); a day with exceptions needs a note. The Internal Controller countersigns, which locks the day, or
+      returns it with a reason. Days close in order; nothing is dated into or before a signed day; a locked day is
+      never reopened. A nightly Quartz job (00:15 Kigali) prepares the closes, never signs one, and logs any signed
+      day whose ledger no longer reads as signed (the register flags it too). A reconciler who posted some of the
+      day's movements is an exception, needing a note; the trail keeps the exceptions excused and the whole note
+- [ ] Daily Close, left for later: no escalation or notification for overdue days beyond the register and the
+      sidebar badge; a day with no movements has no close of its own (locking a later day closes it); the
+      exceptions are read live, so a locked day's CACHE line reflects the cache now, not then
 - [ ] Admin screens — workflow editor, branches, audit log viewer
 - [ ] Access review for the Internal Controller: who holds what, read-only,
       without admin rights
@@ -153,8 +164,9 @@ shape, so it is worth building carefully.
       Africa/Kigali, or move V9's checks to `kigali_today()` in a new migration
 - [ ] `stock_balance` is written only by `LedgerService`, but the database
       does not stop anything else writing it, and `stock_balance_from_ledger`
-      groups by item and location, not by bin. Build the nightly comparison
-      (per bin) with Daily Close
+      groups by item and location, not by bin. The daily close now compares
+      the cache with the ledger per bin at each reconciliation (CACHE); a
+      nightly comparison that alerts on its own is still to build
 - [ ] No screen for unit conversions (`item_uom_conversion`): a receipt line
       in a unit other than the item's base unit is refused until one exists
 - [ ] Approval queue (`/approvals`) and a transaction ticket screen; today a
@@ -205,10 +217,16 @@ shape, so it is worth building carefully.
       (V15, `count.post`). A branch with one Finance officer needs cover from another branch. Confirm
 - [ ] The verification sample: every differing line plus one in ten of the rest (V15, `count_sample_share`)
 - [ ] Whether counters lose `stock.view` while a count is open: the book is absent from the count pages, but
-      stock figures elsewhere (the dashboard, the stock screens once built) stay readable
+      stock figures elsewhere (the dashboard, the daily close's movements and exceptions, the stock screens once
+      built) stay readable
 - [ ] **A count is never cancelled once its verification is signed** (V15): it is posted, or rejected by a
       signer who took no part in it. Stricter than the other documents, which their creator may cancel until
       posted. Confirm
+- [ ] **Who locks the day.** Finance reconciles and the Internal Controller countersigns, which locks it (chosen
+      1 October 2026); V16 moved `close.lock` from the Managing Director to the Internal Controller. Confirm
+- [ ] Whether the Finance officer who reconciles a day may have posted some of its movements (V16 allows it and
+      shows it on the close; forbidding it needs a second Finance officer every day)
+- [ ] How long a day may stay unclosed before it is escalated, and to whom
 - [ ] No segregation rule pairs the Warehouse Manager with Finance, so one person may hold both. V15 keeps
       such a person from approving or rejecting a count they counted; should the pair be blocked outright?
 - [ ] **Returns against 2026 authorizations need a second Warehouse Manager.** The 2026 chain has a

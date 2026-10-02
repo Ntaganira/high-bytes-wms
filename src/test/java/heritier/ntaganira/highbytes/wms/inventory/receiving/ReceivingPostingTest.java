@@ -292,10 +292,21 @@ class ReceivingPostingTest extends IntegrationTest {
     void aLockedBusinessDateRefusesThePostingAndNothingMoves() {
         UUID id = flow.approved();
         UUID kigali = fx.kigali();
-        jdbc.sql("""
-                INSERT INTO daily_close (branch_id, business_date, status, locked_at)
-                VALUES (:branch, kigali_today(), 'LOCKED', now())
-                """).param("branch", kigali).update();
+        // Today is never locked by the rules (V16: a day closes once it is over), and the ledger dates every
+        // movement today, so the lock is reached only by setting the close guard aside for this test's own row.
+        // What is proved is the service's side: the ledger's refusal surfaces, and nothing is left half done.
+        jdbc.sql("ALTER TABLE daily_close DISABLE TRIGGER daily_close_guard").update();
+        try {
+            jdbc.sql("""
+                    INSERT INTO daily_close (branch_id, business_date, status, opening_value, receipts_value,
+                                             dispatches_value, adjustments_value, closing_value, movement_count,
+                                             exception_count, reconciled_by, reconciled_at, internal_controller_id,
+                                             controller_signed_at, locked_at)
+                    VALUES (:branch, kigali_today(), 'LOCKED', 0, 0, 0, 0, 0, 0, 0, :who, now(), :who, now(), now())
+                    """).param("branch", kigali).param("who", flow.poster).update();
+        } finally {
+            jdbc.sql("ALTER TABLE daily_close ENABLE TRIGGER daily_close_guard").update();
+        }
         try {
             fx.actAs(flow.poster);
             assertThatThrownBy(() -> receiving.post(id))
@@ -308,8 +319,13 @@ class ReceivingPostingTest extends IntegrationTest {
                     .param("item", flow.glass).query(Long.class).single())
                     .as("the balance rolled back with the refused movement").isZero();
         } finally {
-            jdbc.sql("DELETE FROM daily_close WHERE branch_id = :branch AND business_date = kigali_today()")
-                    .param("branch", kigali).update();
+            jdbc.sql("ALTER TABLE daily_close DISABLE TRIGGER daily_close_guard").update();
+            try {
+                jdbc.sql("DELETE FROM daily_close WHERE branch_id = :branch AND business_date = kigali_today()")
+                        .param("branch", kigali).update();
+            } finally {
+                jdbc.sql("ALTER TABLE daily_close ENABLE TRIGGER daily_close_guard").update();
+            }
         }
     }
 

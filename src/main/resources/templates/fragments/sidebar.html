@@ -149,6 +149,9 @@
         <a th:href="@{/daily-close}" class="side-link" sec:authorize="hasAuthority('close.view')"
            th:classappend="${activeNav == 'dailyClose'} ? 'active'">
           <i class="bi bi-calendar-check"></i> Daily Close
+          <span class="side-badge transit" th:if="${navCounts?.closesDue > 0}"
+                th:text="${navCounts.closesDue}"
+                th:attr="aria-label='|' + ${navCounts.closesDue} + ' days awaiting their close|'">0</span>
         </a>
         <a th:href="@{/reports}" class="side-link" sec:authorize="hasAuthority('report.view')"
            th:classappend="${activeNav == 'reports'} ? 'active'">

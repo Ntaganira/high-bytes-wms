@@ -18,7 +18,8 @@
       th:classappend="'status-' + ${#strings.toLowerCase(status)}"
       th:with="icon=${
         status == 'POSTED'    or status == 'RELEASED' or status == 'COMPLETED' or status == 'ACTIVE' ? 'bi-check-circle-fill' :
-        status == 'HELD'      or status == 'PENDING'  or status == 'SCHEDULED' ? 'bi-clock-fill' :
+        status == 'HELD'      or status == 'PENDING'  or status == 'SCHEDULED' or status == 'OPEN' ? 'bi-clock-fill' :
+        status == 'RECONCILED' ? 'bi-pen-fill' :
         status == 'REJECTED'  or status == 'VARIANCE' or status == 'QUARANTINE' or status == 'BLOCKED' ? 'bi-exclamation-octagon-fill' :
         status == 'DELIVERED' or status == 'DISPATCHED' ? 'bi-truck' :
         status == 'RECEIVED' ? 'bi-box-arrow-in-down' :

@@ -156,6 +156,12 @@ modules along the existing package seams.
 | `V8__item_categories.sql` | Glass, silicones, steel, hardware, consumables |
 | `V9__access_control.sql` | Segregation (by right as well as by role) and invariant 8 enforced on grants; policy roles, rules and permissions fixed outside migrations; assignments as history; session stamps |
 | `V10__access_control_hardening.sql` | Every seeded role protected; the Internal Controller holds no operational right beyond its own; rights no policy role carries cannot be handed out; policy changes judged for every user |
+| `V11__goods_received.sql` | The approval engine, the document lifecycle, goods received notes, the ledger's posting rules |
+| `V12__delivery_authorization.sql` | Delivery authorizations, delivery notes and the release gate |
+| `V13__transfers.sql` | Inter-branch transfers, goods in transit, transfer receipts |
+| `V14__returns_and_damage.sql` | Write-offs, transit losses, customer returns, quarantine release |
+| `V15__stock_counts.sql` | Blind counts, the verification count, the freeze, adjustment tickets |
+| `V16__daily_close.sql` | The daily close: reconciled by Finance, locked by the Internal Controller, in order |
 
 Never edit an applied migration. Add a new one.
 
@@ -196,9 +202,8 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 
 ## Not built yet
 
-Goods received, dispatch, transfers, cutting, damage, counts, daily close,
-and the admin screens for workflows, branches and the audit log. The schema
-for all of them is in place.
+Cutting (it waits on the client's off-cut decision), reports and KPIs, and
+the admin screens for workflows, branches and the audit log.
 
 ## Two rules the UI enforces that the SRS does not state
 

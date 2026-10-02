@@ -344,6 +344,9 @@ th.num, td.num { text-align: right; }
 .status-revoked   { background: var(--badge-locked-bg);    color: var(--badge-locked-text); text-decoration: line-through; }
 .status-protected { background: var(--badge-bonded-bg);    color: var(--badge-bonded-text); }
 .status-policy    { background: var(--badge-bonded-bg);    color: var(--badge-bonded-text); }
+/* The daily close: a day awaiting reconciliation, then the Internal Controller (LOCKED above). */
+.status-open       { background: var(--badge-held-bg);      color: var(--badge-held-text); }
+.status-reconciled { background: var(--badge-progress-bg);  color: var(--badge-progress-text); }
 
 /* Duties a permission carries. Administration and transactions never share
    a role, so their two colours never sit on one role's list. */

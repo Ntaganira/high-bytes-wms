@@ -39,6 +39,7 @@ spring:
 
   quartz:
     job-store-type: jdbc         # jobs must survive a restart
+    overwrite-existing-jobs: true  # a changed schedule in code replaces the stored one
     jdbc:
       initialize-schema: never   # Flyway owns them: V7__quartz_tables.sql
     properties:
