@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="'Close of ' + ${close.day()}">Close</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">REPORTING · DAILY CLOSE</p>
+      <h1 class="page-title">Close of <span class="mono" th:text="${#temporals.format(close.businessDate(), 'EEE dd MMM yyyy')}">Tue 30 Sep 2026</span></h1>
+      <p class="page-sub">
+        <span th:text="${close.branchName()}">Gahanga Main Warehouse</span> ·
+        <span th:replace="~{fragments/ui :: chip(${close.status()})}"></span>
+      </p>
+    </div>
+    <a class="btn btn-outline-secondary" th:href="@{/daily-close}"><i class="bi bi-arrow-left"></i> All days</a>
+  </div>
+
+  <!-- Where the day stands. -->
+  <div class="alert alert-info d-flex align-items-start gap-2" role="status" th:unless="${d.dayOver()}">
+    <i class="bi bi-hourglass-split"></i>
+    <div><strong>The day is not over.</strong> These are its figures so far; it is reconciled once it has ended in Kigali.</div>
+  </div>
+  <div class="alert alert-warning d-flex align-items-start gap-2" role="status"
+       th:if="${d.dayOver() and d.blockedBy() != null and !close.locked()}">
+    <i class="bi bi-sort-numeric-down"></i>
+    <div>
+      <strong>An earlier day comes first.</strong> Stock moved on
+      <a class="doc-link mono" th:href="@{'/daily-close/' + ${d.blockedBy()}}"
+         th:text="${#temporals.format(d.blockedBy(), 'dd MMM yyyy')}">28 Sep 2026</a>, which is not locked yet. Days close
+      in order, so that no lock seals figures that still rest on an open day.
+    </div>
+  </div>
+  <div class="alert alert-warning d-flex align-items-start gap-2" role="status" th:if="${close.returned()}">
+    <i class="bi bi-arrow-return-left"></i>
+    <div>
+      <strong>Returned</strong> by <span th:text="${close.returnedByName()}">Name</span>
+      on <span th:text="${#temporals.format(close.returnedAt(), 'dd MMM yyyy HH:mm')}">01 Oct 09:00</span>:
+      <span th:text="${close.returnReason()}">Reason</span>. It is to be reconciled again.
+    </div>
+  </div>
+  <div class="alert alert-info d-flex align-items-start gap-2" role="status" th:if="${close.reconciled()}">
+    <i class="bi bi-pen"></i>
+    <div>
+      <strong>Reconciled</strong> by <span th:text="${close.reconciledByName()}">Name</span>
+      on <span th:text="${#temporals.format(close.reconciledAt(), 'dd MMM yyyy HH:mm')}">01 Oct 08:30</span>.
+      Awaiting the Internal Controller's countersignature, which locks the day. Nothing can be dated into it already.
+    </div>
+  </div>
+  <div class="alert alert-success d-flex align-items-start gap-2" role="status" th:if="${close.locked()}">
+    <i class="bi bi-lock-fill"></i>
+    <div>
+      <strong>Locked</strong>: countersigned by <span th:text="${close.controllerName()}">Name</span>
+      on <span th:text="${#temporals.format(close.controllerSignedAt(), 'dd MMM yyyy HH:mm')}">01 Oct 09:12</span>.
+      The ledger refuses any movement dated into this day, or before it, at this branch. A locked day is never reopened:
+      what was wrong is corrected by a document dated today.
+    </div>
+  </div>
+  <div class="alert alert-danger d-flex align-items-start gap-2" role="alert" th:if="${d.figuresChanged()}">
+    <i class="bi bi-exclamation-octagon-fill"></i>
+    <div>
+      <strong>The ledger no longer reads as it was signed.</strong> Something was written into this day after it was
+      reconciled. The figures below show both readings.
+    </div>
+  </div>
+
+  <div class="row g-3">
+
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-calculator" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">The day in values</h2>
+              <p class="card-sub" th:if="${close.signed() != null}">As the database wrote them when the day was reconciled</p>
+              <p class="card-sub" th:if="${close.signed() == null}">Read from the ledger now; written into the close when it is reconciled</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:with="f=${close.signed() != null} ? ${close.signed()} : ${d.live()}">
+          <table class="table hb-table compact mb-0">
+            <tbody>
+              <tr>
+                <th scope="row">Opening</th>
+                <td class="num mono" th:text="${#numbers.formatDecimal(f.opening(), 1, 'COMMA', 2, 'POINT')}">1,000,000.00</td>
+                <td class="small text-body-secondary">the value held at the end of the day before</td>
+              </tr>
+              <tr>
+                <th scope="row">+ Receipts</th>
+                <td class="num mono" th:text="${#numbers.formatDecimal(f.receipts(), 1, 'COMMA', 2, 'POINT')}">250,000.00</td>
+                <td class="small text-body-secondary">goods received, returned, and transferred in</td>
+              </tr>
+              <tr>
+                <th scope="row">− Dispatches</th>
+                <td class="num mono" th:text="${#numbers.formatDecimal(f.dispatches(), 1, 'COMMA', 2, 'POINT')}">100,000.00</td>
+                <td class="small text-body-secondary">goods delivered and transferred out</td>
+              </tr>
+              <tr>
+                <th scope="row">± Adjustments</th>
+                <td class="num mono" th:text="${#numbers.formatDecimal(f.adjustments(), 1, 'COMMA', 2, 'POINT')}">-3,000.00</td>
+                <td class="small text-body-secondary">write-offs, count adjustments, cutting</td>
+              </tr>
+              <tr>
+                <th scope="row">= Closing</th>
+                <td class="num mono fw-semibold" th:text="${#numbers.formatDecimal(f.closing(), 1, 'COMMA', 2, 'POINT')}">1,147,000.00</td>
+                <td class="small text-body-secondary">
+                  <span th:text="${f.movementCount()}">12</span> movements dated this day
+                </td>
+              </tr>
+              <tr th:if="${d.figuresChanged()}">
+                <th scope="row" style="color: var(--color-danger)">Ledger now</th>
+                <td class="num mono" style="color: var(--color-danger)"
+                    th:text="${#numbers.formatDecimal(d.live().closing(), 1, 'COMMA', 2, 'POINT')}">1,148,000.00</td>
+                <td class="small" style="color: var(--color-danger)">
+                  closing now, with <span th:text="${d.live().movementCount()}">13</span> movements
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </th:block>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Exceptions</h2>
+              <p class="card-sub">Found by the database, read now. A day with any is reconciled only with a note on them</p>
+            </div>
+          </div>
+        </div>
+        <th:block th:if="${#lists.isEmpty(d.findings())}">
+          <p class="small text-body-secondary mb-0">None. The day opens where the last locked day closed, nothing is below
+            zero, nothing approved was left off the ledger, and the balances kept agree with it.</p>
+        </th:block>
+        <ul class="list-unstyled mb-0" th:unless="${#lists.isEmpty(d.findings())}">
+          <li class="mb-2" th:each="x : ${d.findings()}">
+            <span class="fw-semibold small" th:text="${x.title()}">Below zero on the book</span>
+            <span class="d-block small" th:text="${x.detail()}">Detail</span>
+          </li>
+        </ul>
+        <div class="mt-3" th:if="${close.exceptionsNote()}">
+          <div class="small fw-semibold">Reconciler's note</div>
+          <p class="small mb-0" th:text="${close.exceptionsNote()}">Note</p>
+        </div>
+      </section>
+
+      <section class="hb-card mb-3">
+        <div class="hb-card-body pb-0">
+          <div class="card-head">
+            <div class="card-title-row">
+              <i class="bi bi-list-columns" aria-hidden="true"></i>
+              <div>
+                <h2 class="card-title">Movements</h2>
+                <p class="card-sub">Every ledger movement dated this day at this branch, in the order recorded</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table hb-table compact mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Ticket</th>
+                <th scope="col">For</th>
+                <th scope="col">Type</th>
+                <th scope="col">Item</th>
+                <th scope="col">Location</th>
+                <th scope="col" class="num">Quantity</th>
+                <th scope="col" class="num">Value (RWF)</th>
+                <th scope="col">Posted by</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr th:each="m : ${d.movements()}">
+                <td class="mono" th:text="${m.ticketSerial()} ?: '—'">TT-KGL-2026-0001</td>
+                <td>
+                  <a class="doc-link mono" th:if="${m.sourceId()}" th:href="@{'/documents/' + ${m.sourceId()}}"
+                     th:text="${m.sourceSerial()}">GRN-KGL-2026-0001</a>
+                  <span th:unless="${m.sourceId()}">—</span>
+                </td>
+                <td class="small">
+                  <span th:text="${m.movementType() != null} ? ${#strings.replace(m.movementType(), '_', ' ')} : '—'">RECEIPT</span>
+                  <span class="d-block text-body-secondary" th:text="${m.direction()}">IN</span>
+                </td>
+                <td>
+                  <span class="mono" th:text="${m.itemCode()}">GL-CF-6</span>
+                  <span class="d-block small text-body-secondary" th:text="${m.itemDescription()}">Clear float</span>
+                </td>
+                <td class="mono">
+                  <span th:text="${m.locationCode()}">KGL-MAIN</span>
+                  <span class="d-block small text-body-secondary" th:if="${m.binCode()}" th:text="${m.binCode()}">A1</span>
+                </td>
+                <td class="num mono">
+                  <span th:text="${#numbers.formatDecimal(m.quantity(), 1, 'COMMA', 3, 'POINT')}">10.000</span>
+                  <span class="small text-body-secondary" th:text="${m.uomCode()}">SHEET</span>
+                </td>
+                <td class="num mono" th:text="${#numbers.formatDecimal(m.signedValue(), 1, 'COMMA', 2, 'POINT')}">80,000.00</td>
+                <td class="small">
+                  <span th:text="${m.postedByName()}">Name</span>
+                  <span class="d-block text-body-secondary mono" th:text="${#temporals.format(m.movementAt(), 'HH:mm')}">10:24</span>
+                </td>
+              </tr>
+              <tr th:if="${#lists.isEmpty(d.movements())}">
+                <td colspan="8" class="small text-body-secondary">No stock moved at this branch on this day.</td>
+              </tr>
+              <tr th:if="${d.truncated()}">
+                <td colspan="8" class="small text-body-secondary">The first 2,000 movements are shown; the figures count them all.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="col-12 col-xl-4">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-pen" aria-hidden="true"></i>
+            <h2 class="card-title">Signatures</h2>
+          </div>
+        </div>
+        <dl class="mb-0 small">
+          <dt>Reconciled (Finance)</dt>
+          <dd>
+            <th:block th:if="${close.reconciledByName()}">
+              <span th:text="${close.reconciledByName()}">Name</span>,
+              <span class="mono" th:text="${#temporals.format(close.reconciledAt(), 'dd MMM yyyy HH:mm')}">01 Oct 08:30</span>
+              <span class="d-block text-body-secondary" th:if="${d.postedByReconciler() > 0}"
+                    th:text="'Posted ' + ${d.postedByReconciler()} + ' of the ' + ${d.movements().size()} + ' movements of this day.'">Posted 4 of the 12 movements of this day.</span>
+            </th:block>
+            <span class="text-body-secondary" th:unless="${close.reconciledByName()}">Not yet</span>
+          </dd>
+          <dt>Countersigned (Internal Controller)</dt>
+          <dd>
+            <th:block th:if="${close.controllerName()}">
+              <span th:text="${close.controllerName()}">Name</span>,
+              <span class="mono" th:text="${#temporals.format(close.controllerSignedAt(), 'dd MMM yyyy HH:mm')}">01 Oct 09:12</span>
+            </th:block>
+            <span class="text-body-secondary" th:unless="${close.controllerName()}">Not yet</span>
+          </dd>
+        </dl>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning" aria-hidden="true"></i>
+            <h2 class="card-title">What you can do</h2>
+          </div>
+        </div>
+
+        <form th:if="${actions.canReconcile}" sec:authorize="hasAuthority('close.reconcile')"
+              th:action="@{'/daily-close/' + ${close.businessDate()} + '/reconcile'}" method="post" class="mb-3">
+          <p class="small">Reconciling signs the day as reviewed: its movements against the documents behind them, and
+            its exceptions. The database writes the figures as you sign; the Internal Controller then countersigns,
+            which locks the day.</p>
+          <label for="closeNote" class="form-label small fw-semibold" style="color: var(--color-heading)">
+            Note <span th:if="${actions.noteRequired}">(required: the day has exceptions)</span>
+            <span th:unless="${actions.noteRequired}">(optional)</span>
+          </label>
+          <textarea id="closeNote" name="note" class="form-control form-control-sm mb-2" rows="3" maxlength="1000"
+                    th:required="${actions.noteRequired}" th:text="${note}"></textarea>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-pen"></i> Reconcile the day</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.reconcileReason}" th:text="${actions.reconcileReason}">Reason</p>
+
+        <form th:if="${actions.canCountersign}" sec:authorize="hasAuthority('close.lock')"
+              th:action="@{'/daily-close/' + ${close.businessDate()} + '/countersign'}" method="post" class="mb-3">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="confirmLock" name="confirm" value="true">
+            <label class="form-check-label small" for="confirmLock">
+              I have reviewed the reconciliation and its note. Countersigning locks the day for good: nothing can be
+              dated into it again, and it is never reopened.
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary-action w-100"><i class="bi bi-lock"></i> Countersign and lock</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.countersignReason}" th:text="${actions.countersignReason}">Reason</p>
+
+        <details th:if="${actions.canReturn}" sec:authorize="hasAuthority('close.lock')" class="mb-2">
+          <summary class="small fw-semibold">Return it to be reconciled again</summary>
+          <form th:action="@{'/daily-close/' + ${close.businessDate()} + '/return'}" method="post" class="mt-2">
+            <label for="returnReason" class="form-label small">Reason (required): what is to be looked at again.</label>
+            <input id="returnReason" name="reason" class="form-control form-control-sm mb-2" maxlength="400"
+                   required autocomplete="off">
+            <button type="submit" class="btn btn-outline-danger w-100"><i class="bi bi-arrow-return-left"></i> Return</button>
+          </form>
+        </details>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canReconcile and !actions.canCountersign and !actions.canReturn
+                    and actions.reconcileReason == null and actions.countersignReason == null}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+
+    </div>
+
+    <div class="col-12">
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">History</h2>
+              <p class="card-sub">Every preparation, signature, return and refusal, newest first</p>
+            </div>
+          </div>
+        </div>
+
+        <th:block th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Signatures on this day will be listed here.')}"></div>
+        </th:block>
+
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

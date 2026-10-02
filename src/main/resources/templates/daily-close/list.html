@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Daily Close</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-end gap-3 mb-4">
+    <div>
+      <p class="eyebrow">REPORTING · DAILY CLOSE</p>
+      <h1 class="page-title">Daily Close</h1>
+      <p class="page-sub">Each day at <span th:text="${currentBranch?.name}">this branch</span> on which stock moved is
+        reconciled by Finance and countersigned by the Internal Controller, in order. The countersignature locks the
+        day: nothing can be dated into it, or before it, again.</p>
+    </div>
+    <a class="btn btn-outline-secondary ms-auto" th:href="@{'/daily-close/' + ${register.today()}}">
+      <i class="bi bi-calendar-day"></i> Today so far
+    </a>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+      <section class="hb-card hb-card-body">
+        <div class="small text-body-secondary">Awaiting reconciliation</div>
+        <div class="fs-5 mono" th:text="${register.awaitingReconciliation()}">2</div>
+      </section>
+    </div>
+    <div class="col-6 col-md-3">
+      <section class="hb-card hb-card-body">
+        <div class="small text-body-secondary">Awaiting countersignature</div>
+        <div class="fs-5 mono" th:text="${register.awaitingCountersignature()}">1</div>
+      </section>
+    </div>
+    <div class="col-12 col-md-6">
+      <section class="hb-card hb-card-body">
+        <div class="small text-body-secondary">Locked up to</div>
+        <div class="fs-5 mono" th:text="${register.lastLocked() != null} ? ${#temporals.format(register.lastLocked(), 'dd MMM yyyy')} : 'No day locked yet'">29 Sep 2026</div>
+      </section>
+    </div>
+  </div>
+
+  <section class="hb-card">
+    <div class="table-responsive">
+      <table class="table hb-table mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Day</th>
+            <th scope="col">State</th>
+            <th scope="col" class="num">Movements</th>
+            <th scope="col" class="num">Closing (RWF)</th>
+            <th scope="col" class="num">Exceptions</th>
+            <th scope="col">Reconciled by</th>
+            <th scope="col">Countersigned by</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="r : ${register.rows()}">
+            <td>
+              <a class="doc-link mono" th:href="@{'/daily-close/' + ${r.businessDate()}}"
+                 th:text="${#temporals.format(r.businessDate(), 'EEE dd MMM yyyy')}">Tue 30 Sep 2026</a>
+            </td>
+            <td>
+              <span th:replace="~{fragments/ui :: chip(${r.status()})}"></span>
+              <span class="d-block small text-body-secondary" th:if="${r.returned()}">returned</span>
+              <span class="d-block small text-body-secondary" th:unless="${r.prepared()}">not prepared yet</span>
+              <span class="d-block small fw-semibold" th:if="${r.drifted()}" style="color: var(--color-danger)">ledger no longer reads as signed</span>
+            </td>
+            <td class="num mono" th:text="${r.movementCount()}">12</td>
+            <td class="num mono" th:text="${r.closingValue() != null} ? ${#numbers.formatDecimal(r.closingValue(), 1, 'COMMA', 2, 'POINT')} : '—'">1,250,000.00</td>
+            <td class="num mono" th:text="${r.exceptionCount()} ?: '—'">0</td>
+            <td th:text="${r.reconciledByName()} ?: '—'">Name</td>
+            <td>
+              <span th:text="${r.controllerName()} ?: '—'">Name</span>
+              <span class="d-block small text-body-secondary mono" th:if="${r.lockedAt()}"
+                    th:text="${#temporals.format(r.lockedAt(), 'dd MMM HH:mm')}">01 Oct 09:12</span>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(register.rows())}">
+            <td colspan="7">
+              <div th:replace="~{fragments/ui :: emptyState('bi-calendar-check', 'Nothing to close', 'No past day at this branch has stock movements awaiting a close.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

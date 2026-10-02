@@ -31,7 +31,10 @@ else.
    `document_id`.
 3. **A locked business date refuses movements inside it.** Once
    `daily_close.status = 'LOCKED'`, an insert dated into that day at that
-   branch is refused at the ledger.
+   branch is refused at the ledger, and so is one dated before it or into a
+   reconciled day (V16). A day is locked only by the Internal Controller
+   countersigning Finance's reconciliation, days lock in order, and a locked
+   day is never reopened, changed or deleted.
 4. **A posted document cannot be altered.** Only cancellation columns change,
    and a posted document whose type moves stock cannot be cancelled at all:
    the ledger would still carry the stock while the document read
@@ -120,12 +123,15 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── damage/    write-offs, transit losses, customer returns, quarantine
 │   └── count/     stock counts (blind, verified, frozen) and the variance report
 │                  NOT BUILT — cutting
-└── reporting/     NOT BUILT — daily close, KPIs, exports
+└── reporting/
+    └── close/     the daily close: reconciled by Finance, countersigned and
+                   locked by the Internal Controller; the nightly Quartz job
+                   NOT BUILT — KPIs, exports
 ```
 
-The spine and the ledger (V3, V4) serve every module, and `daily_close`
-already exists for Daily Close. A document module's own tables come with its
-own migration (V11–V15); cutting has none yet.
+The spine and the ledger (V3, V4) serve every module. A document module's
+own tables come with its own migration (V11–V15); cutting has none yet. V4
+made `daily_close`; V16 gave it its rules.
 
 ## Conventions
 
@@ -235,6 +241,14 @@ own migration (V11–V15); cutting has none yet.
   verification count; whoever verified signs only the verification. Once
   the verification is signed the count is never cancelled: it is posted, or
   rejected by a later signer.
+- **A day closes once it is over, and in order** (V16). Nothing can close
+  today, and the ledger dates every movement today (V11), so a test never
+  locks a day it posts into. A test that needs stock on a past day writes it
+  with `session_replication_role = replica` (`CloseFlow.stockOn`, and
+  `pg_temp.stock_on(..., p_force)` in the verify script), at a branch of its
+  own, so the order its days close in rests on nothing another test wrote.
+  The close's figures and exceptions are the database's
+  (`close_figures`, `close_exceptions`), never supplied.
 - **The access checks run at COMMIT** (deferred constraint triggers). A
   service asks `access_conflict()` first so the refusal carries its reason;
   a psql test must `SET CONSTRAINTS ALL IMMEDIATE`, as `verify-controls.sql`
@@ -287,7 +301,10 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 7. ~~Counts + Variances~~ — done; blind first count, blind verification
    count of every differing line and a random sample, the freeze, adjustment
    tickets posted by a second Finance officer (V15)
-8. Daily Close
+8. ~~Daily Close~~ — done; Finance reconciles a day that is over, the
+   database writes its figures and exceptions, the Internal Controller's
+   countersignature locks it, days close in order; a nightly job prepares
+   them (V16)
 9. Admin screens — ~~users, roles~~ done; workflow editor, branches and
    the audit log viewer remain
 
@@ -307,8 +324,9 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
   count differs from the book and one in ten of the rest (at least one),
   chosen at random at submission. Changed by migration.
 - The book is absent from the count pages, but the Warehouse Manager holds
-  `stock.view`, so stock figures elsewhere (the dashboard, and the stock
-  screens once built) stay readable during a count. Should counters lose
+  `stock.view`, so stock figures elsewhere (the dashboard, the daily close's
+  movements and exceptions, and the stock screens once built) stay readable
+  during a count. Should counters lose
   them while a count is open? The random verification sample is what
   catches a counter who copies the book.
 - Does a customer return need a Finance credit note before it is posted, and
@@ -331,6 +349,17 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
   A count answers it for itself (V15): never once its verification is
   signed, since withdrawing it would drop a variance an independent recount
   confirmed. The client is to confirm.
+- **Who locks the day?** Finance reconciles and the Internal Controller's
+  countersignature locks it (chosen 1 October 2026); V16 moved `close.lock`
+  from the Managing Director, where V5 had put it, to the Internal
+  Controller. The client is to confirm.
+- **May the reconciler have posted the day's movements?** V16 allows it, so a
+  branch with one Finance officer can still close a day it posted in, but
+  makes it an exception (RECONCILER_POSTED): the day is signed only with a
+  note on it, which the Internal Controller reads before countersigning.
+  Forbidding it would need a second Finance officer daily.
+- How long may a day stay unclosed? Nothing locks a day by itself (a machine
+  never signs); overdue days show on the register and in the sidebar.
 - No segregation rule pairs the Director of Supply Chain with the Internal
   Controller, so one person may hold both. On one document they can sign
   only one step, but Board Table 6 may intend the pair to be blocked.

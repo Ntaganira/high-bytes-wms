@@ -13,6 +13,7 @@ package heritier.ntaganira.highbytes.wms.common.web;
 
 import heritier.ntaganira.highbytes.wms.branch.BranchService;
 import heritier.ntaganira.highbytes.wms.branch.BranchView;
+import heritier.ntaganira.highbytes.wms.common.db.KigaliTime;
 import heritier.ntaganira.highbytes.wms.security.AppUserDetails;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -65,7 +66,11 @@ public class GlobalModelAdvice {
               (SELECT COUNT(*) FROM stock_count_line l JOIN document c ON c.id = l.document_id
                 WHERE c.branch_id = :branchId AND c.status IN ('PENDING', 'APPROVED')
                   AND l.variance_qty <> 0 AND count_book_visible(c.id))              AS variances_open,
-              0                                                                          AS delivery_notes_overdue
+              0                                                                          AS delivery_notes_overdue,
+              -- Days prepared or reconciled and not yet locked. Read from the closes the nightly job prepares,
+              -- never from the ledger: this runs on every page.
+              (SELECT COUNT(*) FROM daily_close c
+                WHERE c.branch_id = :branchId AND c.status <> 'LOCKED')                  AS closes_due
               FROM document d
               JOIN document_type dt ON dt.id = d.document_type_id
              WHERE d.branch_id = :branchId
@@ -97,9 +102,10 @@ public class GlobalModelAdvice {
         return branch;
     }
 
+    /** Today in Kigali, whatever the server's own clock is set to: the business date is the branch's. */
     @ModelAttribute("businessDate")
     public LocalDate businessDate() {
-        return LocalDate.now();
+        return LocalDate.now(KigaliTime.ZONE);
     }
 
     @ModelAttribute("dayLocked")
@@ -108,7 +114,7 @@ public class GlobalModelAdvice {
         if (branch == null) return false;
         return jdbc.sql(CLOSE_STATUS)
                 .param("branchId", branch.id())
-                .param("date", LocalDate.now())
+                .param("date", LocalDate.now(KigaliTime.ZONE))
                 .query(String.class)
                 .optional()
                 .map("LOCKED"::equals)
@@ -142,7 +148,8 @@ public class GlobalModelAdvice {
                         rs.getInt("transfers_in_transit"),
                         rs.getInt("counts_open"),
                         rs.getInt("variances_open"),
-                        rs.getInt("delivery_notes_overdue")))
+                        rs.getInt("delivery_notes_overdue"),
+                        rs.getInt("closes_due")))
                 .optional()
                 .orElseGet(NavCounts::empty);
     }
@@ -152,10 +159,11 @@ public class GlobalModelAdvice {
                             int transfersInTransit,
                             int countsOpen,
                             int variancesOpen,
-                            int deliveryNotesOverdue) {
+                            int deliveryNotesOverdue,
+                            int closesDue) {
 
         public static NavCounts empty() {
-            return new NavCounts(0, 0, 0, 0, 0, 0);
+            return new NavCounts(0, 0, 0, 0, 0, 0, 0);
         }
 
         public int totalPending() {

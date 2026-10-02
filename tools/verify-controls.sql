@@ -257,21 +257,63 @@ END $$;
 
 -- ---------------------------------------------------------------------
 -- 3. A locked business date refuses movements
+--
+-- A day is locked the only way there is (V16): reconciled by Finance and
+-- countersigned by the Internal Controller, every earlier day with
+-- movements first. Gahanga is closed up to ten days ago, so the days since
+-- stay open for the checks that date a movement into an open day (28a).
 -- ---------------------------------------------------------------------
-INSERT INTO daily_close (branch_id, business_date, status, locked_at)
-SELECT id, CURRENT_DATE - 1, 'LOCKED', now() FROM branch WHERE code = 'KGL'
-ON CONFLICT (branch_id, business_date) DO UPDATE SET status = 'LOCKED', locked_at = now();
+CREATE FUNCTION pg_temp.close_day(p_branch UUID, p_date DATE) RETURNS VOID AS $$
+BEGIN
+    INSERT INTO daily_close (branch_id, business_date) VALUES (p_branch, p_date)
+    ON CONFLICT (branch_id, business_date) DO NOTHING;
+    UPDATE daily_close SET status = 'RECONCILED', reconciled_by = pg_temp.holder('FINANCE'),
+                           exceptions_note = 'Verification'
+     WHERE branch_id = p_branch AND business_date = p_date AND status = 'OPEN';
+    UPDATE daily_close SET status = 'LOCKED', internal_controller_id = pg_temp.holder('INTERNAL_CTRL')
+     WHERE branch_id = p_branch AND business_date = p_date AND status = 'RECONCILED';
+END $$ LANGUAGE plpgsql;
+
+-- Every day at a branch up to p_date that needs closing, closed in order.
+CREATE FUNCTION pg_temp.close_through(p_branch TEXT, p_date DATE) RETURNS VOID AS $$
+DECLARE
+    b UUID := (SELECT id FROM branch WHERE code = p_branch);
+    d DATE;
+BEGIN
+    LOOP
+        d := close_unlocked_day_before(b, p_date);
+        EXIT WHEN d IS NULL;
+        PERFORM pg_temp.close_day(b, d);
+    END LOOP;
+    PERFORM pg_temp.close_day(b, p_date);
+END $$ LANGUAGE plpgsql;
+
+SELECT pg_temp.close_through('KGL', kigali_today() - 10);
 
 DO $$ BEGIN
   INSERT INTO stock_movement (document_id, branch_id, item_id, location_id, direction,
                               quantity_base_uom, signed_quantity, running_balance,
                               business_date, posted_by)
-  SELECT d.id, b.id, i.id, l.id, 'OUT', 5, -5, 95, CURRENT_DATE - 1, u.id
+  SELECT d.id, b.id, i.id, l.id, 'OUT', 5, -5, 95, kigali_today() - 10, u.id
     FROM document d, branch b, item i, location l, app_user u
    WHERE d.serial_no = '_VERIFY-0001-TT' AND b.code = 'KGL'
      AND i.item_code = '_VERIFY-GLASS' AND l.code = 'KGL-MAIN' AND u.username = '_verify';
   RAISE WARNING 'FAIL  3   a movement was backdated into a locked day';
 EXCEPTION WHEN restrict_violation THEN RAISE NOTICE 'ok    3   locked business date refuses movements';
+END $$;
+
+-- And a day before it, which has no close of its own: everything up to the
+-- last locked day is closed.
+DO $$ BEGIN
+  INSERT INTO stock_movement (document_id, branch_id, item_id, location_id, direction,
+                              quantity_base_uom, signed_quantity, running_balance,
+                              business_date, posted_by)
+  SELECT d.id, b.id, i.id, l.id, 'OUT', 5, -5, 95, kigali_today() - 12, u.id
+    FROM document d, branch b, item i, location l, app_user u
+   WHERE d.serial_no = '_VERIFY-0001-TT' AND b.code = 'KGL'
+     AND i.item_code = '_VERIFY-GLASS' AND l.code = 'KGL-MAIN' AND u.username = '_verify';
+  RAISE WARNING 'FAIL  3b  a movement was backdated to before a locked day';
+EXCEPTION WHEN restrict_violation THEN RAISE NOTICE 'ok    3b  a day before a locked day refuses movements too';
 END $$;
 
 -- ---------------------------------------------------------------------
@@ -426,7 +468,7 @@ INSERT INTO role (code, name) VALUES
        ('_VERIFY_ASSURE',   'Verification Assurance Copy'),
        ('_VERIFY_FINANCE',  'Verification Finance Copy'),
        ('_VERIFY_STORE',    'Verification Store Keeper'),
-       ('_VERIFY_CLOSER',   'Verification Day Closer'),
+       ('_VERIFY_MDCOPY',   'Verification Managing Director Copy'),
        ('_VERIFY_DVERIFY',  'Verification Dispatch Verifier');
 
 INSERT INTO role_permission (role_id, permission_id)
@@ -442,7 +484,7 @@ SELECT r.id, p.id
        ('_VERIFY_FINANCE',  'count.approve'),     -- Finance's, not the Internal Controller's
        ('_VERIFY_STORE',    'receiving.create'),  -- the Warehouse Manager's
        ('_VERIFY_STORE',    'count.enter'),
-       ('_VERIFY_CLOSER',   'close.lock'),        -- the Managing Director's
+       ('_VERIFY_MDCOPY',   'damage.approve'),    -- the Managing Director's alone
        ('_VERIFY_DVERIFY',  'dispatch.verify'));  -- the Warehouse Manager's and the Internal Controller's
 
 -- ---------------------------------------------------------------------
@@ -680,8 +722,10 @@ END $$;
 -- ---------------------------------------------------------------------
 DO $$ BEGIN
   PERFORM pg_temp.grant_role('_verify_ic1', 'INTERNAL_CTRL');
-  PERFORM pg_temp.grant_role('_verify_ic1', '_VERIFY_CLOSER');
-  RAISE WARNING 'FAIL 18a  the Internal Controller was also given a day-close right';
+  -- No segregation rule pairs the Managing Director with the Internal
+  -- Controller: only the assurance rule refuses this.
+  PERFORM pg_temp.grant_role('_verify_ic1', '_VERIFY_MDCOPY');
+  RAISE WARNING 'FAIL 18a  the Internal Controller was also given the Managing Director''s approval right';
 EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18a  the Internal Controller holds no transactional right beyond its own';
 END $$;
 
@@ -721,7 +765,7 @@ END $$;
 
 DO $$ BEGIN
   INSERT INTO role_permission (role_id, permission_id)
-  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_CLOSER' AND p.code = 'cutting.release';
+  SELECT r.id, p.id FROM role r, permission p WHERE r.code = '_VERIFY_MDCOPY' AND p.code = 'cutting.release';
   RAISE WARNING 'FAIL 18e  a right no policy role carries was handed out';
 EXCEPTION WHEN SQLSTATE '23Z01' THEN RAISE NOTICE 'ok   18e  a right the policy has not placed cannot be handed out';
 END $$;
@@ -1290,7 +1334,7 @@ SELECT pg_temp.refuses('28b', 'a movement dated in the future was accepted',
   '23Z02', '%dated the day it is recorded%');
 -- The locked day still speaks first for a locked day (check 3's day).
 SELECT pg_temp.refuses('28c', 'a movement into a locked day was accepted',
-  $q$SELECT pg_temp.move_ticket(pg_temp.fx_id('tt_d1'), pg_temp.holder('FINANCE'), CURRENT_DATE - 1)$q$,
+  $q$SELECT pg_temp.move_ticket(pg_temp.fx_id('tt_d1'), pg_temp.holder('FINANCE'), kigali_today() - 10)$q$,
   '23001', '%closed at this branch%');
 SELECT pg_temp.accepts('28d', 'a movement dated today (Kigali) is accepted',
   $q$SELECT pg_temp.move_ticket(pg_temp.fx_id('tt_d1'), pg_temp.holder('FINANCE'), kigali_today())$q$);
@@ -4512,6 +4556,255 @@ BEGIN
         RAISE WARNING 'FAIL 62s  the place holds %', pg_temp.held('_VERIFY-CNT4');
     END IF;
 END $$;
+
+-- =====================================================================
+-- The daily close (V16): reconciled by Finance, countersigned and locked
+-- by the Internal Controller, day after day in order; its figures are
+-- the ledger's. At a branch of its own, so its locks touch nothing else.
+-- =====================================================================
+INSERT INTO branch (code, name, branch_type) VALUES ('_VC', 'Verification Close Branch', 'BRANCH');
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT id, '_VERIFY-CL', 'Verification close store', 'WAREHOUSE' FROM branch WHERE code = '_VC';
+
+-- Glass received at a location on a given day, at 1000 a sheet, through a
+-- real receipt. The ledger dates a movement the day it is recorded (V11),
+-- so a past day holds stock only when p_force sets the ledger's triggers
+-- aside for that one insert (session_replication_role): the only way a
+-- past day is ever stocked in a test, and how a tamperer would do it.
+-- Without p_force the movement meets every rule the ledger has.
+CREATE FUNCTION pg_temp.stock_on(p_serial TEXT, p_branch TEXT, p_loc TEXT, p_qty NUMERIC, p_date DATE,
+                                 p_force BOOLEAN DEFAULT FALSE) RETURNS VOID AS $$
+DECLARE
+    fin UUID := pg_temp.holder('FINANCE');
+    g   UUID;
+    tt  UUID;
+BEGIN
+    g := pg_temp.make_grn(p_serial, NULL, p_branch, p_loc);
+    UPDATE goods_received_line SET item_id = (SELECT id FROM item WHERE item_code = '_VERIFY-GLASS'),
+           quantity = p_qty, qty_base_uom = p_qty
+     WHERE document_id = g;
+    UPDATE document SET status = 'PENDING' WHERE id = g;
+    PERFORM pg_temp.sign_upto(g, pg_temp.steps_in(g));
+    UPDATE document SET status = 'APPROVED' WHERE id = g;
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = g;
+    tt := pg_temp.make_ticket(g, fin, p_serial || '-TT');
+    IF p_force THEN
+        PERFORM set_config('session_replication_role', 'replica', true);
+    END IF;
+    PERFORM pg_temp.move_ticket(tt, fin, p_date);
+    PERFORM set_config('session_replication_role', 'origin', true);
+    UPDATE document SET status = 'POSTED', posted_by = fin WHERE id = tt;
+END $$ LANGUAGE plpgsql;
+
+-- The close of a day at the verification branch.
+CREATE FUNCTION pg_temp.close_row(p_date DATE) RETURNS UUID AS $$
+    SELECT c.id FROM daily_close c JOIN branch b ON b.id = c.branch_id
+     WHERE b.code = '_VC' AND c.business_date = p_date;
+$$ LANGUAGE sql;
+
+-- 10 sheets arrive three days ago, 5 two days ago; nothing since.
+SELECT pg_temp.stock_on('_VERIFY-L-IN1', '_VC', '_VERIFY-CL', 10, kigali_today() - 3, TRUE);
+SELECT pg_temp.stock_on('_VERIFY-L-IN2', '_VC', '_VERIFY-CL', 5, kigali_today() - 2, TRUE);
+
+-- ---------------------------------------------------------------------
+-- 63. Who closes a day; a close starts empty; Finance reconciles, in
+--     order, and the figures are the database's
+-- ---------------------------------------------------------------------
+DO $$
+DECLARE bad TEXT;
+BEGIN
+    SELECT string_agg(v.code || ' on {' || COALESCE(have.roles, '') || '} expected {' || v.want || '}', '; ')
+      INTO bad
+      FROM (VALUES ('close.reconcile', 'FINANCE'), ('close.lock', 'INTERNAL_CTRL')) AS v(code, want)
+      LEFT JOIN LATERAL (
+            SELECT string_agg(r.code, ',' ORDER BY r.code) AS roles
+              FROM role_permission rp
+              JOIN role r       ON r.id = rp.role_id AND role_is_policy_defined(r.id)
+              JOIN permission p ON p.id = rp.permission_id
+             WHERE p.code = v.code) have ON TRUE
+     WHERE have.roles IS DISTINCT FROM v.want;
+    IF bad IS NULL AND (SELECT action FROM permission WHERE code = 'close.lock') = 'VERIFY' THEN
+        RAISE NOTICE 'ok   63a  of the policy''s roles Finance alone reconciles a day and the Internal Controller alone locks it';
+    ELSE
+        RAISE WARNING 'FAIL 63a  % (close.lock is %)', COALESCE(bad, 'placed as expected'),
+              (SELECT action FROM permission WHERE code = 'close.lock');
+    END IF;
+END $$;
+SELECT pg_temp.refuses('63b', 'a close was inserted already locked',
+  $q$INSERT INTO daily_close (branch_id, business_date, status, locked_at)
+     SELECT id, kigali_today() - 3, 'LOCKED', now() FROM branch WHERE code = '_VC'$q$,
+  '23Z02', '%starts OPEN and empty%');
+SELECT pg_temp.refuses('63c', 'a close was inserted with its figures supplied',
+  $q$INSERT INTO daily_close (branch_id, business_date, closing_value)
+     SELECT id, kigali_today() - 3, 1 FROM branch WHERE code = '_VC'$q$,
+  '23Z02', '%starts OPEN and empty%');
+SELECT pg_temp.refuses('63d', 'a close of today was opened before the day is over',
+  $q$INSERT INTO daily_close (branch_id, business_date) SELECT id, kigali_today() FROM branch WHERE code = '_VC'$q$,
+  '23Z02', '%not over yet%');
+SELECT pg_temp.accepts('63e', 'a close is prepared for a day that is over, open and empty',
+  $q$INSERT INTO daily_close (branch_id, business_date)
+     SELECT b.id, v.d FROM branch b, (VALUES (kigali_today() - 3), (kigali_today() - 2)) AS v(d) WHERE b.code = '_VC'$q$);
+SELECT pg_temp.refuses('63f', 'a day was reconciled while an earlier day with movements was open',
+  $q$UPDATE daily_close SET status = 'RECONCILED', reconciled_by = pg_temp.holder('FINANCE'), exceptions_note = 'Verification'
+      WHERE id = pg_temp.close_row(kigali_today() - 2)$q$,
+  '23Z02', '%before%is locked%');
+SELECT pg_temp.refuses('63g', 'a Warehouse Manager reconciled a day',
+  $q$UPDATE daily_close SET status = 'RECONCILED', reconciled_by = pg_temp.holder('WH_MANAGER'), exceptions_note = 'Verification'
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$,
+  '23Z02', '%does not hold close.reconcile%');
+-- The script writes the ledger directly, so stock_balance never heard of
+-- these receipts: the database finds that (CACHE), and a day with an
+-- exception is not signed without a word on it.
+SELECT pg_temp.refuses('63h', 'a day with exceptions was reconciled without a note',
+  $q$UPDATE daily_close SET status = 'RECONCILED', reconciled_by = pg_temp.holder('FINANCE')
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$,
+  '23Z02', '%write that in the note%');
+SELECT pg_temp.accepts('63i', 'Finance reconciles the earliest open day, with a note (and a closing value of 999 supplied)',
+  $q$UPDATE daily_close SET status = 'RECONCILED', reconciled_by = pg_temp.holder('FINANCE'), closing_value = 999,
+                           exceptions_note = 'Written to the ledger directly: the balance cache never saw it'
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$);
+DO $$
+DECLARE r RECORD;
+BEGIN
+    SELECT * INTO r FROM daily_close WHERE id = pg_temp.close_row(kigali_today() - 3);
+    IF (r.opening_value, r.receipts_value, r.dispatches_value, r.adjustments_value, r.closing_value, r.movement_count)
+       = (0::numeric, 10000::numeric, 0::numeric, 0::numeric, 10000::numeric, 1)
+       AND r.exception_count >= 1 AND r.reconciled_at IS NOT NULL THEN
+        RAISE NOTICE 'ok   63j  the figures are the ledger''s (999 became 10000.00), with the exceptions it found';
+    ELSE
+        RAISE WARNING 'FAIL 63j  opening %, receipts %, dispatches %, adjustments %, closing %, % movements, % exceptions',
+              r.opening_value, r.receipts_value, r.dispatches_value, r.adjustments_value, r.closing_value,
+              r.movement_count, r.exception_count;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('63k', 'a movement was dated into a reconciled day',
+  $q$SELECT pg_temp.stock_on('_VERIFY-L-IN3', '_VC', '_VERIFY-CL', 1, kigali_today() - 3)$q$,
+  '23001', '%closed at this branch%');
+SELECT pg_temp.refuses('63l', 'a Finance officer countersigned a close',
+  $q$UPDATE daily_close SET status = 'LOCKED', internal_controller_id = pg_temp.holder('FINANCE')
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$,
+  '23Z02', '%does not hold close.lock%');
+SELECT pg_temp.refuses('63m', 'a reconciled close''s note was rewritten',
+  $q$UPDATE daily_close SET exceptions_note = 'Something else' WHERE id = pg_temp.close_row(kigali_today() - 3)$q$,
+  '23Z02', '%changes only by being countersigned, or returned%');
+SELECT pg_temp.refuses('63n', 'a reconciled close was returned without a reason',
+  $q$UPDATE daily_close SET status = 'OPEN', returned_by = pg_temp.holder('INTERNAL_CTRL')
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$,
+  '23Z02', '%needs a reason%');
+SELECT pg_temp.accepts('63o', 'the Internal Controller returns a reconciled close, with a reason',
+  $q$UPDATE daily_close SET status = 'OPEN', returned_by = pg_temp.holder('INTERNAL_CTRL'),
+                           return_reason = 'Explain the cache difference'
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$);
+DO $$
+DECLARE r RECORD;
+BEGIN
+    SELECT * INTO r FROM daily_close WHERE id = pg_temp.close_row(kigali_today() - 3);
+    IF r.status = 'OPEN' AND r.reconciled_by IS NULL AND r.closing_value IS NULL AND r.exceptions_note IS NULL
+       AND r.returned_at IS NOT NULL THEN
+        RAISE NOTICE 'ok   63p  a returned close is open again, its reconciliation cleared and the return stamped';
+    ELSE
+        RAISE WARNING 'FAIL 63p  status %, reconciled by %, closing %, returned at %',
+              r.status, r.reconciled_by, r.closing_value, r.returned_at;
+    END IF;
+END $$;
+SELECT pg_temp.accepts('63q', 'it is reconciled again',
+  $q$UPDATE daily_close SET status = 'RECONCILED', reconciled_by = pg_temp.holder('FINANCE'),
+                           exceptions_note = 'The ledger was written directly by the verification: the cache never saw it'
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$);
+
+-- ---------------------------------------------------------------------
+-- 64. The countersignature locks the day for good; days lock in order;
+--     a ledger that changed under a reconciliation is not locked
+-- ---------------------------------------------------------------------
+SELECT pg_temp.accepts('64a', 'the Internal Controller countersigns the reconciled day',
+  $q$UPDATE daily_close SET status = 'LOCKED', internal_controller_id = pg_temp.holder('INTERNAL_CTRL')
+      WHERE id = pg_temp.close_row(kigali_today() - 3)$q$);
+DO $$
+DECLARE r RECORD;
+BEGIN
+    SELECT * INTO r FROM daily_close WHERE id = pg_temp.close_row(kigali_today() - 3);
+    IF r.status = 'LOCKED' AND r.locked_at IS NOT NULL AND r.controller_signed_at IS NOT NULL
+       AND r.closing_value = 10000 THEN
+        RAISE NOTICE 'ok   64b  the countersignature locks the day, stamped by the database, the figures as reconciled';
+    ELSE
+        RAISE WARNING 'FAIL 64b  status %, locked at %, closing %', r.status, r.locked_at, r.closing_value;
+    END IF;
+END $$;
+SELECT pg_temp.refuses('64c', 'a locked day was reopened',
+  $q$UPDATE daily_close SET status = 'OPEN' WHERE id = pg_temp.close_row(kigali_today() - 3)$q$,
+  '23Z02', '%never reopened%');
+SELECT pg_temp.refuses('64d', 'a locked day''s close was deleted',
+  $q$DELETE FROM daily_close WHERE id = pg_temp.close_row(kigali_today() - 3)$q$,
+  '23Z02', '%never deleted%');
+SELECT pg_temp.refuses('64e', 'a movement was dated into a locked day',
+  $q$SELECT pg_temp.stock_on('_VERIFY-L-IN3', '_VC', '_VERIFY-CL', 1, kigali_today() - 3)$q$,
+  '23001', '%closed at this branch%');
+SELECT pg_temp.refuses('64f', 'a movement was dated before a locked day, on a day with no close of its own',
+  $q$SELECT pg_temp.stock_on('_VERIFY-L-IN3', '_VC', '_VERIFY-CL', 1, kigali_today() - 4)$q$,
+  '23001', '%or before one%');
+SELECT pg_temp.accepts('64g', 'with the day before locked, the next day is reconciled',
+  $q$UPDATE daily_close SET status = 'RECONCILED', reconciled_by = pg_temp.holder('FINANCE'),
+                           exceptions_note = 'The ledger was written directly by the verification: the cache never saw it'
+      WHERE id = pg_temp.close_row(kigali_today() - 2)$q$);
+DO $$
+DECLARE r RECORD;
+BEGIN
+    SELECT * INTO r FROM daily_close WHERE id = pg_temp.close_row(kigali_today() - 2);
+    IF (r.opening_value, r.receipts_value, r.closing_value, r.movement_count) = (10000::numeric, 5000::numeric, 15000::numeric, 1) THEN
+        RAISE NOTICE 'ok   64h  a day opens where the locked day before it closed: 10000 + 5000 = 15000';
+    ELSE
+        RAISE WARNING 'FAIL 64h  opening %, receipts %, closing %, % movements',
+              r.opening_value, r.receipts_value, r.closing_value, r.movement_count;
+    END IF;
+END $$;
+
+-- Someone with the power to set the ledger's triggers aside writes a sheet
+-- into the locked day. The next day no longer reads as reconciled, and its
+-- opening no longer matches the locked close.
+SELECT pg_temp.stock_on('_VERIFY-L-IN4', '_VC', '_VERIFY-CL', 1, kigali_today() - 3, TRUE);
+SELECT pg_temp.refuses('64i', 'a day was locked although the ledger changed after it was reconciled',
+  $q$UPDATE daily_close SET status = 'LOCKED', internal_controller_id = pg_temp.holder('INTERNAL_CTRL')
+      WHERE id = pg_temp.close_row(kigali_today() - 2)$q$,
+  '23Z02', '%no longer reads as it was reconciled%');
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM close_exceptions((SELECT id FROM branch WHERE code = '_VC'), kigali_today() - 2)
+                WHERE kind = 'OPENING') THEN
+        RAISE NOTICE 'ok   64j  a day whose opening differs from the locked close before it is an exception';
+    ELSE
+        RAISE WARNING 'FAIL 64j  the opening difference was not reported';
+    END IF;
+END $$;
+DO $$
+DECLARE
+    b UUID := (SELECT id FROM branch WHERE code = '_VC');
+BEGIN
+    IF EXISTS (SELECT 1 FROM close_drift(b) WHERE business_date = kigali_today() - 3 AND status = 'LOCKED') THEN
+        RAISE NOTICE 'ok   64k  a locked day whose ledger no longer reads as signed is reported for the register and the nightly job';
+    ELSE
+        RAISE WARNING 'FAIL 64k  the tampered locked day was not reported as drifted';
+    END IF;
+END $$;
+-- The receipts were posted by the Finance holder, who also reconciles here.
+DO $$
+DECLARE
+    b UUID := (SELECT id FROM branch WHERE code = '_VC');
+BEGIN
+    IF EXISTS (SELECT 1 FROM close_exceptions(b, kigali_today() - 2, pg_temp.holder('FINANCE'))
+                WHERE kind = 'RECONCILER_POSTED')
+       AND NOT EXISTS (SELECT 1 FROM close_exceptions(b, kigali_today() - 2, pg_temp.fin2())
+                        WHERE kind = 'RECONCILER_POSTED') THEN
+        RAISE NOTICE 'ok   64l  a reconciler who posted some of the day''s movements is an exception, needing a note';
+    ELSE
+        RAISE WARNING 'FAIL 64l  the reconciler''s own postings were not reported, or reported for someone else';
+    END IF;
+END $$;
+SELECT pg_temp.accepts('64m', 'a close is prepared for the day after, with nothing moved on it',
+  $q$INSERT INTO daily_close (branch_id, business_date) SELECT id, kigali_today() - 1 FROM branch WHERE code = '_VC'$q$);
+SELECT pg_temp.refuses('64n', 'an open day was locked without being reconciled',
+  $q$UPDATE daily_close SET status = 'LOCKED', internal_controller_id = pg_temp.holder('INTERNAL_CTRL')
+      WHERE id = pg_temp.close_row(kigali_today() - 1)$q$,
+  '23Z02', '%is not a step%');
 
 -- ---------------------------------------------------------------------
 -- 46. The chain switch for transfers is a row, and a document finishes
