@@ -14,6 +14,7 @@ package heritier.ntaganira.highbytes.wms.inventory.dispatch;
 import heritier.ntaganira.highbytes.wms.common.db.ContentionException;
 import heritier.ntaganira.highbytes.wms.common.db.ControlRefusedException;
 import heritier.ntaganira.highbytes.wms.document.DocumentService;
+import heritier.ntaganira.highbytes.wms.inventory.gate.ReleaseGate;
 import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingService;
 import heritier.ntaganira.highbytes.wms.support.DispatchFlow;
 import heritier.ntaganira.highbytes.wms.support.IntegrationTest;

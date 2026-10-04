@@ -124,7 +124,10 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 ├── approval/      the approval queue: what waits on the reader's signature, every branch
 ├── search/        the search box: documents and master data, as far as the reader's rights reach
 ├── inventory/
+│   ├── lookup/    the option types every form's pickers return, and StockAt
+│   ├── gate/      GateSteps, ReleaseGate — what a held release says, shared
 │   ├── ledger/    the only writer of stock_movement and stock_balance
+│   ├── opening/   the cutover: what each place already held, once per place
 │   ├── receiving/ Goods Received Notes
 │   ├── dispatch/  Delivery Authorizations, Delivery Notes (the gate)
 │   ├── transfer/  inter-branch transfers and their receipts (via TRANSIT)
@@ -225,13 +228,46 @@ made `daily_close`; V16 gave it its rules.
   cutting rights; the COO still holds
   none, and gets its rights the same way. Give a right to the role whose step it
   signs, and ask the client when the chain does not say.
-- **A new stock-moving document widens two lists together.** Stock moves
+- **A new stock-moving document widens three lists together.** Stock moves
   only through a transaction ticket whose source is a type `ticket_guard`
-  handles (GRN, DN, TRF, TRR, DMG, CNT and CUT today), and the ledger finds the approving document
-  by walking `document_support_link` (V12). A module that moves stock adds
-  its type to both in its migration, or its tickets are refused. (The view
-  already links every ticket to its source; a document that relates to no
-  other, as a count does, needs no branch of its own there.)
+  handles (OPB, GRN, DN, TRF, TRR, DMG, CNT and CUT today), whose lines
+  `ticket_line_guard` can check against that source, and whose type
+  `stock_movement_needs_approved_document` admits; the ledger then finds the
+  approving document by walking `document_support_link` (V12). A module that
+  moves stock restates all three functions in its migration with its own
+  branch added, as V15, V18 and V19 did, or its tickets are refused. (The
+  view already links every ticket to its source, so it needs no change; a
+  document that relates to no other, as a count does, needs no branch of its
+  own there either.)
+- **A type two modules need does not live in the one that needed it
+  first.** `inventory/lookup/` holds the picker option types
+  (`LocationOption`, `BinOption`, `ItemOption`, `UnitOption`,
+  `CustomerOption`, `StockAt`) and `inventory/gate/` holds `GateSteps` and
+  `ReleaseGate`, because a release banner is what the whole system guards
+  rather than a dispatch detail. Before 4 October 2026 these were nested in
+  `ReceivingLookupService` and `DispatchLookupService`, and six of nine
+  modules imported across to reach them. A new shared type goes in one of
+  these two packages, never in the module that happens to want it first.
+- **Each module asks its own pickers, under its own right.** Every module has
+  its own `*LookupService` holding its own SQL and annotated with its own
+  `view` permission; they share only the option *types*. So reading the
+  cutover form needs `opening.view` and nothing else. Injecting another
+  module's lookup service would make one screen's rights depend on another's.
+- **An opening balance is the first thing in the ledger at a branch**
+  (V19). The cutover from QuickBooks enters as a document because invariant 2
+  leaves no other way in. Two controls are its own: at most one *posted*
+  opening balance per location, ever (a partial unique index on
+  `opening_balance (location_id) WHERE is_posted` — not a count, which two
+  concurrent postings would both pass), and none may post once anything
+  other than another opening balance has moved stock at the branch. So a
+  branch loads its main store and its bonded store separately, and a branch
+  that has traded loads nothing: stock found later arrives by count
+  adjustment. `OpeningService.obstacleAt` asks both before the form opens, so
+  nobody keys three hundred lines to be refused at the end; the database
+  remains the authority. A test needs a branch of its own
+  (`Fixtures.newBranch`) — the shared KGL and RBV fixtures trade, so a
+  cutover test on those is refused by the control rather than by what it
+  meant to test.
 - **An open count freezes what it counts.** From the moment a count opens
   until its verification is signed, the ledger refuses any movement of a
   counted item at the counted location (a full count: the whole location),
@@ -364,8 +400,31 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
    Definitions (read whole; only a switchover still to come moves) and the
    audit log viewer (V17)
 
+## Cutover from QuickBooks
+
+0. ~~Opening balances~~ — done; the stock each place already held, in on a
+   signed document because invariant 2 admits no other way, once per
+   location and only before the branch has traded (V19,
+   `inventory/opening/`). Numbered 0 because at a branch it is the first
+   document that exists.
+1. **The extract itself** — not built. The item master, suppliers and
+   customers out of QuickBooks, then one opening balance per location. The
+   hard part was the document and its controls, not the mapping.
+
 ## Open questions for the client
 
+- **Who signs the opening balance, and does its chain switch in 2027?**
+  V19 chose, 4 October 2026, for the client to confirm: Warehouse Manager
+  (who counted the floor) → Inventory Transactions Officer (verifying
+  independently) → Internal Controller → Managing Director, posted by
+  Finance. The Managing Director signs last rather than the Internal
+  Controller — the only chain where that is so — because the figures become
+  the opening position the Board is shown. The chain is deliberately *not*
+  effective-dated into the 2027 restructuring: a cutover is a single event
+  in the life of a location, not an operational flow, and a chain ending
+  2026-12-31 would leave the module unusable with no chain in force if
+  go-live slipped into 2027. If the client wants the switch, add the second
+  definition by migration before go-live.
 - **Cutting (V18), built on defaults chosen 2 October 2026 for the client
   to confirm.** Off-cut identity: one item per parent sheet and exact size
   (`<parent>-R-<long>x<short>`), reused for the same size, rather than a

@@ -159,6 +159,25 @@ public class Fixtures {
     }
 
     /**
+     * A BRANCH-type branch of the test's own, returning its code. An opening
+     * balance may not post once anything else has moved stock at its branch
+     * (V19), and the shared KGL and RBV fixtures trade, so a cutover test
+     * needs a branch nothing else touches. The main branch is never created
+     * here: there is exactly one.
+     */
+    public String newBranch(String prefix) {
+        String code = (prefix + "-" + UUID.randomUUID().toString().substring(0, 6)).toUpperCase();
+        jdbc.sql("""
+                INSERT INTO branch (code, name, branch_type, city, country_code)
+                VALUES (:code, :name, 'BRANCH', 'Kigali', 'RW')
+                """)
+                .param("code", code)
+                .param("name", "Test branch " + code)
+                .update();
+        return code;
+    }
+
+    /**
      * A warehouse location of the test's own at a branch, returning its code. A count freezes what it counts at
      * its location, so a count test counts a location no other test moves stock through.
      */

@@ -11,10 +11,12 @@ package heritier.ntaganira.highbytes.wms.inventory.dispatch;
  * </pre>
  */
 
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.BinOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.ItemOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.LocationOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.UnitOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.BinOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.CustomerOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.ItemOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.LocationOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.StockAt;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.UnitOption;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -41,9 +43,6 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class DispatchLookupService {
 
-    public record CustomerOption(UUID id, String code, String name) {
-        public String label() { return code + " — " + name; }
-    }
 
     private final JdbcClient jdbc;
 

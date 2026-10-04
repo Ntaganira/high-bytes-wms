@@ -11,6 +11,7 @@ package heritier.ntaganira.highbytes.wms.inventory.dispatch;
  * </pre>
  */
 
+import heritier.ntaganira.highbytes.wms.inventory.gate.ReleaseGate;
 import java.util.List;
 import java.util.UUID;
 

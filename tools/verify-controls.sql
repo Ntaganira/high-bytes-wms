@@ -5498,6 +5498,234 @@ BEGIN
     END;
 END $$;
 
+-- =====================================================================
+-- 68. Opening balances (V19). The cutover is the one time stock enters
+--     with no supplier, invoice or customs entry behind it, so the
+--     controls that make it auditable are checked here: it is the first
+--     thing in the ledger at its branch, it happens once per location,
+--     and what posts is what was signed for.
+-- =====================================================================
+
+-- A branch of its own, with two warehouse locations. The checks below
+-- need a branch where nothing has traded yet, and by this point the
+-- receipt, dispatch and transfer fixtures have moved stock at both KGL
+-- and RBV -- which is precisely what control (a) refuses.
+INSERT INTO branch (code, name, branch_type) VALUES ('_VOPB', 'Verification Cutover Branch', 'BRANCH');
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT b.id, '_VOPB-A', 'Cutover store A', 'WAREHOUSE' FROM branch b WHERE b.code = '_VOPB';
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT b.id, '_VOPB-B', 'Cutover store B', 'WAREHOUSE' FROM branch b WHERE b.code = '_VOPB';
+
+-- A draft opening balance with one glass line.
+CREATE FUNCTION pg_temp.make_opb(p_serial TEXT, p_branch TEXT DEFAULT 'KGL',
+                                 p_loc TEXT DEFAULT 'KGL-MAIN', p_customs TEXT DEFAULT NULL,
+                                 p_as_at DATE DEFAULT NULL, p_qty NUMERIC DEFAULT 12,
+                                 p_thickness NUMERIC DEFAULT 6.0) RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, p_serial, pg_temp.verify_user()
+      FROM document_type dt, branch b WHERE dt.code = 'OPB' AND b.code = p_branch
+    RETURNING id INTO d;
+    INSERT INTO opening_balance (document_id, branch_id, location_id, as_at_date, basis_note, customs_reference)
+    SELECT d, b.id, l.id, COALESCE(p_as_at, kigali_today()),
+           'QuickBooks stock valuation report, struck at close of business', p_customs
+      FROM branch b, location l WHERE b.code = p_branch AND l.code = p_loc;
+    INSERT INTO opening_balance_line (document_id, line_no, item_id, uom_id, quantity, qty_base_uom,
+                                      unit_cost, measured_thickness_mm)
+    SELECT d, 1, i.id, i.base_uom_id, p_qty, p_qty, 1000, p_thickness
+      FROM item i WHERE i.item_code = '_VERIFY-GLASS';
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- Walked through its real lifecycle, as the receipt fixtures are.
+CREATE FUNCTION pg_temp.opb_at(p_serial TEXT, p_state TEXT, p_branch TEXT DEFAULT 'KGL',
+                               p_loc TEXT DEFAULT 'KGL-MAIN', p_customs TEXT DEFAULT NULL)
+RETURNS UUID AS $$
+DECLARE d UUID;
+BEGIN
+    d := pg_temp.make_opb(p_serial, p_branch, p_loc, p_customs);
+    IF p_state = 'DRAFT' THEN RETURN d; END IF;
+    UPDATE document SET status = 'PENDING' WHERE id = d;
+    IF p_state = 'PENDING' THEN RETURN d; END IF;
+    PERFORM pg_temp.sign_upto(d, pg_temp.steps_in(d));
+    UPDATE document SET status = 'APPROVED' WHERE id = d;
+    IF p_state = 'APPROVED' THEN RETURN d; END IF;
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = d;
+    RETURN d;
+END $$ LANGUAGE plpgsql;
+
+-- The ticket an opening balance raises, and its movements.
+CREATE FUNCTION pg_temp.make_opb_ticket(p_opb UUID, p_poster UUID, p_serial TEXT,
+                                        p_type TEXT DEFAULT 'OPENING', p_dir TEXT DEFAULT 'IN',
+                                        p_from BOOLEAN DEFAULT FALSE) RETURNS UUID AS $$
+DECLARE t UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, o.branch_id, p_serial, p_poster
+      FROM document_type dt, opening_balance o WHERE dt.code = 'TT' AND o.document_id = p_opb
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, to_location_id,
+                                    from_location_id, source_document_id, customs_reference)
+    SELECT t, p_type, p_dir,
+           CASE WHEN p_dir = 'IN' THEN o.location_id END,
+           CASE WHEN p_from THEN o.location_id END,
+           p_opb, o.customs_reference
+      FROM opening_balance o WHERE o.document_id = p_opb;
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom, storage_bin_id)
+    SELECT t, l.line_no, l.item_id, l.quantity, l.uom_id, l.qty_base_uom, l.storage_bin_id
+      FROM opening_balance_line l WHERE l.document_id = p_opb;
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+SET CONSTRAINTS document_opening_posted DEFERRED;
+
+-- ---- 68a  the whole path: an opening balance loads stock -------------
+DO $$
+DECLARE
+    opb   UUID;
+    t     UUID;
+    moved NUMERIC;
+BEGIN
+    opb := pg_temp.opb_at('_V-OPB-A', 'APPROVED', '_VOPB', '_VOPB-A');
+    t   := pg_temp.make_opb_ticket(opb, pg_temp.holder('FINANCE'), '_V-TT-OPB-A');
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = opb;
+    PERFORM pg_temp.move_ticket(t, pg_temp.holder('FINANCE'), kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = t;
+    -- Only this module's constraint: the receipt fixtures of check 23 are
+    -- deliberately posted without movements and keep theirs deferred.
+    SET CONSTRAINTS document_opening_posted IMMEDIATE;
+    SELECT SUM(signed_quantity) INTO moved
+      FROM stock_movement m WHERE m.document_id = t;
+    IF moved = 12 THEN
+        RAISE NOTICE 'ok   68a  an opening balance posts and the ledger moves by exactly what was signed for';
+    ELSE
+        RAISE WARNING 'FAIL 68a  the ledger moved %, not 12', moved;
+    END IF;
+    INSERT INTO fx (k, id) VALUES ('opb_posted', opb);
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL 68a  an opening balance could not be posted (%): %', SQLSTATE, SQLERRM;
+END $$;
+
+SET CONSTRAINTS document_opening_posted DEFERRED;
+
+-- ---- 68b  one per location, ever ------------------------------------
+DO $$
+DECLARE opb UUID;
+BEGIN
+    opb := pg_temp.opb_at('_V-OPB-B', 'APPROVED', '_VOPB', '_VOPB-A');
+    PERFORM pg_temp.refuses('68b ', 'a second opening balance at a location that already has one',
+        format('UPDATE document SET status = ''POSTED'', posted_by = %L WHERE id = %L',
+               pg_temp.holder('FINANCE'), opb),
+        '23505');
+END $$;
+
+-- ---- 68c  nothing may have moved stock at the branch first -----------
+DO $$
+DECLARE opb UUID;
+BEGIN
+    -- The fixture receipt (check 23) already moved stock at KGL, and 68a
+    -- loaded KGL-MAIN, so a cutting location opening balance now arrives
+    -- after trading.
+    opb := pg_temp.opb_at('_V-OPB-C', 'APPROVED', 'KGL', 'KGL-CUT');
+    PERFORM pg_temp.refuses('68c ', 'an opening balance posted after other stock has moved at the branch',
+        format('SET CONSTRAINTS document_opening_posted IMMEDIATE; '
+               'UPDATE document SET status = ''POSTED'', posted_by = %L WHERE id = %L',
+               pg_temp.holder('FINANCE'), opb),
+        '23Z02', '%first entry in the ledger%');
+END $$;
+
+SET CONSTRAINTS document_opening_posted DEFERRED;
+
+-- ---- 68d..68h  what the header refuses ------------------------------
+DO $$
+BEGIN
+    PERFORM pg_temp.refuses('68d ', 'bonded stock loaded with no customs reference',
+        'SELECT pg_temp.make_opb(''_V-OPB-D'', ''RBV'', ''RBV-BOND'', NULL)',
+        '23Z02', '%customs reference%');
+
+    PERFORM pg_temp.refuses('68e ', 'glass loaded with no measured thickness',
+        'SELECT pg_temp.make_opb(''_V-OPB-E'', ''KGL'', ''KGL-QUAR'', NULL, NULL, 12, NULL)',
+        '23514', '%measured thickness%');
+
+    PERFORM pg_temp.refuses('68f ', 'figures dated into the future',
+        format('SELECT pg_temp.make_opb(''_V-OPB-F'', ''KGL'', ''KGL-QUAR'', NULL, %L)',
+               kigali_today() + 1),
+        '23Z02', '%still to come%');
+
+    PERFORM pg_temp.refuses('68g ', 'an opening balance into a transit location',
+        'SELECT pg_temp.make_opb(''_V-OPB-G'', ''KGL'', ''KGL-TRAN'')',
+        '23Z02', '%transit%');
+
+    PERFORM pg_temp.refuses('68h ', 'is_posted set by hand',
+        format('UPDATE opening_balance SET is_posted = TRUE WHERE document_id = %L',
+               pg_temp.make_opb('_V-OPB-H', 'KGL', 'KGL-QUAR')),
+        '23Z02', '%only when its document posts%');
+END $$;
+
+-- ---- 68i..68j  content and submission -------------------------------
+DO $$
+DECLARE opb UUID;
+BEGIN
+    opb := pg_temp.opb_at('_V-OPB-I', 'PENDING', 'KGL', 'KGL-QUAR');
+    PERFORM pg_temp.refuses('68i ', 'a line changed once the document has left DRAFT',
+        format('UPDATE opening_balance_line SET quantity = 99, qty_base_uom = 99 WHERE document_id = %L', opb),
+        '23Z02', '%lines are fixed%');
+
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, b.id, '_V-OPB-J', pg_temp.verify_user()
+      FROM document_type dt, branch b WHERE dt.code = 'OPB' AND b.code = 'KGL';
+    PERFORM pg_temp.refuses('68j ', 'an opening balance submitted with no location or lines',
+        'UPDATE document SET status = ''PENDING'' WHERE serial_no = ''_V-OPB-J''',
+        '23Z02', '%cannot be submitted%');
+END $$;
+
+-- ---- 68k  the ticket an opening balance may raise -------------------
+DO $$
+DECLARE opb UUID;
+BEGIN
+    opb := pg_temp.opb_at('_V-OPB-K', 'APPROVED', 'KGL', 'KGL-QUAR');
+    PERFORM pg_temp.refuses('68k ', 'an opening ticket that also names a from-location',
+        format('SELECT pg_temp.make_opb_ticket(%L, %L, ''_V-TT-OPB-K'', ''OPENING'', ''IN'', TRUE)',
+               opb, pg_temp.holder('FINANCE')),
+        '23Z02', '%from-location%');
+
+    PERFORM pg_temp.refuses('68l ', 'an opening balance dressed as an adjustment',
+        format('SELECT pg_temp.make_opb_ticket(%L, %L, ''_V-TT-OPB-L'', ''ADJUSTMENT'', ''IN'')',
+               opb, pg_temp.holder('FINANCE')),
+        '23Z02', '%must be an OPENING%');
+END $$;
+
+-- ---- 68n  the control does not over-block ---------------------------
+DO $$
+DECLARE
+    opb UUID;
+    t   UUID;
+BEGIN
+    SET CONSTRAINTS document_opening_posted DEFERRED;
+    opb := pg_temp.opb_at('_V-OPB-N', 'APPROVED', '_VOPB', '_VOPB-B');
+    t   := pg_temp.make_opb_ticket(opb, pg_temp.holder('FINANCE'), '_V-TT-OPB-N');
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = opb;
+    PERFORM pg_temp.move_ticket(t, pg_temp.holder('FINANCE'), kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = t;
+    SET CONSTRAINTS document_opening_posted IMMEDIATE;
+    RAISE NOTICE 'ok   68n  a second store at the same branch still loads: other opening balances do not block one';
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL 68n  a second store at the same branch was refused (%): %', SQLSTATE, SQLERRM;
+END $$;
+
+SET CONSTRAINTS document_opening_posted DEFERRED;
+
+-- ---- 68m  the base quantity follows from what was entered -----------
+DO $$
+DECLARE opb UUID;
+BEGIN
+    opb := pg_temp.make_opb('_V-OPB-M', 'KGL', 'KGL-QUAR');
+    PERFORM pg_temp.refuses('68m ', 'a base quantity that does not follow from the quantity entered',
+        format('UPDATE opening_balance_line SET qty_base_uom = 99 WHERE document_id = %L', opb),
+        '23514', '%in the base unit%');
+END $$;
+
 ROLLBACK;
 
 \echo ''

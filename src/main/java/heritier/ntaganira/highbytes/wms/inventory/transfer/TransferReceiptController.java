@@ -15,7 +15,7 @@ import heritier.ntaganira.highbytes.wms.common.audit.AuditService;
 import heritier.ntaganira.highbytes.wms.common.db.ControlRefusedException;
 import heritier.ntaganira.highbytes.wms.common.db.DbRefusal;
 import heritier.ntaganira.highbytes.wms.document.DocumentService;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.BinOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.BinOption;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;

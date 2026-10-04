@@ -1,9 +1,9 @@
-package heritier.ntaganira.highbytes.wms.inventory.dispatch;
+package heritier.ntaganira.highbytes.wms.inventory.lookup;
 
 /**
  * <pre>
  * - Project    : HIGH BYTES WMS
- * - Package    : heritier.ntaganira.highbytes.wms.inventory.dispatch
+ * - Package    : heritier.ntaganira.highbytes.wms.inventory.lookup
  * - File       : StockAt.java
  * - Date       : 2026-09-30
  * - Author     : NTAGANIRA Heritier

@@ -141,6 +141,7 @@ public class DocumentController {
         }
 
         switch (target[1]) {
+            case "OPB" -> { return "redirect:/opening/" + target[0]; }
             case "GRN" -> { return "redirect:/receiving/" + target[0]; }
             case "DAO" -> { return "redirect:/dispatch/" + target[0]; }
             case "DN"  -> { return "redirect:/delivery-notes/" + target[0]; }

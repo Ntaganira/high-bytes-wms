@@ -24,10 +24,11 @@ import heritier.ntaganira.highbytes.wms.document.DocumentService;
 import heritier.ntaganira.highbytes.wms.document.OpenedDocument;
 import heritier.ntaganira.highbytes.wms.document.StepCheck;
 import heritier.ntaganira.highbytes.wms.inventory.UnitConversions;
+import heritier.ntaganira.highbytes.wms.inventory.gate.ReleaseGate;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.ConsignmentShares;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.LedgerService;
 import heritier.ntaganira.highbytes.wms.inventory.ledger.MovementRequest;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.BinOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.BinOption;
 import heritier.ntaganira.highbytes.wms.security.CurrentUser;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
@@ -108,7 +109,7 @@ public class ReceiptService {
 
     /** What the receipt form draws beside the rows: the transfer, its lines, the banner, the bins. */
     public record Context(TransferHeader transfer, List<TransferLineRow> transferLines,
-                          heritier.ntaganira.highbytes.wms.inventory.dispatch.ReleaseGate gate, List<BinOption> bins) {}
+                          ReleaseGate gate, List<BinOption> bins) {}
 
     /** Everything the receipt's own view needs. */
     public record Detail(ReceiptHeader header, List<ReceiptLineRow> lines, ReceiptActions actions,

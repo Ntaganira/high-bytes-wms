@@ -54,7 +54,7 @@ public class SecurityConfig {
 
     /** Holding any one of these lets a user read some kind of document. */
     private static final String[] DOCUMENT_VIEW = {
-            "receiving.view", "dispatch.view", "transfer.view", "cutting.view",
+            "opening.view", "receiving.view", "dispatch.view", "transfer.view", "cutting.view",
             "damage.view", "count.view", "ticket.view"
     };
 
@@ -97,6 +97,7 @@ public class SecurityConfig {
                 .requestMatchers("/admin/branches/**")  .hasAuthority("admin.branches")
                 .requestMatchers("/admin/audit/**")     .hasAuthority("audit.view")
 
+                .requestMatchers("/opening/**")        .hasAuthority("opening.view")
                 .requestMatchers("/receiving/**")      .hasAuthority("receiving.view")
                 // Setting up who the company buys from is Finance's; the store only picks from the list.
                 .requestMatchers("/suppliers/**")      .hasAuthority("partner.manage")

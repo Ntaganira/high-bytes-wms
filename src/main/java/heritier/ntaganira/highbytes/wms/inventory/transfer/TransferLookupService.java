@@ -11,11 +11,11 @@ package heritier.ntaganira.highbytes.wms.inventory.transfer;
  * </pre>
  */
 
-import heritier.ntaganira.highbytes.wms.inventory.dispatch.StockAt;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.BinOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.ItemOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.LocationOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.UnitOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.StockAt;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.BinOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.ItemOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.LocationOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.UnitOption;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;

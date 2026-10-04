@@ -23,6 +23,12 @@ package heritier.ntaganira.highbytes.wms.document;
  */
 public enum DocumentKind {
 
+    /**
+     * The cutover: raised by the Warehouse Manager who counted the floor,
+     * posted by Finance. One per location, ever, and only before anything
+     * else has moved stock at the branch (V19).
+     */
+    OPB("OPB", "opening", "Opening Stock Balance"),
     GRN("GRN", "receiving", "Goods Received Note"),
     DAO("DAO", "dispatch", "Delivery Authorization Order"),
     /** Posted by the warehouse at the gate, so cancelling one is the gate's right too. */

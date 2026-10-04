@@ -1,13 +1,13 @@
-package heritier.ntaganira.highbytes.wms.inventory.receiving;
+package heritier.ntaganira.highbytes.wms.inventory.opening;
 
 /**
  * <pre>
  * - Project    : HIGH BYTES WMS
- * - Package    : heritier.ntaganira.highbytes.wms.inventory.receiving
- * - File       : ReceivingLookupService.java
- * - Date       : 2026-09-30
+ * - Package    : heritier.ntaganira.highbytes.wms.inventory.opening
+ * - File       : OpeningLookupService.java
+ * - Date       : 2026-10-04
  * - Author     : NTAGANIRA Heritier
- * - Desc       : The pickers the goods received form needs: suppliers, locations, bins, items, units
+ * - Desc       : The pickers the opening balance form needs: places, bins, items, units
  * </pre>
  */
 
@@ -28,45 +28,32 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * What the receiving form lets a user choose from.
+ * What the opening balance form lets a user choose from, behind
+ * {@code opening.create} — each module asks its own pickers under its own
+ * right, so reading the cutover form never depends on holding a receiving
+ * right.
  *
- * <p>Suppliers are listed to holders of {@code receiving.create} but created
- * only under {@code partner.manage}: the receiver picks a supplier Finance
- * has set up and cannot invent one, which keeps who may be paid separate from
- * who receives goods.
+ * <p>Transit locations are excluded: stock is in transit because a transfer
+ * put it there, and no transfer precedes the cutover. V19 refuses one anyway;
+ * leaving it out of the picker means nobody is offered a choice the database
+ * will reject.
  *
- * <p>Only active suppliers, locations, bins and items are offered; the
- * database refuses an inactive one anyway.
+ * <p>Only active places, bins, items and units are offered; the database
+ * refuses an inactive one regardless.
  */
 @Service
 @Transactional(readOnly = true)
-public class ReceivingLookupService {
-
-    public record SupplierOption(UUID id, String code, String name) {
-        public String label() { return code + " — " + name; }
-    }
-
-
-
-
+public class OpeningLookupService {
 
     private final JdbcClient jdbc;
 
-    public ReceivingLookupService(JdbcClient jdbc) {
+    public OpeningLookupService(JdbcClient jdbc) {
         this.jdbc = jdbc;
     }
 
-    @PreAuthorize("hasAuthority('receiving.create')")
-    public List<SupplierOption> suppliers() {
-        return jdbc.sql("SELECT id, code, name FROM supplier WHERE is_active ORDER BY name")
-                .query((rs, n) -> new SupplierOption(rs.getObject("id", UUID.class),
-                        rs.getString("code"), rs.getString("name")))
-                .list();
-    }
-
-    /** Where goods may be received at a branch: its warehouses and bonded stores. */
-    @PreAuthorize("hasAuthority('receiving.create')")
-    public List<LocationOption> receivingLocations(UUID branchId) {
+    /** The places a cutover may load: warehouses and bonded stores, never transit. */
+    @PreAuthorize("hasAuthority('opening.view')")
+    public List<LocationOption> loadableLocations(UUID branchId) {
         return jdbc.sql("""
                 SELECT id, code, name, is_bonded FROM location
                  WHERE branch_id = :branch AND is_active AND location_type IN ('WAREHOUSE', 'BONDED')
@@ -78,7 +65,7 @@ public class ReceivingLookupService {
                 .list();
     }
 
-    @PreAuthorize("hasAuthority('receiving.create')")
+    @PreAuthorize("hasAuthority('opening.view')")
     public List<BinOption> binsOf(UUID locationId) {
         if (locationId == null) return List.of();
         return jdbc.sql("""
@@ -91,7 +78,7 @@ public class ReceivingLookupService {
                 .list();
     }
 
-    @PreAuthorize("hasAuthority('receiving.create')")
+    @PreAuthorize("hasAuthority('opening.view')")
     public List<ItemOption> items() {
         return jdbc.sql("""
                 SELECT i.id, i.item_code, i.description, i.product_type, u.code AS base_uom
@@ -103,7 +90,7 @@ public class ReceivingLookupService {
                 .list();
     }
 
-    @PreAuthorize("hasAuthority('receiving.create')")
+    @PreAuthorize("hasAuthority('opening.view')")
     public List<UnitOption> units() {
         return jdbc.sql("SELECT id, code, name FROM uom WHERE is_active ORDER BY code")
                 .query((rs, n) -> new UnitOption(rs.getObject("id", UUID.class),
@@ -111,8 +98,10 @@ public class ReceivingLookupService {
                 .list();
     }
 
-    /** The product type of each item, for the glass-needs-thickness check. */
-    @PreAuthorize("hasAuthority('receiving.create')")
+    /**
+     * The product type of each item named on the form, so the controller can
+     * require a measured thickness for glass before the database does.
+     */
     public Map<UUID, String> productTypes(Collection<UUID> itemIds) {
         Map<UUID, String> types = new HashMap<>();
         if (itemIds.isEmpty()) return types;

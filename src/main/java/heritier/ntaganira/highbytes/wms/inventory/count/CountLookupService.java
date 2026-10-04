@@ -12,9 +12,9 @@ package heritier.ntaganira.highbytes.wms.inventory.count;
  */
 
 import heritier.ntaganira.highbytes.wms.common.db.KigaliTime;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.BinOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.ItemOption;
-import heritier.ntaganira.highbytes.wms.inventory.receiving.ReceivingLookupService.LocationOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.BinOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.ItemOption;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.LocationOption;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;

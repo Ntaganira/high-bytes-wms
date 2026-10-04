@@ -16,6 +16,7 @@ import heritier.ntaganira.highbytes.wms.common.audit.AuditService;
 import heritier.ntaganira.highbytes.wms.common.db.ControlRefusedException;
 import heritier.ntaganira.highbytes.wms.common.db.DbRefusal;
 import heritier.ntaganira.highbytes.wms.document.DocumentService;
+import heritier.ntaganira.highbytes.wms.inventory.lookup.StockAt;
 import heritier.ntaganira.highbytes.wms.security.CurrentUser;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -349,10 +350,10 @@ public class TransferController {
         model.addAttribute("bondedHere", lookups.touchesBonded(form.getFromLocationId(), form.getToLocationId()));
     }
 
-    private static Map<UUID, BigDecimal> totals(Map<UUID, List<heritier.ntaganira.highbytes.wms.inventory.dispatch.StockAt>> stock) {
+    private static Map<UUID, BigDecimal> totals(Map<UUID, List<StockAt>> stock) {
         Map<UUID, BigDecimal> totals = new HashMap<>();
         stock.forEach((item, places) -> totals.put(item, places.stream()
-                .map(heritier.ntaganira.highbytes.wms.inventory.dispatch.StockAt::quantity)
+                .map(StockAt::quantity)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)));
         return totals;
     }

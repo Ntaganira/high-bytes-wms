@@ -33,7 +33,7 @@
 
     <!-- Shown to whoever reads a document here, or has a signature waiting anywhere. -->
     <a th:href="@{/approvals}" class="side-link"
-       th:if="${awaitingYou > 0 or #authorization.expression('hasAnyAuthority(''receiving.view'',''dispatch.view'',''transfer.view'',''cutting.view'',''damage.view'',''count.view'',''ticket.view'')')}"
+       th:if="${awaitingYou > 0 or #authorization.expression('hasAnyAuthority(''opening.view'',''receiving.view'',''dispatch.view'',''transfer.view'',''cutting.view'',''damage.view'',''count.view'',''ticket.view'')')}"
        th:classappend="${activeNav == 'approvals'} ? 'active'"
        th:attr="aria-current=${activeNav == 'approvals'} ? 'page' : null">
       <i class="bi bi-pen"></i> Approval Queue
@@ -42,7 +42,7 @@
     </a>
 
     <!-- Documents -->
-    <th:block sec:authorize="hasAnyAuthority('receiving.view','dispatch.view','transfer.view','cutting.view','damage.view','count.view','ticket.view')">
+    <th:block sec:authorize="hasAnyAuthority('opening.view','receiving.view','dispatch.view','transfer.view','cutting.view','damage.view','count.view','ticket.view')">
       <button class="side-label" type="button" data-bs-toggle="collapse"
               data-bs-target="#navDocuments" aria-expanded="true" aria-controls="navDocuments">
         Documents <i class="bi bi-chevron-down"></i>
@@ -52,6 +52,11 @@
         <a th:href="@{/documents}" class="side-link"
            th:classappend="${activeNav == 'documents'} ? 'active'">
           <i class="bi bi-files"></i> All Documents
+        </a>
+
+        <a th:href="@{/opening}" class="side-link" sec:authorize="hasAuthority('opening.view')"
+           th:classappend="${activeNav == 'opening'} ? 'active'">
+          <i class="bi bi-clipboard-data"></i> Opening Balances
         </a>
 
         <a th:href="@{/receiving}" class="side-link" sec:authorize="hasAuthority('receiving.view')"
