@@ -17,6 +17,16 @@
   <link rel="stylesheet" th:href="@{/css/tokens.css}">
   <link rel="stylesheet" th:href="@{/css/app.css}">
 
+  <!-- Before first paint, or a folded sidebar opens and shuts again on every
+       page. app.js owns the toggle; this only reads the remembered choice. -->
+  <script>
+    try {
+      if (localStorage.getItem('hb.sidebar') === 'collapsed') {
+        document.documentElement.classList.add('sidebar-collapsed');
+      }
+    } catch (e) { /* storage blocked: the sidebar opens, as it always did */ }
+  </script>
+
   <!-- CSRF for htmx: every mutating request carries the token -->
   <meta name="_csrf" th:content="${_csrf?.token}">
   <meta name="_csrf_header" th:content="${_csrf?.headerName}">
@@ -26,6 +36,7 @@
 <body>
 
 <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+<button th:replace="~{fragments/sidebar :: toggle}"></button>
 
 <div class="app-main">
 

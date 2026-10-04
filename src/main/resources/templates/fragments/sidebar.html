@@ -15,7 +15,7 @@
 
   <div class="brand">
     <div class="brand-logo" aria-hidden="true">HB</div>
-    <div>
+    <div class="brand-text">
       <div class="brand-name">HIGH BYTES</div>
       <div class="brand-sub">WAREHOUSE CONTROL</div>
     </div>
@@ -28,7 +28,7 @@
     <a th:href="@{/}" class="side-link"
        th:classappend="${activeNav == 'dashboard'} ? 'active'"
        th:attr="aria-current=${activeNav == 'dashboard'} ? 'page' : null">
-      <i class="bi bi-house-door-fill"></i> Dashboard
+      <i class="bi bi-house-door-fill"></i> <span class="side-text">Dashboard</span>
     </a>
 
     <!-- Shown to whoever reads a document here, or has a signature waiting anywhere. -->
@@ -36,9 +36,9 @@
        th:if="${awaitingYou > 0 or #authorization.expression('hasAnyAuthority(''opening.view'',''receiving.view'',''dispatch.view'',''transfer.view'',''cutting.view'',''damage.view'',''count.view'',''ticket.view'')')}"
        th:classappend="${activeNav == 'approvals'} ? 'active'"
        th:attr="aria-current=${activeNav == 'approvals'} ? 'page' : null">
-      <i class="bi bi-pen"></i> Approval Queue
+      <i class="bi bi-pen"></i> <span class="side-text">Approval Queue</span>
       <span class="side-badge held" th:if="${awaitingYou > 0}" th:text="${awaitingYou}"
-            th:attr="aria-label='|' + ${awaitingYou} + ' awaiting your signature|'">0</span>
+            th:attr="aria-label=|${awaitingYou} awaiting your signature|">0</span>
     </a>
 
     <!-- Documents -->
@@ -51,59 +51,59 @@
 
         <a th:href="@{/documents}" class="side-link"
            th:classappend="${activeNav == 'documents'} ? 'active'">
-          <i class="bi bi-files"></i> All Documents
+          <i class="bi bi-files"></i> <span class="side-text">All Documents</span>
         </a>
 
         <a th:href="@{/opening}" class="side-link" sec:authorize="hasAuthority('opening.view')"
            th:classappend="${activeNav == 'opening'} ? 'active'">
-          <i class="bi bi-clipboard-data"></i> Opening Balances
+          <i class="bi bi-clipboard-data"></i> <span class="side-text">Opening Balances</span>
         </a>
 
         <a th:href="@{/receiving}" class="side-link" sec:authorize="hasAuthority('receiving.view')"
            th:classappend="${activeNav == 'receiving'} ? 'active'">
-          <i class="bi bi-box-seam"></i> Goods Received
+          <i class="bi bi-box-seam"></i> <span class="side-text">Goods Received</span>
           <span class="side-badge held" th:if="${navCounts?.goodsReceivedPending > 0}"
                 th:text="${navCounts.goodsReceivedPending}"
-                th:attr="aria-label='|' + ${navCounts.goodsReceivedPending} + ' awaiting approval|'">0</span>
+                th:attr="aria-label=|${navCounts.goodsReceivedPending} awaiting approval|">0</span>
         </a>
 
         <a th:href="@{/dispatch}" class="side-link" sec:authorize="hasAuthority('dispatch.view')"
            th:classappend="${activeNav == 'dispatch'} ? 'active'">
-          <i class="bi bi-clipboard-check"></i> Delivery Authorizations
+          <i class="bi bi-clipboard-check"></i> <span class="side-text">Delivery Authorizations</span>
           <span class="side-badge held" th:if="${navCounts?.releasesHeld > 0}"
                 th:text="${navCounts.releasesHeld}"
-                th:attr="aria-label='|' + ${navCounts.releasesHeld} + ' releases held|'">0</span>
+                th:attr="aria-label=|${navCounts.releasesHeld} releases held|">0</span>
         </a>
 
         <a th:href="@{/delivery-notes}" class="side-link" sec:authorize="hasAuthority('dispatch.view')"
            th:classappend="${activeNav == 'deliveryNotes'} ? 'active'">
-          <i class="bi bi-truck"></i> Delivery Notes
+          <i class="bi bi-truck"></i> <span class="side-text">Delivery Notes</span>
           <span class="side-badge danger" th:if="${navCounts?.deliveryNotesOverdue > 0}"
                 th:text="${navCounts.deliveryNotesOverdue}"
-                th:attr="aria-label='|' + ${navCounts.deliveryNotesOverdue} + ' unacknowledged beyond three days|'">0</span>
+                th:attr="aria-label=|${navCounts.deliveryNotesOverdue} unacknowledged beyond three days|">0</span>
         </a>
 
         <a th:href="@{/transfers}" class="side-link" sec:authorize="hasAuthority('transfer.view')"
            th:classappend="${activeNav == 'transfers'} ? 'active'">
-          <i class="bi bi-arrow-left-right"></i> Transfers
+          <i class="bi bi-arrow-left-right"></i> <span class="side-text">Transfers</span>
           <span class="side-badge transit" th:if="${navCounts?.transfersInTransit > 0}"
                 th:text="${navCounts.transfersInTransit}"
-                th:attr="aria-label='|' + ${navCounts.transfersInTransit} + ' awaiting dispatch or receipt|'">0</span>
+                th:attr="aria-label=|${navCounts.transfersInTransit} awaiting dispatch or receipt|">0</span>
         </a>
 
         <a th:href="@{/cutting}" class="side-link" sec:authorize="hasAuthority('cutting.view')"
            th:classappend="${activeNav == 'cutting'} ? 'active'">
-          <i class="bi bi-scissors"></i> Cutting Orders
+          <i class="bi bi-scissors"></i> <span class="side-text">Cutting Orders</span>
         </a>
 
         <a th:href="@{/damage}" class="side-link" sec:authorize="hasAuthority('damage.view')"
            th:classappend="${activeNav == 'damage'} ? 'active'">
-          <i class="bi bi-exclamation-triangle"></i> Returns &amp; Damage
+          <i class="bi bi-exclamation-triangle"></i> <span class="side-text">Returns &amp; Damage</span>
         </a>
 
         <a th:href="@{/tickets}" class="side-link" sec:authorize="hasAuthority('ticket.view')"
            th:classappend="${activeNav == 'tickets'} ? 'active'">
-          <i class="bi bi-ticket-perforated"></i> Transaction Tickets
+          <i class="bi bi-ticket-perforated"></i> <span class="side-text">Transaction Tickets</span>
         </a>
       </div>
     </th:block>
@@ -118,43 +118,43 @@
 
         <a th:href="@{/stock}" class="side-link" sec:authorize="hasAuthority('stock.view')"
            th:classappend="${activeNav == 'stock'} ? 'active'">
-          <i class="bi bi-box"></i> Stock Balances
+          <i class="bi bi-box"></i> <span class="side-text">Stock Balances</span>
         </a>
 
         <a th:href="@{/items}" class="side-link" sec:authorize="hasAuthority('item.view')"
            th:classappend="${activeNav == 'items'} ? 'active'">
-          <i class="bi bi-grid-3x3-gap"></i> Item Master
+          <i class="bi bi-grid-3x3-gap"></i> <span class="side-text">Item Master</span>
         </a>
 
         <a th:href="@{/locations}" class="side-link" sec:authorize="hasAuthority('item.view')"
            th:classappend="${activeNav == 'locations'} ? 'active'">
-          <i class="bi bi-geo-alt"></i> Locations &amp; Bins
+          <i class="bi bi-geo-alt"></i> <span class="side-text">Locations &amp; Bins</span>
         </a>
 
         <a th:href="@{/suppliers}" class="side-link" sec:authorize="hasAuthority('partner.manage')"
            th:classappend="${activeNav == 'suppliers'} ? 'active'">
-          <i class="bi bi-shop"></i> Suppliers
+          <i class="bi bi-shop"></i> <span class="side-text">Suppliers</span>
         </a>
 
         <a th:href="@{/customers}" class="side-link" sec:authorize="hasAuthority('partner.manage')"
            th:classappend="${activeNav == 'customers'} ? 'active'">
-          <i class="bi bi-people"></i> Customers
+          <i class="bi bi-people"></i> <span class="side-text">Customers</span>
         </a>
 
         <a th:href="@{/counts}" class="side-link" sec:authorize="hasAuthority('count.view')"
            th:classappend="${activeNav == 'counts'} ? 'active'">
-          <i class="bi bi-clipboard-data"></i> Stock Counts
+          <i class="bi bi-clipboard-data"></i> <span class="side-text">Stock Counts</span>
           <span class="side-badge transit" th:if="${navCounts?.countsOpen > 0}"
                 th:text="${navCounts.countsOpen}"
-                th:attr="aria-label='|' + ${navCounts.countsOpen} + ' counts open|'">0</span>
+                th:attr="aria-label=|${navCounts.countsOpen} counts open|">0</span>
         </a>
 
         <a th:href="@{/variances}" class="side-link" sec:authorize="hasAuthority('count.view')"
            th:classappend="${activeNav == 'variances'} ? 'active'">
-          <i class="bi bi-graph-up-arrow"></i> Variances
+          <i class="bi bi-graph-up-arrow"></i> <span class="side-text">Variances</span>
           <span class="side-badge danger" th:if="${navCounts?.variancesOpen > 0}"
                 th:text="${navCounts.variancesOpen}"
-                th:attr="aria-label='|' + ${navCounts.variancesOpen} + ' unresolved variances|'">0</span>
+                th:attr="aria-label=|${navCounts.variancesOpen} unresolved variances|">0</span>
         </a>
       </div>
     </th:block>
@@ -168,14 +168,14 @@
       <div class="collapse show" id="navReporting">
         <a th:href="@{/daily-close}" class="side-link" sec:authorize="hasAuthority('close.view')"
            th:classappend="${activeNav == 'dailyClose'} ? 'active'">
-          <i class="bi bi-calendar-check"></i> Daily Close
+          <i class="bi bi-calendar-check"></i> <span class="side-text">Daily Close</span>
           <span class="side-badge transit" th:if="${navCounts?.closesDue > 0}"
                 th:text="${navCounts.closesDue}"
-                th:attr="aria-label='|' + ${navCounts.closesDue} + ' days awaiting their close|'">0</span>
+                th:attr="aria-label=|${navCounts.closesDue} days awaiting their close|">0</span>
         </a>
         <a th:href="@{/reports}" class="side-link" sec:authorize="hasAuthority('report.view')"
            th:classappend="${activeNav == 'reports'} ? 'active'">
-          <i class="bi bi-bar-chart"></i> Reports &amp; KPIs
+          <i class="bi bi-bar-chart"></i> <span class="side-text">Reports &amp; KPIs</span>
         </a>
       </div>
     </th:block>
@@ -189,29 +189,39 @@
       <div class="collapse show" id="navAdmin">
         <a th:href="@{/admin/users}" class="side-link" sec:authorize="hasAuthority('admin.users')"
            th:classappend="${activeNav == 'users'} ? 'active'">
-          <i class="bi bi-person"></i> Users
+          <i class="bi bi-person"></i> <span class="side-text">Users</span>
         </a>
         <a th:href="@{/admin/roles}" class="side-link" sec:authorize="hasAuthority('admin.roles')"
            th:classappend="${activeNav == 'roles'} ? 'active'">
-          <i class="bi bi-shield-check"></i> Roles &amp; Permissions
+          <i class="bi bi-shield-check"></i> <span class="side-text">Roles &amp; Permissions</span>
         </a>
         <a th:href="@{/admin/workflows}" class="side-link" sec:authorize="hasAuthority('admin.workflow')"
            th:classappend="${activeNav == 'workflows'} ? 'active'">
-          <i class="bi bi-diagram-3"></i> Workflow Definitions
+          <i class="bi bi-diagram-3"></i> <span class="side-text">Workflow Definitions</span>
         </a>
         <a th:href="@{/admin/branches}" class="side-link" sec:authorize="hasAuthority('admin.branches')"
            th:classappend="${activeNav == 'branches'} ? 'active'">
-          <i class="bi bi-building"></i> Branches
+          <i class="bi bi-building"></i> <span class="side-text">Branches</span>
         </a>
         <a th:href="@{/admin/audit}" class="side-link" sec:authorize="hasAuthority('audit.view')"
            th:classappend="${activeNav == 'audit'} ? 'active'">
-          <i class="bi bi-clock-history"></i> Audit Log
+          <i class="bi bi-clock-history"></i> <span class="side-text">Audit Log</span>
         </a>
       </div>
     </th:block>
 
   </nav>
 </aside>
+
+<!--
+  Desktop only: folds the sidebar to its icons and back, from the
+  sidebar's own edge. Outside the aside, which scrolls and would clip it.
+  The rail keeps every count in sight; the choice stays in this browser.
+-->
+<button th:fragment="toggle" id="sidebarToggle" class="sidebar-toggle" type="button"
+        aria-controls="appSidebar" aria-expanded="true" aria-label="Collapse menu">
+  <i class="bi bi-chevron-left" aria-hidden="true"></i>
+</button>
 
 </body>
 </html>

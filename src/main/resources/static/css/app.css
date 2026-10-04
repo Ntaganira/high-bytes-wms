@@ -67,7 +67,7 @@ th.num, td.num { text-align: right; }
 .brand-name { color: #fff; font-weight: 700; font-size: 1rem; line-height: 1.15; letter-spacing: .3px; }
 .brand-sub { color: var(--color-brand-accent); font-size: .66rem; font-weight: 600; letter-spacing: .8px; white-space: nowrap; }
 
-.side-nav { padding: 4px 10px 24px; }
+.side-nav { padding: 15px 10px 24px; }
 .side-label {
   display: flex; align-items: center; justify-content: space-between;
   width: 100%; background: none; border: 0;
@@ -96,7 +96,7 @@ th.num, td.num { text-align: right; }
 }
 .side-link.active::before {
   content: ""; position: absolute; left: 0; top: 8px; bottom: 8px;
-  width: 3px; border-radius: 0 3px 3px 0; background: var(--color-active-accent);
+  width: 1px; border-radius: 0 3px 3px 0; background: var(--color-active-accent);
 }
 .side-link.active .bi { opacity: 1; }
 .side-badge {
@@ -110,6 +110,58 @@ th.num, td.num { text-align: right; }
 .side-badge.held    { background: var(--badge-held-bg);     color: var(--badge-held-text); }
 .side-badge.transit { background: var(--badge-progress-bg); color: var(--badge-progress-text); }
 .side-badge.danger  { background: var(--badge-low-bg);      color: var(--badge-low-text); }
+
+/* ---- Folded sidebar (desktop) -----------------------------------------
+   The rail keeps every icon and every count in sight: a held release
+   must not drop out of view because someone wanted a wider table. The
+   names stay in the markup for screen readers and show as tooltips. */
+.sidebar-toggle { display: none; }
+@media (min-width: 992px) {
+  /* Round, on the sidebar's edge, centred on the topbar's bottom rule. */
+  .sidebar-toggle {
+    position: fixed; z-index: 1035;
+    top: calc(var(--topbar-height) - 18px);
+    left: calc(var(--sidebar-width) - 18px);
+    width: 36px; height: 36px; padding: 0;
+    display: grid; place-items: center;
+    border: 1px solid var(--color-border); border-radius: 50%;
+    background: var(--color-card); color: var(--color-primary);
+    box-shadow: var(--shadow-float);
+    font-size: .95rem;
+  }
+  .sidebar-toggle:hover { background: var(--color-info-light); color: var(--color-primary-dark); }
+  .sidebar-toggle .bi { transition: transform .2s; -webkit-text-stroke: .6px; }
+  .sidebar-collapsed .sidebar-toggle { left: calc(var(--sidebar-width-collapsed) - 18px); }
+  .sidebar-collapsed .sidebar-toggle .bi { transform: rotate(180deg); }
+
+  .sidebar-animate .app-sidebar    { transition: width .2s ease; }
+  .sidebar-animate .app-main       { transition: margin-left .2s ease; }
+  .sidebar-animate .sidebar-toggle { transition: left .2s ease; }
+
+  .sidebar-collapsed .app-sidebar { width: var(--sidebar-width-collapsed); overflow-x: hidden; }
+  .sidebar-collapsed .app-main    { margin-left: var(--sidebar-width-collapsed); }
+
+  .sidebar-collapsed .brand { justify-content: center; padding: 18px 0 16px; }
+  .sidebar-collapsed .brand-text,
+  .sidebar-collapsed .side-text {
+    position: absolute; width: 1px; height: 1px; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+
+  /* A group cannot fold in the rail: every link shows, a rule between groups. */
+  .sidebar-collapsed .side-label { display: none; }
+  .sidebar-collapsed .side-nav > .collapse {
+    display: block; height: auto;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid var(--color-sidebar-hover);
+  }
+
+  .sidebar-collapsed .side-link { justify-content: center; padding: 6px 0; }
+  .sidebar-collapsed .side-badge {
+    position: absolute; top: 2px; right: 6px;
+    min-width: 18px; height: 18px; padding: 0 4px; font-size: .62rem;
+  }
+}
 
 /* ---- Main + topbar --------------------------------------------------- */
 .app-main { min-height: 100vh; }

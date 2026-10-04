@@ -17,6 +17,45 @@
     });
   }
 
+  /* ---- Sidebar fold (desktop) ----------------------------------------
+     The choice lives in this browser only. The layout's <head> applies
+     it before first paint; this keeps the button and tooltips in step. */
+  var root    = document.documentElement;
+  var toggle  = document.getElementById('sidebarToggle');
+  var desktop = window.matchMedia('(min-width: 992px)');
+  var tips    = [];
+
+  function railTips() {
+    tips.forEach(function (t) { t.dispose(); });
+    tips = [];
+    if (!root.classList.contains('sidebar-collapsed') || !desktop.matches || !window.bootstrap) return;
+    document.querySelectorAll('#appSidebar .side-link').forEach(function (link) {
+      var text  = link.querySelector('.side-text');
+      var badge = link.querySelector('.side-badge');
+      var title = (text ? text.textContent.trim() : '') +
+                  (badge ? ' · ' + badge.getAttribute('aria-label') : '');
+      tips.push(new bootstrap.Tooltip(link, { title: title, placement: 'right', trigger: 'hover focus' }));
+    });
+  }
+
+  function setCollapsed(on) {
+    root.classList.toggle('sidebar-collapsed', on);
+    toggle.setAttribute('aria-expanded', String(!on));
+    toggle.setAttribute('aria-label', on ? 'Expand menu' : 'Collapse menu');
+    railTips();
+  }
+
+  if (toggle) {
+    setCollapsed(root.classList.contains('sidebar-collapsed'));
+    toggle.addEventListener('click', function () {
+      root.classList.add('sidebar-animate');
+      var on = !root.classList.contains('sidebar-collapsed');
+      setCollapsed(on);
+      try { localStorage.setItem('hb.sidebar', on ? 'collapsed' : 'expanded'); } catch (e) { /* not remembered */ }
+    });
+    desktop.addEventListener('change', railTips);
+  }
+
   /* ---- Stock movement chart ------------------------------------------
      Data comes from the server as JSON in the page, never hardcoded. */
   var dataEl = document.getElementById('chartData');

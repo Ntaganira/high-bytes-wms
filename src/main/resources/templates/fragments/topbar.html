@@ -60,7 +60,7 @@
     <div class="dropdown"
          th:with="pendingTotal=${(navCounts == null ? 0 : navCounts.totalPending) + (awaitingYou == null ? 0 : awaitingYou)}">
       <button class="icon-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false"
-              th:attr="aria-label='|Notifications, ' + ${pendingTotal} + ' pending|'">
+              th:attr="aria-label=|Notifications, ${pendingTotal} pending|">
         <i class="bi bi-bell"></i>
         <span class="notif-badge" th:if="${pendingTotal > 0}"
               th:text="${pendingTotal}">0</span>
