@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${kind.title()}">Report</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">REPORTING · <a th:href="@{/reports}">REPORTS &amp; KPIS</a></p>
+      <h1 class="page-title" th:text="${kind.title()}">Stock valuation</h1>
+      <p class="page-sub" th:text="${report != null} ? ${report.subtitle()} : ${kind.description()}">Gahanga · as at today</p>
+    </div>
+    <div class="d-flex gap-2" th:if="${report != null}">
+      <a class="btn btn-outline-secondary"
+         th:href="${kind.dated()} ? @{'/reports/' + ${kind.key()} + '/pdf'(from=${from},to=${to})} : @{'/reports/' + ${kind.key()} + '/pdf'}">
+        <i class="bi bi-file-earmark-pdf"></i> PDF</a>
+      <a class="btn btn-outline-secondary"
+         th:href="${kind.dated()} ? @{'/reports/' + ${kind.key()} + '/xlsx'(from=${from},to=${to})} : @{'/reports/' + ${kind.key()} + '/xlsx'}">
+        <i class="bi bi-file-earmark-spreadsheet"></i> Excel</a>
+    </div>
+  </div>
+
+  <form class="hb-card hb-card-body mb-3" method="get" th:action="@{'/reports/' + ${kind.key()}}" th:if="${kind.dated()}">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3">
+        <label for="from" class="form-label small fw-semibold" style="color: var(--color-heading)">From</label>
+        <input id="from" name="from" type="date" class="form-control mono" th:value="${from}">
+      </div>
+      <div class="col-6 col-md-3">
+        <label for="to" class="form-label small fw-semibold" style="color: var(--color-heading)">To</label>
+        <input id="to" name="to" type="date" class="form-control mono" th:value="${to}">
+      </div>
+      <div class="col-12 col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel"></i> Apply</button>
+        <a th:href="@{'/reports/' + ${kind.key()}}" class="btn btn-outline-secondary">This month</a>
+      </div>
+    </div>
+  </form>
+
+  <div class="alert alert-danger" role="alert" th:if="${periodProblem}" th:text="${periodProblem}">The period ends before it starts.</div>
+
+  <section class="hb-card hb-card-body" th:if="${report != null}">
+    <th:block th:if="${#lists.isEmpty(report.rows())}">
+      <div th:replace="~{fragments/ui :: emptyState(${kind.icon()}, 'Nothing to report', ${kind.dated()} ? 'Nothing in this period. Widen the dates.' : 'Nothing is held at this branch now.')}"></div>
+    </th:block>
+    <div class="table-responsive" th:if="${!#lists.isEmpty(report.rows())}">
+      <table class="table hb-table compact align-middle mb-0">
+        <thead>
+        <tr>
+          <th scope="col" th:each="c : ${report.columns()}" th:text="${c.label()}"
+              th:classappend="${c.numeric()} ? 'num'">Item</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="row : ${report.rows()}">
+          <td th:each="c, st : ${report.columns()}"
+              th:classappend="(${c.numeric()} ? 'num ' : '') + (${c.numeric() or c.kind().name() == 'CODE' or c.kind().name() == 'DATE' or c.kind().name() == 'DATETIME'} ? 'mono' : '')"
+              th:text="${report.cell(row, st.index)}">GL-6CLR</td>
+        </tr>
+        </tbody>
+        <tfoot th:if="${report.totals() != null}">
+        <tr>
+          <th scope="row" th:each="c, st : ${report.columns()}"
+              th:classappend="${c.numeric()} ? 'num mono'"
+              th:text="${report.total(st.index)}">Total</th>
+        </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <div class="mt-2" th:if="${report != null}">
+    <p class="text-body-secondary small mb-1" th:each="n : ${report.notes()}" th:text="${n}">Note</p>
+    <p class="text-body-secondary small mb-0"
+       th:text="'Generated ' + ${#temporals.format(report.generatedAt(), 'dd MMM yyyy HH:mm')} + ' (Kigali)'">Generated</p>
+  </div>
+
+</div>
+</body>
+</html>

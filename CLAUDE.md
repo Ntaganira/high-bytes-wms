@@ -135,9 +135,9 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── stock/     stock balances by item and place, and the ledger, read-only
 │   └── ticket/    transaction tickets read: the register, one ticket and the signatures behind it
 └── reporting/
-    └── close/     the daily close: reconciled by Finance, countersigned and
-                   locked by the Internal Controller; the nightly Quartz job
-                   NOT BUILT — KPIs, exports
+    ├── close/     the daily close: reconciled by Finance, countersigned and
+    │              locked by the Internal Controller; the nightly Quartz job
+    └── report/    the standard reports and the KPIs, on screen, as PDF and Excel
 ```
 
 The spine and the ledger (V3, V4) serve every module. A document module's
@@ -291,6 +291,12 @@ made `daily_close`; V16 gave it its rules.
   `delivery_note_authority`, and what it may load through
   `delivery_authority_line`; a new join straight to
   `delivery_authorization` misses every cut delivery.
+- **A report reaches no further than the screen it summarises.** Besides
+  `report.view`, each report needs its own screen's right (`ReportKind.right`:
+  `stock.view`, `dispatch.view`, `damage.view`, `count.view`, `close.view`),
+  and each KPI the right of what it measures. A report that reads stock or
+  movements leaves a counted place out, as the stock screens do; a new one
+  does too.
 - **A branch closes only once finished with** (V17): no stock, no open
   document, no transfer still to arrive, every day with movements locked;
   the main branch never. Nothing new starts at an inactive branch (document,

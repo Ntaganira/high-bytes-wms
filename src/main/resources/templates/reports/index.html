@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title>Reports &amp; KPIs</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">REPORTING</p>
+    <h1 class="page-title">Reports &amp; KPIs</h1>
+    <p class="page-sub">At <span th:text="${currentBranch.name()}">Gahanga Main Warehouse</span>, read from the ledger
+      and the documents themselves. Every report exports to PDF and Excel. A place under a live count shows no book
+      here either.</p>
+  </div>
+
+  <section class="mb-4" aria-labelledby="kpiTitle">
+    <h2 class="card-title mb-3" id="kpiTitle">Over the last 90 days</h2>
+    <div class="row g-3">
+      <div class="col-12 col-sm-6 col-xl-4" th:each="k : ${kpis}">
+        <div class="hb-card kpi h-100">
+          <div class="kpi-icon" aria-hidden="true"
+               th:classappend="${k.warn()} ? 'issues' : 'items'">
+            <i class="bi" th:classappend="${k.warn()} ? 'bi-exclamation-triangle' : 'bi-speedometer2'"></i>
+          </div>
+          <div>
+            <div class="kpi-label" th:text="${k.label()}">Inventory accuracy</div>
+            <div class="kpi-value"><span th:text="${k.value()}">98.6%</span></div>
+            <div class="small text-body-secondary" th:text="${k.detail()}">What it measures</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="reportsTitle">
+    <h2 class="card-title mb-3" id="reportsTitle">Reports</h2>
+    <div class="row g-3">
+      <div class="col-12 col-md-6 col-xl-4" th:each="r : ${kinds}">
+        <div class="hb-card hb-card-body h-100 d-flex flex-column">
+          <div class="card-title-row mb-2">
+            <i class="bi" th:classappend="${r.icon()}" aria-hidden="true"></i>
+            <h3 class="card-title mb-0">
+              <a th:href="@{'/reports/' + ${r.key()}}" th:text="${r.title()}">Stock valuation</a>
+            </h3>
+          </div>
+          <p class="small text-body-secondary flex-grow-1" th:text="${r.description()}">What it answers</p>
+          <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-primary" th:href="@{'/reports/' + ${r.key()}}">Open</a>
+            <a class="btn btn-sm btn-outline-secondary" th:href="@{'/reports/' + ${r.key()} + '/pdf'}">
+              <i class="bi bi-file-earmark-pdf"></i> PDF</a>
+            <a class="btn btn-sm btn-outline-secondary" th:href="@{'/reports/' + ${r.key()} + '/xlsx'}">
+              <i class="bi bi-file-earmark-spreadsheet"></i> Excel</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

@@ -108,6 +108,12 @@
       <artifactId>poi-ooxml</artifactId>
       <version>${poi.version}</version>
     </dependency>
+    <!-- The reports write their PDF with OpenPDF directly; the version JasperReports itself uses. -->
+    <dependency>
+      <groupId>com.github.librepdf</groupId>
+      <artifactId>openpdf</artifactId>
+      <version>1.3.32</version>
+    </dependency>
 
     <!-- Front-end assets, served from the jar rather than a CDN:
          the Gahanga site may run without reliable internet -->

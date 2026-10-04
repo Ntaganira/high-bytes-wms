@@ -139,7 +139,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   └── location/      locations, types, bins
 ├── document/          (next) the spine + workflow engine
 ├── inventory/         ledger, receiving, dispatch, transfer, damage, count, cutting, stock, ticket
-└── reporting/         (next) daily close, KPIs, exports
+└── reporting/         daily close, reports and KPIs (PDF, Excel)
 ```
 
 Package-by-feature, single module. Phase 3 can split these into Maven
@@ -201,6 +201,9 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 - Branch switcher, with bonded branches flagged
 - Dashboard: KPIs, movement chart, what awaits your signature, low stock —
   all reading the ledger
+- Reports & KPIs: stock valuation, movement register, dispatches,
+  write-offs, count variances and daily closes, each as PDF and Excel; the
+  control KPIs over 90 days
 - Search: a serial opens its document; otherwise documents, items,
   locations, suppliers and customers, each only as far as your rights reach
 - All documents: every document you may read, at every branch, filtered by
@@ -226,7 +229,7 @@ PostgreSQL stores as BYTEA. That failure appears when a persisted job is
 
 ## Not built yet
 
-Reports and KPIs.
+Phase 1's screens are all built. What is left for later is listed in TODO.md.
 
 ## Two rules the UI enforces that the SRS does not state
 

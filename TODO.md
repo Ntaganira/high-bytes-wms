@@ -215,6 +215,16 @@ shape, so it is worth building carefully.
       are characters, not wildcards
 - [ ] Search, left for later: no search of people, branches or the audit log (each is on its own admin screen);
       the item list's own search box still treats % and _ as wildcards
+- [x] Reports & KPIs (`reporting/report/`, `/reports`): the standard set (stock valuation, movement register,
+      dispatches, write-offs/losses/returns, count variances, daily closes), each on screen and as PDF (OpenPDF)
+      and Excel (Apache POI) drawn from one table, at the working branch, a period of at most a year (the month to
+      date by default). Each report needs its own screen's right besides `report.view`. KPIs over 90 days: inventory
+      accuracy, stock turnover, time to release, time at the gate, cutting waste, signatures overdue. Places under a
+      live count are left out of every stock and movement figure; a count's variances are reported once posted
+- [ ] Reports, left for later: exports are not recorded in the audit log (`audit_log.action` has no EXPORT; adding it
+      is a migration); no scheduled or e-mailed reports; one branch at a time; at most 5,000 rows a report (then no
+      total); names of posters read by join, so a renamed user reads under the new name; the daily-close report
+      shows the signed figures, counted places included, to `close.view` holders as the close screen does
 - [ ] Tickets, left for later: no export; a document's own page names its ticket without linking it; one branch at
       a time
 - [ ] Admin screens, left for later: no export of the audit log; a document's audit entry links to no page
