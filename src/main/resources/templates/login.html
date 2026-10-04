@@ -11,58 +11,164 @@
   <link rel="stylesheet" th:href="@{/css/tokens.css}">
   <link rel="stylesheet" th:href="@{/css/app.css}">
 </head>
-<body>
+<body class="auth-body">
 
-<div class="login-shell">
-  <div class="login-card">
+<div class="auth-split">
 
-    <div class="login-brand">
+  <!-- The illustration half. Decoration: it drops away below 992px, where
+       the card carries the brand instead. -->
+  <div class="auth-art">
+    <div class="auth-brand">
       <div class="brand-logo" aria-hidden="true">HB</div>
       <div>
-        <div style="color: var(--color-heading); font-weight: 800; letter-spacing: .3px">HIGH BYTES</div>
-        <div style="color: var(--color-success); font-size: .66rem; font-weight: 700; letter-spacing: .8px">WAREHOUSE CONTROL</div>
+        <div class="auth-brand-name">HIGH BYTES</div>
+        <div class="auth-brand-sub">WAREHOUSE CONTROL</div>
       </div>
     </div>
 
-    <h1 class="login-title">Sign in</h1>
-    <p class="login-sub">Use the account issued to you. Every action you take is recorded against it.</p>
+    <div class="auth-art-figure">
+      <!-- A rack of stock, glass on its A-frame, and a document whose
+           approval chain waits on its last signature. -->
+      <svg viewBox="0 0 520 400" aria-hidden="true" focusable="false">
+        <circle class="il-pale" cx="270" cy="200" r="162"/>
+        <circle class="il-light" cx="456" cy="52" r="10"/>
+        <circle class="il-light" cx="70" cy="92" r="6"/>
+        <circle class="il-light" cx="424" cy="330" r="5"/>
 
-    <div th:if="${param.error}" class="alert alert-danger py-2 small" role="alert">
-      <i class="bi bi-exclamation-circle me-1"></i>
-      Username or password is incorrect.
-    </div>
-    <div th:if="${param.locked}" class="alert alert-warning py-2 small" role="alert">
-      <i class="bi bi-lock me-1"></i>
-      This account is locked after too many failed sign-ins. Try again in
-      <span th:text="${lockoutMinutes}">15</span> minutes, or ask an administrator to unlock it.
-    </div>
-    <div th:if="${param.ended}" class="alert alert-info py-2 small" role="alert">
-      <i class="bi bi-info-circle me-1"></i>
-      Your session was ended because your account changed: a new password, or the
-      account was deactivated. Sign in again if you can.
-    </div>
-    <div th:if="${param.logout}" class="alert alert-success py-2 small" role="alert">
-      <i class="bi bi-check-circle me-1"></i>
-      You have been signed out.
+        <circle class="il-rim" cx="168" cy="66" r="16"/>
+        <path class="il-hand" d="M168 66 V57 M168 66 h7"/>
+
+        <ellipse class="il-grey" cx="262" cy="356" rx="230" ry="9"/>
+
+        <!-- pallet rack -->
+        <rect class="il-navy" x="56" y="128" width="8" height="226" rx="2"/>
+        <rect class="il-navy" x="206" y="128" width="8" height="226" rx="2"/>
+        <rect class="il-blue" x="56" y="190" width="158" height="6" rx="2"/>
+        <rect class="il-blue" x="56" y="270" width="158" height="6" rx="2"/>
+        <rect class="il-blue" x="56" y="346" width="158" height="6" rx="2"/>
+
+        <rect class="il-light" x="72" y="150" width="42" height="40" rx="3"/>
+        <rect class="il-blue" x="120" y="160" width="36" height="30" rx="3"/>
+        <rect class="il-light" x="162" y="144" width="36" height="46" rx="3"/>
+        <rect class="il-white" x="84" y="160" width="18" height="8" rx="2"/>
+        <rect class="il-white" x="129" y="168" width="18" height="6" rx="2"/>
+        <rect class="il-white" x="171" y="156" width="18" height="8" rx="2"/>
+
+        <rect class="il-blue" x="70" y="226" width="58" height="44" rx="3"/>
+        <rect class="il-light" x="134" y="236" width="64" height="34" rx="3"/>
+        <rect class="il-white" x="86" y="238" width="26" height="8" rx="2"/>
+        <rect class="il-white" x="152" y="246" width="28" height="8" rx="2"/>
+
+        <rect class="il-light" x="72" y="300" width="52" height="46" rx="3"/>
+        <rect class="il-blue" x="130" y="312" width="68" height="34" rx="3"/>
+        <rect class="il-white" x="86" y="312" width="24" height="8" rx="2"/>
+        <rect class="il-white" x="150" y="322" width="28" height="8" rx="2"/>
+
+        <!-- glass sheets on an A-frame -->
+        <path class="il-frame" d="M246 346 L282 168 L318 346"/>
+        <g transform="rotate(-6 300 346)">
+          <rect class="il-glass" x="270" y="180" width="62" height="164" rx="3"/>
+          <rect class="il-glass" x="284" y="194" width="62" height="150" rx="3"/>
+          <rect class="il-glass" x="298" y="208" width="62" height="136" rx="3"/>
+          <path class="il-shine" d="M312 240 l22 -24 M318 258 l34 -36"/>
+        </g>
+        <rect class="il-navy" x="228" y="344" width="122" height="9" rx="3"/>
+
+        <!-- the document and its chain: three signed, one to come -->
+        <rect class="il-light" x="388" y="104" width="124" height="176" rx="10"/>
+        <rect class="il-rim" x="378" y="94" width="124" height="176" rx="10"/>
+        <path class="il-blue" d="M378 104 a10 10 0 0 1 10 -10 h104 a10 10 0 0 1 10 10 v22 h-124 z"/>
+        <rect class="il-white" x="390" y="104" width="46" height="6" rx="3"/>
+        <rect class="il-white" x="390" y="114" width="28" height="4" rx="2"/>
+        <path class="il-line" d="M392 146 h88 M392 160 h64 M392 174 h80"/>
+        <path class="il-line" d="M400 208 h72"/>
+        <circle class="il-ok" cx="400" cy="208" r="9"/>
+        <circle class="il-ok" cx="424" cy="208" r="9"/>
+        <circle class="il-ok" cx="448" cy="208" r="9"/>
+        <circle class="il-wait" cx="472" cy="208" r="9"/>
+        <path class="il-tick" d="M396 208 l3 3 l5 -6 M420 208 l3 3 l5 -6 M444 208 l3 3 l5 -6"/>
+        <path class="il-ink" d="M394 246 c8 -12 14 6 22 -4 s12 -10 18 2 s10 6 18 -6 s8 -2 12 2"/>
+        <path class="il-rule" d="M392 256 h62"/>
+
+        <!-- plant -->
+        <path class="il-blue" d="M467 318 C452 302 452 278 462 262 C470 282 472 300 467 318 Z"/>
+        <path class="il-blue" opacity=".55" d="M467 318 C482 304 492 290 488 272 C476 282 468 300 467 318 Z"/>
+        <path class="il-blue" d="M467 318 C458 308 444 304 436 306 C444 316 456 320 467 318 Z"/>
+        <rect class="il-navy" x="452" y="316" width="30" height="32" rx="4"/>
+      </svg>
     </div>
 
-    <form th:action="@{/login}" method="post">
-      <div class="mb-3">
-        <label for="username" class="form-label fw-semibold small" style="color: var(--color-heading)">Username</label>
-        <input type="text" id="username" name="username" class="form-control"
-               autocomplete="username" required autofocus>
-      </div>
-      <div class="mb-4">
-        <label for="password" class="form-label fw-semibold small" style="color: var(--color-heading)">Password</label>
-        <input type="password" id="password" name="password" class="form-control"
-               autocomplete="current-password" required>
-      </div>
-      <button type="submit" class="btn btn-primary-action w-100 justify-content-center">
-        <i class="bi bi-box-arrow-in-right"></i> Sign in
-      </button>
-    </form>
-
+    <p class="auth-art-caption">Every movement on a document. Every release signed.</p>
   </div>
+
+  <main class="auth-panel">
+    <div class="auth-card">
+
+      <div class="auth-brand">
+        <div class="brand-logo" aria-hidden="true">HB</div>
+        <div>
+          <div class="auth-brand-name">HIGH BYTES</div>
+          <div class="auth-brand-sub">WAREHOUSE CONTROL</div>
+        </div>
+      </div>
+
+      <h1 class="auth-title">Hello!</h1>
+      <p class="auth-sub">Sign in to continue.</p>
+
+      <div th:if="${param.error}" class="alert alert-danger py-2 small" role="alert">
+        <i class="bi bi-exclamation-circle me-1"></i>
+        Username or password is incorrect.
+      </div>
+      <div th:if="${param.locked}" class="alert alert-warning py-2 small" role="alert">
+        <i class="bi bi-lock me-1"></i>
+        This account is locked after too many failed sign-ins. Try again in
+        <span th:text="${lockoutMinutes}">15</span> minutes, or ask an administrator to unlock it.
+      </div>
+      <div th:if="${param.ended}" class="alert alert-info py-2 small" role="alert">
+        <i class="bi bi-info-circle me-1"></i>
+        Your session was ended because your account changed: a new password, or the
+        account was deactivated. Sign in again if you can.
+      </div>
+      <div th:if="${param.logout}" class="alert alert-success py-2 small" role="alert">
+        <i class="bi bi-check-circle me-1"></i>
+        You have been signed out.
+      </div>
+
+      <form th:action="@{/login}" method="post">
+        <div class="auth-field">
+          <label for="username" class="visually-hidden">Username</label>
+          <i class="bi bi-person" aria-hidden="true"></i>
+          <input type="text" id="username" name="username" class="form-control"
+                 placeholder="Username" autocomplete="username" required autofocus>
+        </div>
+        <div class="auth-field">
+          <label for="password" class="visually-hidden">Password</label>
+          <i class="bi bi-lock" aria-hidden="true"></i>
+          <input type="password" id="password" name="password" class="form-control"
+                 placeholder="Password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="auth-submit">Sign in</button>
+      </form>
+
+      <!-- There is no self-service reset: an administrator issues a
+           temporary password, and the reset is on the audit log. The link
+           says so instead of leading nowhere. -->
+      <details class="auth-help">
+        <summary>Forgot password?</summary>
+        <p>
+          Ask your system administrator to reset it. They give you a temporary
+          password, which you replace as soon as you sign in. Nothing is sent by
+          email: every reset is made, and recorded, by a named administrator.
+        </p>
+      </details>
+
+      <p class="auth-note">
+        <i class="bi bi-shield-check" aria-hidden="true"></i>
+        <span>Use the account issued to you. Every action you take is recorded against it.</span>
+      </p>
+    </div>
+  </main>
+
 </div>
 
 </body>

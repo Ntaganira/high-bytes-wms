@@ -522,6 +522,115 @@ th.num, td.num { text-align: right; }
 .login-title { color: var(--color-heading); font-weight: 800; font-size: 1.3rem; margin: 0 0 4px; }
 .login-sub { color: var(--color-muted); font-size: .85rem; margin: 0 0 22px; }
 
+/* ---- Sign-in: split screen ------------------------------------------------
+   An illustration half and a blue half holding the card. The illustration
+   is decoration and drops away below 992px; the card then carries the brand. */
+.auth-body { background: var(--color-card); }
+.auth-split { min-height: 100vh; display: grid; grid-template-columns: 1fr; }
+.auth-art { display: none; }
+
+.auth-panel {
+  position: relative; overflow: hidden;
+  min-height: 100vh; padding: 32px 16px;
+  display: grid; place-items: center;
+  background: var(--color-heading);
+}
+/* Two fine arcs, bottom right. */
+.auth-panel::before, .auth-panel::after {
+  content: ""; position: absolute; pointer-events: none;
+  width: 560px; height: 560px; border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .55);
+}
+.auth-panel::before { right: -250px; bottom: -330px; }
+.auth-panel::after  { right: -330px; bottom: -370px; }
+
+.auth-card {
+  position: relative; z-index: 1;
+  width: 100%; max-width: 400px;
+  background: var(--color-card); border-radius: var(--radius-card);
+  padding: 32px 32px 26px;
+  box-shadow: 0 18px 48px rgba(0, 33, 80, .25);
+}
+.auth-brand { display: flex; align-items: center; gap: 12px; }
+.auth-card .auth-brand { margin-bottom: 26px; }
+.auth-brand .brand-logo { background: var(--color-sidebar); color: #fff; }
+.auth-brand-name { color: var(--color-heading); font-weight: 800; letter-spacing: .3px; line-height: 1.15; }
+.auth-brand-sub { color: var(--color-success); font-size: .66rem; font-weight: 700; letter-spacing: .8px; }
+
+.auth-title { color: var(--color-heading); font-weight: 800; font-size: 1.75rem; margin: 0 0 6px; }
+.auth-sub { color: var(--color-text); font-size: 1rem; margin: 0 0 24px; }
+
+.auth-field { position: relative; margin-bottom: 16px; }
+.auth-field > .bi {
+  position: absolute; left: 22px; top: 50%; transform: translateY(-50%);
+  color: var(--color-muted); font-size: 1.1rem; pointer-events: none;
+}
+.auth-field:focus-within > .bi { color: var(--color-primary); }
+.auth-field .form-control {
+  height: 54px; padding: 0 22px 0 54px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-card);
+  color: var(--color-heading); font-size: .95rem;
+}
+.auth-field .form-control::placeholder { color: var(--color-muted); opacity: 1; }
+
+.auth-submit {
+  width: 100%; height: 52px; margin-top: 8px;
+  border: 0; border-radius: var(--radius-pill);
+  background: var(--color-heading); color: #fff;
+  font-weight: 600; font-size: .95rem;
+  box-shadow: var(--shadow-active-nav);
+  transition: background-color .15s;
+}
+.auth-submit:hover, .auth-submit:focus-visible { background: var(--color-primary-dark); }
+
+.auth-help { margin-top: 18px; font-size: .85rem; }
+.auth-help > summary {
+  display: inline-block; list-style: none; cursor: pointer;
+  color: var(--color-heading); font-weight: 500;
+}
+.auth-help > summary::-webkit-details-marker { display: none; }
+.auth-help > summary:hover { color: var(--color-primary); }
+.auth-help p {
+  margin: 10px 0 0; padding: 10px 12px;
+  background: var(--color-info-light); border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.auth-note {
+  display: flex; gap: 8px; margin: 20px 0 0; padding-top: 16px;
+  border-top: 1px solid var(--color-divider);
+  color: var(--color-muted); font-size: .78rem;
+}
+
+@media (min-width: 992px) {
+  .auth-split { grid-template-columns: 1fr 1.05fr; }
+  .auth-art { display: flex; flex-direction: column; padding: 32px 48px 28px; }
+  .auth-art-figure { flex: 1; display: grid; place-items: center; }
+  .auth-art-figure svg { width: 100%; max-width: 480px; height: auto; }
+  .auth-art-caption { margin: 0; text-align: center; color: var(--color-muted); font-size: .9rem; }
+  .auth-panel { border-radius: 15px 0 0 15px; padding: 48px; }
+  .auth-card .auth-brand { display: none; }
+}
+
+/* The illustration's palette, from the tokens like everything else. */
+.il-pale  { fill: var(--qa-bg-blue); }
+.il-light { fill: var(--badge-progress-bg); }
+.il-blue  { fill: var(--color-primary); }
+.il-navy  { fill: var(--color-heading); }
+.il-grey  { fill: var(--color-divider); }
+.il-white { fill: var(--color-card); }
+.il-ok    { fill: var(--color-success-fill); }
+.il-rim   { fill: var(--color-card); stroke: var(--color-border); stroke-width: 2; }
+.il-wait  { fill: var(--color-card); stroke: var(--color-control-border); stroke-width: 2; stroke-dasharray: 3 3; }
+.il-glass { fill: var(--color-primary); fill-opacity: .14; stroke: var(--color-primary); stroke-opacity: .5; stroke-width: 1.5; }
+.il-frame { fill: none; stroke: var(--color-heading); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+.il-line  { fill: none; stroke: var(--color-border); stroke-width: 4; stroke-linecap: round; }
+.il-rule  { fill: none; stroke: var(--color-border); stroke-width: 1.5; }
+.il-hand  { fill: none; stroke: var(--color-control-border); stroke-width: 2; stroke-linecap: round; }
+.il-ink   { fill: none; stroke: var(--color-primary); stroke-width: 2; stroke-linecap: round; }
+.il-shine { fill: none; stroke: var(--color-card); stroke-width: 3; stroke-linecap: round; opacity: .85; }
+.il-tick  { fill: none; stroke: var(--color-card); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
 /* ---- Responsive --------------------------------------------------------- */
 @media (max-width: 1399.98px) { .location-btn { min-width: 0; } }
 @media (max-width: 991.98px) {
