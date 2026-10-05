@@ -203,6 +203,15 @@ public class LedgerService {
                         : row.totalValue().multiply(quantity).divide(row.quantity(), 2, RoundingMode.HALF_UP);
             }
             newTotal = row.totalValue().subtract(value);
+            if (m.reversesMovementId() != null && newQuantity.signum() == 0 && newTotal.signum() != 0) {
+                // A mirror leaves at the value it came in at. If the place's stock has since been issued at an
+                // average that mixed it with other receipts, emptying the place at that value would leave money
+                // on the books with no stock under it.
+                throw new ControlRefusedException("Reversing this would empty the place but leave "
+                        + newTotal.toPlainString() + " RWF on the books with no stock under it: stock there has been "
+                        + "issued at the average cost since, so the place no longer carries this movement's value. "
+                        + "A reversal undoes exactly what moved, and this one cannot.");
+            }
         }
         BigDecimal unitCost = value.divide(quantity, 4, RoundingMode.HALF_UP);
         BigDecimal average = newQuantity.signum() > 0
@@ -226,9 +235,10 @@ public class LedgerService {
             written = jdbc.sql("""
                     INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id,
                                                 storage_bin_id, direction, quantity_base_uom, signed_quantity,
-                                                unit_cost, value, running_balance, business_date, posted_by)
+                                                unit_cost, value, running_balance, business_date, posted_by,
+                                                reverses_movement_id)
                     VALUES (:line, :ticket, :branch, :item, :location, :bin, :direction, :quantity, :signed,
-                            :unitCost, :value, :running, kigali_today(), :postedBy)
+                            :unitCost, :value, :running, kigali_today(), :postedBy, :reverses)
                     RETURNING id, business_date
                     """)
                     .param("line", m.ticketLineId(), Types.OTHER)
@@ -244,6 +254,7 @@ public class LedgerService {
                     .param("value", value)
                     .param("running", running)
                     .param("postedBy", postedBy, Types.OTHER)
+                    .param("reverses", m.reversesMovementId(), Types.BIGINT)
                     .query((rs, n) -> new Written(rs.getLong("id"), rs.getObject("business_date", LocalDate.class)))
                     .single();
         } catch (DataAccessException e) {

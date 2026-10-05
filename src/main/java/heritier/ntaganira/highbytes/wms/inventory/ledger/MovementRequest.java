@@ -22,7 +22,9 @@ import java.util.UUID;
  * that differs from its line, and one whose supporting document is not fully
  * approved. A receipt names the {@code value} it brings in (invoice plus
  * landed cost); an issue is valued at the moving weighted-average cost, so its
- * {@code value} is ignored.
+ * {@code value} is ignored. {@code reversesMovementId} is set only on a
+ * reversing document's mirror of a movement ({@link #mirror}), and null on
+ * every other.
  */
 public record MovementRequest(
         UUID ticketId,
@@ -33,7 +35,8 @@ public record MovementRequest(
         UUID storageBinId,
         Direction direction,
         BigDecimal quantityBase,
-        BigDecimal value
+        BigDecimal value,
+        Long reversesMovementId
 ) {
 
     public enum Direction { IN, OUT }
@@ -42,13 +45,13 @@ public record MovementRequest(
                                           UUID locationId, UUID storageBinId, BigDecimal quantityBase,
                                           BigDecimal value) {
         return new MovementRequest(ticketId, ticketLineId, branchId, itemId, locationId, storageBinId,
-                Direction.IN, quantityBase, value);
+                Direction.IN, quantityBase, value, null);
     }
 
     public static MovementRequest issue(UUID ticketId, UUID ticketLineId, UUID branchId, UUID itemId,
                                         UUID locationId, UUID storageBinId, BigDecimal quantityBase) {
         return new MovementRequest(ticketId, ticketLineId, branchId, itemId, locationId, storageBinId,
-                Direction.OUT, quantityBase, null);
+                Direction.OUT, quantityBase, null, null);
     }
 
     /**
@@ -66,6 +69,21 @@ public record MovementRequest(
                                           UUID locationId, UUID storageBinId, BigDecimal quantityBase,
                                           BigDecimal value) {
         return new MovementRequest(ticketId, ticketLineId, branchId, itemId, locationId, storageBinId,
-                Direction.OUT, quantityBase, value);
+                Direction.OUT, quantityBase, value, null);
+    }
+
+    /**
+     * The exact mirror of a posted movement, on a reversing document's ticket:
+     * the same item, place, bin, quantity and value, the other way, naming the
+     * movement it undoes. A mirror going OUT leaves at the value the original
+     * brought in, not at today's average; the database pins that value (V21,
+     * {@code stock_movement_mirrors_what_it_reverses}), which is what lets an
+     * OUT here carry a stated value as {@link #issueAt} does.
+     */
+    public static MovementRequest mirror(UUID ticketId, UUID ticketLineId, UUID branchId, UUID itemId,
+                                         UUID locationId, UUID storageBinId, Direction direction,
+                                         BigDecimal quantityBase, BigDecimal value, long reversesMovementId) {
+        return new MovementRequest(ticketId, ticketLineId, branchId, itemId, locationId, storageBinId,
+                direction, quantityBase, value, reversesMovementId);
     }
 }

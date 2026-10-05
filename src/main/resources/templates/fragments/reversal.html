@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<body>
+
+<!--
+  On the page of a document a reversal can undo (V21): whether it has been
+  reversed, or is being, and the way to raise one when it is posted and has
+  not been. The serial is shown to every reader of the document; the link and
+  the button only to those who may use them.
+
+  reversedBy  the live reversal, or null
+  documentId  this document
+  reversible  posted, and of a type and kind a reversal undoes
+-->
+<th:block th:fragment="banner(reversedBy, documentId, reversible)">
+  <div th:if="${reversedBy != null}" class="alert d-flex align-items-start gap-2"
+       th:classappend="${reversedBy.posted()} ? 'alert-warning' : 'alert-info'" role="status">
+    <i class="bi bi-arrow-counterclockwise"></i>
+    <div>
+      <strong th:text="${reversedBy.posted()} ? 'Reversed' : 'Being reversed'">Reversed</strong>
+      by
+      <a sec:authorize="hasAuthority('reversal.view')" class="doc-link"
+         th:href="@{'/reversals/' + ${reversedBy.id()}}" th:text="${reversedBy.serialNo()}">REV-KGL-2026-0001</a>
+      <span sec:authorize="!hasAuthority('reversal.view')" class="mono" th:text="${reversedBy.serialNo()}">REV-KGL-2026-0001</span>
+      <span th:replace="~{fragments/ui :: chip(${reversedBy.status()})}"></span>.
+      <span th:if="${reversedBy.posted()}">Every movement this document made has been undone in the ledger; both stay on record.</span>
+      <span th:unless="${reversedBy.posted()}">Until it posts, this document's stock stands as posted.</span>
+    </div>
+  </div>
+  <div th:if="${reversedBy == null and reversible}" sec:authorize="hasAuthority('reversal.create')" class="mb-3">
+    <a th:href="@{/reversals/new(original=${documentId})}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-counterclockwise"></i> Raise a reversal
+    </a>
+    <span class="small text-body-secondary ms-2">A posted document is never edited: a mistake is undone whole, beside it.</span>
+  </div>
+</th:block>
+
+</body>
+</html>

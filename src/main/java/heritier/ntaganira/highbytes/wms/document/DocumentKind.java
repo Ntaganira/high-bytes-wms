@@ -43,6 +43,11 @@ public enum DocumentKind {
     CNT("CNT", "count", "Physical Stock Count"),
     /** Prepared by Finance, released by the Internal Controller; a second Finance officer posts it (cutting.post). */
     CUT("CUT", "cutting", "Retail Cutting Order"),
+    /**
+     * Undoes a whole posted document by mirroring every movement it made (V21). Raised by the Warehouse
+     * Manager, posted by Finance; whoever raised or posted the original takes no part.
+     */
+    REV("REV", "reversal", "Reversing Document"),
     TT("TT", "ticket", "Transaction Ticket");
 
     private final String code;

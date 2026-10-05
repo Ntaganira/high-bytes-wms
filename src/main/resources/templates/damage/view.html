@@ -11,6 +11,7 @@
 <div layout:fragment="content">
 
   <div th:replace="~{fragments/ui :: documentHeader(${dmg})}"></div>
+  <th:block th:replace="~{fragments/reversal :: banner(${reversedBy}, ${dmg.id}, ${dmg.status == 'POSTED' and (dmg.kind.name() == 'WRITE_OFF' or dmg.kind.name() == 'QUARANTINE_RELEASE')})}"></th:block>
 
   <!-- The state of the approval and the posting, in the one banner every controlled document uses. -->
   <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>

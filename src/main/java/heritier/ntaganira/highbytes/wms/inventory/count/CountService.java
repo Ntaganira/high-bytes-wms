@@ -808,7 +808,7 @@ public class CountService {
         boolean canCancel = cancel.allowed() && cancelBlocked == null;
         String cancelReason = "POSTED".equals(status) && (create || poster)
                 ? h.serialNo() + " has been posted, so it cannot be cancelled: the stock has been adjusted. A wrong "
-                        + "count is corrected by a reversing document (not built yet), or by the next count."
+                        + "count is corrected by a reversing document, raised from this page, or by the next count."
                 : cancelBlocked != null && create ? cancelBlocked : null;
 
         String postReason = null;

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${rev.serialNo}">Reversal</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div th:replace="~{fragments/ui :: documentHeader(${rev})}"></div>
+
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <p class="eyebrow">DOCUMENTS · REVERSING DOCUMENT</p>
+      <h1 class="page-title">
+        Reverses <a class="doc-link" th:href="@{${rev.originalPath()}}" th:text="${rev.originalSerial}">GRN-KGL-2026-0412</a>
+      </h1>
+      <p class="page-sub">
+        <span th:text="${rev.originalTitle}">Goods Received Note</span>
+        <th:block th:if="${rev.originalPostedAt != null}">
+          posted <span class="mono" th:text="${#temporals.format(rev.originalPostedAt, 'dd MMM yyyy HH:mm')}">04 Oct 2026 10:00</span>
+        </th:block>
+        · raised by <span th:text="${rev.originalCreatedByName}">Name</span>,
+        posted by <span th:text="${rev.originalPostedByName}">Name</span>.
+        Neither takes any part in this reversal.
+      </p>
+    </div>
+    <div class="d-flex gap-2">
+      <a th:if="${actions.canEdit}" sec:authorize="hasAuthority('reversal.create')"
+         th:href="@{'/reversals/' + ${rev.id} + '/edit'}" class="btn btn-outline-secondary">
+        <i class="bi bi-pencil"></i> Edit reason
+      </a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-12 col-xl-8">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+            <h2 class="card-title">Why it is reversed</h2>
+          </div>
+        </div>
+        <p class="mb-0" th:text="${rev.reason}">The receipt was keyed against the wrong supplier delivery.</p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title" th:text="${rev.status == 'POSTED'} ? 'What was undone' : 'What it will undo'">What it will undo</h2>
+              <p class="card-sub">Every movement of the original, mirrored: the same item, place, bin, quantity and value, the other way.</p>
+            </div>
+          </div>
+        </div>
+        <div th:replace="~{reversals/parts :: movements(${lines})}"></div>
+        <p class="small text-body-secondary mt-3 mb-0">
+          Total value moved by the original:
+          <span class="mono" th:text="${#numbers.formatDecimal(valueRwf, 1, 'COMMA', 2, 'POINT')}">5,040,000.00</span> RWF.
+          A mirror leaves at the value it came in at, not at today's average.
+        </p>
+      </section>
+
+    </div>
+
+    <div class="col-12 col-xl-4">
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-pen" aria-hidden="true"></i>
+            <div>
+              <h2 class="card-title">Approval chain</h2>
+              <p class="card-sub" th:if="${chainInfo != null}">
+                Chain v<span th:text="${chainInfo.version}">1</span>
+                · proposed, awaiting the client's confirmation
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <ol th:replace="~{fragments/ui :: approvalChain(${chain})}"></ol>
+
+        <p class="small text-body-secondary mt-3 mb-0">
+          Raised by <span th:text="${rev.createdByName}">Name</span>
+          on <span th:text="${#temporals.format(rev.createdAt, 'dd MMM HH:mm')}">05 Oct 09:00</span>.
+          Finance posts it; the poster signs no step, raised nothing, and neither raised nor posted the original.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body mb-3">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-lightning-charge" aria-hidden="true"></i>
+            <h2 class="card-title">What you can do</h2>
+          </div>
+        </div>
+
+        <div class="alert alert-info small" role="status" th:if="${actions.originalHands != null}">
+          <i class="bi bi-person-x"></i> <span th:text="${actions.originalHands}">You raised the original.</span>
+        </div>
+
+        <form th:if="${actions.canSubmit}"
+              sec:authorize="hasAnyAuthority('reversal.create','reversal.verify','reversal.approve')"
+              th:action="@{'/reversals/' + ${rev.id} + '/submit'}" method="post" class="mb-3">
+          <p class="small mb-2">
+            Submitting signs step 1
+            (<span th:text="${actions.nextStep?.actionLabel}">PREPARE</span> as
+            <span th:text="${actions.nextStep?.roleName}">Warehouse Manager</span>).
+          </p>
+          <button class="btn btn-primary-action w-100"><i class="bi bi-send"></i> Submit for approval</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.submitReason}" th:text="${actions.submitReason}">Reason</p>
+
+        <th:block th:if="${actions.canSign}"
+                  sec:authorize="hasAnyAuthority('reversal.create','reversal.verify','reversal.approve')">
+          <form th:action="@{'/reversals/' + ${rev.id} + '/approve'}" method="post" class="mb-2">
+            <p class="small mb-2">
+              Sign step <span th:text="${actions.nextStep.sequenceNo}">2</span>
+              (<span th:text="${actions.nextStep.roleName}">Role</span>)
+            </p>
+            <input name="comment" class="form-control form-control-sm mb-2" placeholder="Comment (optional)" autocomplete="off">
+            <button class="btn btn-primary-action w-100"><i class="bi bi-check-lg"></i> Approve</button>
+          </form>
+          <form th:action="@{'/reversals/' + ${rev.id} + '/reject'}" method="post" class="mt-2">
+            <input name="comment" class="form-control form-control-sm mb-2" placeholder="Why it is rejected" autocomplete="off">
+            <button class="btn btn-outline-danger w-100"><i class="bi bi-x-lg"></i> Reject</button>
+          </form>
+        </th:block>
+        <p class="small text-body-secondary" th:if="${actions.signReason}" th:text="${actions.signReason}">Reason</p>
+
+        <form th:if="${actions.canPost}" sec:authorize="hasAuthority('reversal.post')"
+              th:action="@{'/reversals/' + ${rev.id} + '/post'}" method="post" class="mb-3">
+          <p class="small mb-2">
+            Posting raises a mirror ticket for each ticket of the original and undoes every movement it made.
+            It cannot be cancelled afterwards.
+          </p>
+          <button class="btn btn-primary-action w-100"><i class="bi bi-arrow-counterclockwise"></i> Post the reversal</button>
+        </form>
+        <p class="small text-body-secondary" th:if="${actions.postReason}" th:text="${actions.postReason}">Reason</p>
+
+        <details th:if="${actions.canCancel}" sec:authorize="hasAuthority('reversal.create')">
+          <summary class="small">Cancel this reversal</summary>
+          <form th:action="@{'/reversals/' + ${rev.id} + '/cancel'}" method="post" class="mt-2">
+            <input name="reason" class="form-control form-control-sm mb-2" placeholder="Why it is cancelled" autocomplete="off">
+            <button class="btn btn-outline-danger btn-sm w-100">Cancel</button>
+          </form>
+        </details>
+        <p class="small text-body-secondary" th:if="${actions.cancelReason}" th:text="${actions.cancelReason}">Reason</p>
+
+        <p class="small text-body-secondary mb-0"
+           th:if="${!actions.canSubmit and !actions.canSign and !actions.canPost and !actions.canCancel
+                    and !actions.canEdit and actions.submitReason == null and actions.signReason == null
+                    and actions.postReason == null and actions.cancelReason == null
+                    and actions.originalHands == null}">
+          Nothing is waiting on you here.
+        </p>
+      </section>
+
+      <section class="hb-card hb-card-body">
+        <div class="card-head">
+          <div class="card-title-row">
+            <i class="bi bi-clock-history" aria-hidden="true"></i>
+            <h2 class="card-title">History</h2>
+          </div>
+        </div>
+        <div th:if="${#lists.isEmpty(history)}">
+          <div th:replace="~{fragments/ui :: emptyState('bi-clock-history', 'No history yet', 'Changes to this reversal will be listed here.')}"></div>
+        </div>
+        <th:block th:each="entry : ${history}">
+          <div th:replace="~{fragments/ui :: auditEntry(${entry})}"></div>
+        </th:block>
+      </section>
+
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

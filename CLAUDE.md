@@ -135,6 +135,8 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── count/     stock counts (blind, verified, frozen) and the variance report
 │   ├── cutting/   cutting orders: sheets cut to a customer's sizes, off-cuts kept,
 │                  the pieces out through the gate
+│   ├── reversal/  reversing documents: a posted document undone whole, by the exact
+│                  mirror of every movement it made (GRN, OPB, CNT, write-offs, releases)
 │   ├── stock/     stock balances by item and place, and the ledger, read-only
 │   └── ticket/    transaction tickets read: the register, one ticket and the signatures behind it
 └── reporting/
@@ -230,15 +232,34 @@ made `daily_close`; V16 gave it its rules.
   signs, and ask the client when the chain does not say.
 - **A new stock-moving document widens three lists together.** Stock moves
   only through a transaction ticket whose source is a type `ticket_guard`
-  handles (OPB, GRN, DN, TRF, TRR, DMG, CNT and CUT today), whose lines
+  handles (OPB, GRN, DN, TRF, TRR, DMG, CNT, CUT and REV today), whose lines
   `ticket_line_guard` can check against that source, and whose type
   `stock_movement_needs_approved_document` admits; the ledger then finds the
   approving document by walking `document_support_link` (V12). A module that
   moves stock restates all three functions in its migration with its own
-  branch added, as V15, V18 and V19 did, or its tickets are refused. (The
+  branch added, as V15, V18, V19 and V21 did, or its tickets are refused. (The
   view already links every ticket to its source, so it needs no change; a
   document that relates to no other, as a count does, needs no branch of its
   own there either.)
+- **A reversal is the exact mirror, of the whole document, or nothing** (V21).
+  A reversing document (REV) names one posted document in
+  `document.reverses_document_id` and moves nothing it chose: one REVERSAL
+  ticket per ticket of the original (`reverses_ticket_id`), line for line,
+  and one movement per movement, the same item, place, bin, quantity and
+  value the other way, naming it in `reverses_movement_id`. Only a REVERSAL
+  movement may set that column, and at commit every movement of the original
+  must have its mirror. A mirror going out leaves at the value it came in at,
+  not today's average, so the ledger refuses it when the stock has since left
+  or the place no longer carries that value. Whoever raised or posted the
+  original takes no part in its reversal; one live reversal per document
+  (`document_one_live_reversal`). A new type joins the reversible ones only
+  when its reversal's effect on other documents has rules of its own: a
+  delivery note's on what its authorization may still release, a transfer's
+  on goods in transit, a cutting order's on its pieces, a transit loss's or a
+  customer return's on the transfer or note behind it. Until then
+  `reversal_target_guard` refuses it. A movement type that classifies stock
+  (`close_figures`, the reports) must place REVERSAL: the close counts it as
+  an adjustment.
 - **A type two modules need does not live in the one that needed it
   first.** `inventory/lookup/` holds the picker option types
   (`LocationOption`, `BinOption`, `ItemOption`, `UnitOption`,
@@ -399,6 +420,12 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
 9. ~~Admin screens~~ — done; users and roles, then branches, Workflow
    Definitions (read whole; only a switchover still to come moves) and the
    audit log viewer (V17)
+10. ~~Reversing documents~~ — done for goods received, opening balances,
+    count adjustments, write-offs and quarantine releases (V21,
+    `inventory/reversal/`): a posted document undone whole by its exact
+    mirror, under a proposed chain. Delivery notes, transfers and their
+    receipts, cutting orders, transit losses and customer returns are next,
+    each with rules for what its reversal changes in other documents.
 
 ## Cutover from QuickBooks
 
@@ -406,12 +433,37 @@ Every line must print `ok`. A `FAIL` means an invariant has been weakened.
    signed document because invariant 2 admits no other way, once per
    location and only before the branch has traded (V19,
    `inventory/opening/`). Numbered 0 because at a branch it is the first
-   document that exists.
+   document that exists. A wrong one is reversed in full and loaded again,
+   until the branch trades (V21, decided 5 October 2026).
 1. **The extract itself** — not built. The item master, suppliers and
    customers out of QuickBooks, then one opening balance per location. The
    hard part was the document and its controls, not the mapping.
 
 ## Open questions for the client
+
+- **Who may undo a posted movement?** V21 PROPOSES, 5 October 2026, for the
+  client to decide: the Warehouse Manager raises a reversing document, the
+  Internal Controller verifies, the Managing Director approves, Finance
+  posts; whoever raised or posted the original takes no part, though its
+  signers may sign again (the Internal Controller signs every document a
+  reversal undoes, so barring signers would make reversal impossible with
+  one Internal Controller). A reversal can take stock off the books as surely
+  as a theft and call it a clerical error, which is why it carries the
+  assurance role and the top approver. Only the Warehouse Manager raises one
+  because submitting signs step 1 and a step names one role: an error Finance
+  finds is raised by the Warehouse Manager with Finance's finding as the
+  reason. A document the Warehouse Manager raised is reversed by a second
+  Warehouse Manager, or one covering from another branch. An opening balance
+  may be reversed after its branch has traded too; a corrected one then can
+  no longer load, so its stock comes back only by count adjustment. The
+  client may want an opening balance's reversal limited to before trading.
+- **May a reversal take stock back at a value it no longer carries?** V21
+  says no: a mirror leaves at the value it came in at, and the ledger refuses
+  it when the place has since issued that stock at an average mixed with
+  other receipts, or when emptying the place would leave value with no stock
+  under it. Such a mistake is then corrected by a count or a write-off, not a
+  reversal. The client may want a reversal at the current average instead,
+  with the difference written to a variance.
 
 - **Who signs the opening balance, and does its chain switch in 2027?**
   V19 chose, 4 October 2026, for the client to confirm: Warehouse Manager

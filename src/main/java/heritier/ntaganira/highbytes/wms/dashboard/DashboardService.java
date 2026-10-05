@@ -58,6 +58,9 @@ public class DashboardService {
                AND m.direction = 'IN'
                AND m.business_date >= :since
                AND count_freezing(m.item_id, m.location_id) IS NULL
+               -- A reversed movement and its mirror are neither (V21): what was undone was never received.
+               AND m.reverses_movement_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM stock_movement r WHERE r.reverses_movement_id = m.id)
             """;
 
     private static final String RECEIPT_NOTES_SINCE = """
@@ -216,6 +219,9 @@ public class DashboardService {
          LEFT JOIN stock_movement m
                 ON m.business_date = d.day::date AND m.branch_id = :branchId
                AND count_freezing(m.item_id, m.location_id) IS NULL
+               -- A reversed movement and its mirror are neither (V21): a reversed receipt is not a dispatch.
+               AND m.reverses_movement_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM stock_movement r WHERE r.reverses_movement_id = m.id)
              GROUP BY d.day
              ORDER BY d.day
             """;

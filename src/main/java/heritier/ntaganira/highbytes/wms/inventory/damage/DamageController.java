@@ -206,6 +206,7 @@ public class DamageController {
     public String view(@PathVariable UUID id, Model model) {
         var detail = reports.detail(id);
         model.addAttribute("dmg", detail.header());
+        model.addAttribute("reversedBy", documents.reversedBy(id).orElse(null));
         model.addAttribute("lines", detail.lines());
         model.addAttribute("chain", detail.chain());
         model.addAttribute("chainInfo", detail.chainInfo());

@@ -5726,6 +5726,375 @@ BEGIN
         '23514', '%in the base unit%');
 END $$;
 
+
+-- =====================================================================
+-- 69. Reversing documents (V21). A posted document is undone only by the
+--     exact mirror of every movement it made, once, by people who neither
+--     raised nor posted it, and only for the kinds this version reverses.
+--     A fully reversed opening balance may load again until the branch
+--     trades, and the close reads a reversal as an adjustment.
+-- =====================================================================
+
+-- A branch and place of their own: by now other checks have left counts
+-- open and stock moved at KGL and RBV. And a second Finance officer: the
+-- fixtures' Finance holder posts every original, and V21 keeps the
+-- original's poster out of its reversal.
+INSERT INTO branch (code, name, branch_type) VALUES ('_VREV', 'Verification Reversal Branch', 'BRANCH');
+INSERT INTO location (branch_id, code, name, location_type)
+SELECT b.id, '_VREV-A', 'Reversal store A', 'WAREHOUSE' FROM branch b WHERE b.code = '_VREV';
+INSERT INTO app_user (username, full_name, password_hash, is_active, must_change_password)
+VALUES ('_verify_rev_fin', 'Second Finance officer', 'x', TRUE, FALSE),
+       ('_verify_rev_ic2', 'Second Internal Controller', 'x', TRUE, FALSE);
+SELECT pg_temp.grant_role('_verify_rev_fin', 'FINANCE');
+SELECT pg_temp.grant_role('_verify_rev_ic2', 'INTERNAL_CTRL');
+
+CREATE FUNCTION pg_temp.rev_fin() RETURNS UUID AS $$
+    SELECT id FROM app_user WHERE username = '_verify_rev_fin';
+$$ LANGUAGE sql;
+
+CREATE FUNCTION pg_temp.ticket_of(p_doc UUID) RETURNS UUID AS $$
+    SELECT document_id FROM transaction_ticket WHERE source_document_id = p_doc LIMIT 1;
+$$ LANGUAGE sql;
+
+-- A receipt at _VREV-A, signed, posted by the Finance holder, its ticket
+-- written and its 100 sheets moved: the document the checks below undo.
+CREATE FUNCTION pg_temp.rev_original(p_serial TEXT, p_creator UUID DEFAULT NULL) RETURNS UUID AS $$
+DECLARE g UUID; t UUID;
+BEGIN
+    g := pg_temp.make_grn(p_serial, p_creator, '_VREV', '_VREV-A');
+    UPDATE document SET status = 'PENDING' WHERE id = g;
+    PERFORM pg_temp.sign_upto(g, pg_temp.steps_in(g));
+    UPDATE document SET status = 'APPROVED' WHERE id = g;
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = g;
+    t := pg_temp.make_ticket(g, pg_temp.holder('FINANCE'), p_serial || '-TT');
+    PERFORM pg_temp.move_ticket(t, pg_temp.holder('FINANCE'), kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = t;
+    RETURN g;
+END $$ LANGUAGE plpgsql;
+
+-- A reversal raised by the Warehouse Manager holder (who signed the
+-- receipt's step, which V21 allows), with its reason.
+CREATE FUNCTION pg_temp.make_rev(p_serial TEXT, p_original UUID, p_creator UUID DEFAULT NULL) RETURNS UUID AS $$
+DECLARE r UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by, reverses_document_id)
+    SELECT dt.id, o.branch_id, p_serial, COALESCE(p_creator, pg_temp.holder('WH_MANAGER')), p_original
+      FROM document_type dt, document o WHERE dt.code = 'REV' AND o.id = p_original
+    RETURNING id INTO r;
+    INSERT INTO reversal (document_id, reason) VALUES (r, 'Verification: keyed against the wrong delivery');
+    RETURN r;
+END $$ LANGUAGE plpgsql;
+
+-- Walked through its real lifecycle; posted by the second Finance officer.
+CREATE FUNCTION pg_temp.rev_at(p_serial TEXT, p_original UUID, p_state TEXT) RETURNS UUID AS $$
+DECLARE r UUID;
+BEGIN
+    r := pg_temp.make_rev(p_serial, p_original);
+    IF p_state = 'DRAFT' THEN RETURN r; END IF;
+    UPDATE document SET status = 'PENDING' WHERE id = r;
+    IF p_state = 'PENDING' THEN RETURN r; END IF;
+    PERFORM pg_temp.sign_upto(r, pg_temp.steps_in(r));
+    UPDATE document SET status = 'APPROVED' WHERE id = r;
+    IF p_state = 'APPROVED' THEN RETURN r; END IF;
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.rev_fin() WHERE id = r;
+    RETURN r;
+END $$ LANGUAGE plpgsql;
+
+-- The mirror of one ticket of the original: REVERSAL, the other way (or
+-- p_dir), the places swapped, line for line (or every line at p_qty).
+CREATE FUNCTION pg_temp.make_rev_ticket(p_rev UUID, p_reverses UUID, p_serial TEXT,
+                                        p_dir TEXT DEFAULT NULL, p_qty NUMERIC DEFAULT NULL) RETURNS UUID AS $$
+DECLARE t UUID;
+BEGIN
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+    SELECT dt.id, r.branch_id, p_serial, pg_temp.rev_fin()
+      FROM document_type dt, document r WHERE dt.code = 'TT' AND r.id = p_rev
+    RETURNING id INTO t;
+    INSERT INTO transaction_ticket (document_id, movement_type, direction, from_location_id, to_location_id,
+                                    source_document_id, customs_reference, reverses_ticket_id)
+    SELECT t, 'REVERSAL', COALESCE(p_dir, CASE o.direction WHEN 'IN' THEN 'OUT' ELSE 'IN' END),
+           o.to_location_id, o.from_location_id, p_rev, o.customs_reference, o.document_id
+      FROM transaction_ticket o WHERE o.document_id = p_reverses;
+    INSERT INTO ticket_line (ticket_id, line_no, item_id, quantity, uom_id, qty_base_uom,
+                             unit_value, total_value, storage_bin_id)
+    SELECT t, l.line_no, l.item_id, COALESCE(p_qty, l.quantity), l.uom_id, COALESCE(p_qty, l.qty_base_uom),
+           l.unit_value, l.total_value, l.storage_bin_id
+      FROM ticket_line l WHERE l.ticket_id = p_reverses;
+    RETURN t;
+END $$ LANGUAGE plpgsql;
+
+-- Its movements: each mirrors the original's on the same line, at the
+-- original's value (or p_value), naming it (unless p_names is false).
+CREATE FUNCTION pg_temp.move_mirror(p_ticket UUID, p_value NUMERIC DEFAULT NULL,
+                                    p_names BOOLEAN DEFAULT TRUE) RETURNS VOID AS $$
+    INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id, storage_bin_id,
+                                direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                running_balance, business_date, posted_by, reverses_movement_id)
+    SELECT rl.id, rt.document_id, m.branch_id, m.item_id, m.location_id, m.storage_bin_id,
+           rt.direction, m.quantity_base_uom,
+           CASE rt.direction WHEN 'IN' THEN m.quantity_base_uom ELSE -m.quantity_base_uom END,
+           m.unit_cost, COALESCE(p_value, m.value), 0, kigali_today(), pg_temp.rev_fin(),
+           CASE WHEN p_names THEN m.id END
+      FROM transaction_ticket rt
+      JOIN ticket_line rl   ON rl.ticket_id = rt.document_id
+      JOIN ticket_line ol   ON ol.ticket_id = rt.reverses_ticket_id AND ol.line_no = rl.line_no
+      JOIN stock_movement m ON m.ticket_line_id = ol.id AND m.reverses_movement_id IS NULL
+     WHERE rt.document_id = p_ticket;
+$$ LANGUAGE sql;
+
+SET CONSTRAINTS document_reversal_posted DEFERRED;
+
+-- ---- 69a  the whole path: a receipt undone ---------------------------
+DO $$
+DECLARE
+    g      UUID;
+    r      UUID;
+    t      UUID;
+    before NUMERIC;
+    after  NUMERIC;
+BEGIN
+    g := pg_temp.rev_original('_V-REV-A');
+    SELECT SUM(m.signed_quantity) INTO before
+      FROM stock_movement m JOIN location l ON l.id = m.location_id WHERE l.code = '_VREV-A';
+    r := pg_temp.rev_at('_V-REV-A-R', g, 'POSTED');
+    t := pg_temp.make_rev_ticket(r, pg_temp.ticket_of(g), '_V-REV-A-RT');
+    PERFORM pg_temp.move_mirror(t);
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.rev_fin() WHERE id = t;
+    SET CONSTRAINTS document_reversal_posted IMMEDIATE;
+    SELECT COALESCE(SUM(m.signed_quantity), 0) INTO after
+      FROM stock_movement m JOIN location l ON l.id = m.location_id WHERE l.code = '_VREV-A';
+    IF before = 100 AND after = 0 THEN
+        RAISE NOTICE 'ok   69a  a receipt is reversed whole: its mirror posts and the place holds what it held before';
+    ELSE
+        RAISE WARNING 'FAIL 69a  the place held % and then %', before, after;
+    END IF;
+    INSERT INTO fx (k, id) VALUES ('rev_a', r), ('rev_a_original', g);
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL 69a  a reversal could not be posted (%): %', SQLSTATE, SQLERRM;
+END $$;
+
+SET CONSTRAINTS document_reversal_posted DEFERRED;
+
+-- ---- 69b..69e  what a reversal may name -------------------------------
+DO $$
+DECLARE draft UUID;
+BEGIN
+    PERFORM pg_temp.refuses('69b ', 'a reversing document that names nothing it reverses',
+        $q$INSERT INTO document (document_type_id, branch_id, serial_no, created_by)
+           SELECT dt.id, b.id, '_V-REV-B', pg_temp.holder('WH_MANAGER')
+             FROM document_type dt, branch b WHERE dt.code = 'REV' AND b.code = '_VREV'$q$,
+        '23Z02', '%must name the posted document%');
+
+    PERFORM pg_temp.refuses('69c ', 'a receipt that claims to reverse another document',
+        format('UPDATE document SET reverses_document_id = %L WHERE id = %L',
+               pg_temp.fx_id('rev_a_original'), pg_temp.make_grn('_V-REV-C', NULL, '_VREV', '_VREV-A')),
+        '23Z02', '%reverses nothing%');
+
+    draft := pg_temp.make_grn('_V-REV-D-GRN', NULL, '_VREV', '_VREV-A');
+    PERFORM pg_temp.refuses('69d ', 'a reversal of a document that has not posted',
+        format('SELECT pg_temp.make_rev(''_V-REV-D'', %L)', draft),
+        '23Z02', '%Only a posted document is reversed%');
+
+    PERFORM pg_temp.refuses('69e ', 'a reversal of a kind this version does not reverse (a ticket)',
+        format('SELECT pg_temp.make_rev(''_V-REV-E'', %L)', pg_temp.ticket_of(pg_temp.fx_id('rev_a_original'))),
+        '23Z02', '%cannot be reversed yet%');
+END $$;
+
+-- ---- 69f..69i  who raises it, and how many ----------------------------
+DO $$
+DECLARE g UUID;
+BEGIN
+    g := pg_temp.rev_original('_V-REV-F');
+    INSERT INTO fx (k, id) VALUES ('rev_f_original', g);
+
+    PERFORM pg_temp.refuses('69f ', 'the original''s raiser raising its reversal',
+        format('SELECT pg_temp.make_rev(''_V-REV-F1'', %L, pg_temp.verify_user())', g),
+        '23Z02', '%raised%takes no part in undoing it%');
+
+    PERFORM pg_temp.refuses('69g ', 'the original''s poster raising its reversal',
+        format('SELECT pg_temp.make_rev(''_V-REV-F2'', %L, pg_temp.holder(''FINANCE''))', g),
+        '23Z02', '%posted%takes no part in undoing it%');
+
+    PERFORM pg_temp.make_rev('_V-REV-H1', g);
+    PERFORM pg_temp.refuses('69h ', 'a second live reversal of one document',
+        format('SELECT pg_temp.make_rev(''_V-REV-H2'', %L)', g),
+        '23505');
+
+    UPDATE document SET status = 'CANCELLED', cancelled_by = pg_temp.holder('WH_MANAGER'),
+                        cancel_reason = 'Verification'
+     WHERE serial_no = '_V-REV-H1';
+    PERFORM pg_temp.accepts('69i ', 'a new reversal once the last one was cancelled',
+        format('SELECT pg_temp.make_rev(''_V-REV-H3'', %L)', g));
+END $$;
+
+-- ---- 69j..69k  a reason the signers can judge -------------------------
+DO $$
+DECLARE g UUID; d UUID;
+BEGIN
+    g := pg_temp.rev_original('_V-REV-J');
+    INSERT INTO document (document_type_id, branch_id, serial_no, created_by, reverses_document_id)
+    SELECT dt.id, b.id, '_V-REV-J-R', pg_temp.holder('WH_MANAGER'), g
+      FROM document_type dt, branch b WHERE dt.code = 'REV' AND b.code = '_VREV'
+    RETURNING id INTO d;
+    PERFORM pg_temp.refuses('69j ', 'a reversal submitted with no reason',
+        format('UPDATE document SET status = ''PENDING'' WHERE id = %L', d),
+        '23Z02', '%cannot be submitted%');
+    PERFORM pg_temp.refuses('69k ', 'a reason too short to judge',
+        format('INSERT INTO reversal (document_id, reason) VALUES (%L, ''error'')', d),
+        '23514');
+END $$;
+
+-- ---- 69l..69m  who signs and posts it ---------------------------------
+DO $$
+DECLARE g UUID; r UUID; h3 UUID;
+BEGIN
+    -- Raised by a second Internal Controller, so the same person could sign the reversal's step 2.
+    g := pg_temp.rev_original('_V-REV-L', (SELECT id FROM app_user WHERE username = '_verify_rev_ic2'));
+    r := pg_temp.make_rev('_V-REV-L-R', g);
+    UPDATE document SET status = 'PENDING' WHERE id = r;
+    PERFORM pg_temp.sign(r, 1, pg_temp.holder('WH_MANAGER'));
+    PERFORM pg_temp.refuses('69l ', 'the original''s raiser signing its reversal',
+        format('SELECT pg_temp.sign(%L, 2, (SELECT id FROM app_user WHERE username = ''_verify_rev_ic2''))', r),
+        '23Z02', '%raised%cannot sign its reversal%');
+
+    h3 := (SELECT id FROM document WHERE serial_no = '_V-REV-H3');
+    UPDATE document SET status = 'PENDING' WHERE id = h3;
+    PERFORM pg_temp.sign_upto(h3, pg_temp.steps_in(h3));
+    UPDATE document SET status = 'APPROVED' WHERE id = h3;
+    PERFORM pg_temp.refuses('69m ', 'the original''s poster posting its reversal',
+        format('UPDATE document SET status = ''POSTED'', posted_by = %L WHERE id = %L', pg_temp.holder('FINANCE'), h3),
+        '23Z02', '%posted%cannot post its reversal%');
+
+    -- Withdrawing a signed reversal is taking part too.
+    PERFORM pg_temp.refuses('69m2', 'the original''s poster cancelling its signed reversal',
+        format('UPDATE document SET status = ''CANCELLED'', cancelled_by = %L, cancel_reason = ''Verification'' WHERE id = %L',
+               pg_temp.holder('FINANCE'), h3),
+        '23Z02', '%posted%cannot cancel its reversal%');
+END $$;
+
+-- ---- 69n..69u  the mirror, and nothing but the mirror -----------------
+DO $$
+DECLARE g UUID; r UUID; t0 UUID; t UUID; other BIGINT;
+BEGIN
+    g  := pg_temp.rev_original('_V-REV-N');
+    r  := pg_temp.rev_at('_V-REV-N-R', g, 'POSTED');
+    t0 := pg_temp.ticket_of(g);
+    INSERT INTO fx (k, id) VALUES ('rev_n', r);
+
+    PERFORM pg_temp.refuses('69n ', 'a reversing ticket that goes the same way as the one it reverses',
+        format('SELECT pg_temp.make_rev_ticket(%L, %L, ''_V-REV-N-RT1'', ''IN'')', r, t0),
+        '23Z02', '%must be the mirror%');
+
+    PERFORM pg_temp.refuses('69o ', 'a reversing ticket line at another quantity',
+        format('SELECT pg_temp.make_rev_ticket(%L, %L, ''_V-REV-N-RT2'', NULL, 99)', r, t0),
+        '23Z02', '%undoes exactly what moved%');
+
+    t := pg_temp.make_rev_ticket(r, t0, '_V-REV-N-RT');
+
+    PERFORM pg_temp.refuses('69p ', 'a mirror at another value than the movement it undoes',
+        format('SELECT pg_temp.move_mirror(%L, 1)', t),
+        '23Z02', '%exact mirror%');
+
+    PERFORM pg_temp.refuses('69q ', 'a reversing ticket''s movement that names nothing it undoes',
+        format('SELECT pg_temp.move_mirror(%L, NULL, FALSE)', t),
+        '23Z02', '%names the movement it undoes%');
+
+    -- Any posted movement of another receipt will do: the point is that a receipt's ticket names it.
+    SELECT m.id INTO other FROM stock_movement m WHERE m.document_id = pg_temp.ticket_of(pg_temp.fx_id('rev_f_original'));
+    PERFORM pg_temp.refuses('69r ', 'an ordinary movement that claims to reverse another',
+        format($q$INSERT INTO stock_movement (ticket_line_id, document_id, branch_id, item_id, location_id,
+                                              direction, quantity_base_uom, signed_quantity, unit_cost, value,
+                                              running_balance, business_date, posted_by, reverses_movement_id)
+                  SELECT tl.id, t.document_id, d.branch_id, tl.item_id, t.to_location_id, 'IN', tl.qty_base_uom,
+                         tl.qty_base_uom, 1000, tl.qty_base_uom * 1000, 0, kigali_today(), %L, %s
+                    FROM ticket_line tl JOIN transaction_ticket t ON t.document_id = tl.ticket_id
+                    JOIN document d ON d.id = t.document_id
+                   WHERE tl.ticket_id = %L$q$,
+               pg_temp.holder('FINANCE'), other, t0),
+        '23Z02', '%Only a reversing document''s ticket reverses a movement%');
+
+    PERFORM pg_temp.refuses('69s ', 'a second reversing ticket of the same ticket',
+        format('SELECT pg_temp.make_rev_ticket(%L, %L, ''_V-REV-N-RT3'')', r, t0),
+        '23505');
+
+    PERFORM pg_temp.refuses('69t ', 'a reversal posted with a movement of the original left standing',
+        'SET CONSTRAINTS document_reversal_posted IMMEDIATE',
+        '23Z02', '%was not reversed%');
+END $$;
+
+SET CONSTRAINTS document_reversal_posted DEFERRED;
+
+-- ---- 69u..69x  an opening balance reversed, and loaded again ---------
+DO $$
+DECLARE opb UUID; r UUID; t UUID; o2 UUID; tt UUID; reversed BOOLEAN;
+BEGIN
+    opb := pg_temp.fx_id('opb_posted');
+    PERFORM pg_temp.refuses('69u ', 'an opening balance marked reversed by hand',
+        format('UPDATE opening_balance SET is_reversed = TRUE WHERE document_id = %L', opb),
+        '23Z02', '%marked reversed only when its reversal posts%');
+
+    r := pg_temp.rev_at('_V-REV-W-R', opb, 'POSTED');
+    t := pg_temp.make_rev_ticket(r, pg_temp.ticket_of(opb), '_V-REV-W-RT');
+    PERFORM pg_temp.move_mirror(t);
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.rev_fin() WHERE id = t;
+    -- Completeness is 69a's to prove; 69t left a reversal deliberately incomplete, still queued.
+    SELECT is_reversed INTO reversed FROM opening_balance WHERE document_id = opb;
+    IF reversed THEN
+        RAISE NOTICE 'ok   69v  an opening balance is marked reversed when its reversal posts';
+    ELSE
+        RAISE WARNING 'FAIL 69v  the reversed opening balance was not marked';
+    END IF;
+
+    SET CONSTRAINTS document_opening_posted DEFERRED;
+    o2 := pg_temp.opb_at('_V-OPB-W2', 'APPROVED', '_VOPB', '_VOPB-A');
+    tt := pg_temp.make_opb_ticket(o2, pg_temp.holder('FINANCE'), '_V-TT-OPB-W2');
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = o2;
+    PERFORM pg_temp.move_ticket(tt, pg_temp.holder('FINANCE'), kigali_today());
+    UPDATE document SET status = 'POSTED', posted_by = pg_temp.holder('FINANCE') WHERE id = tt;
+    SET CONSTRAINTS document_opening_posted IMMEDIATE;
+    RAISE NOTICE 'ok   69w  a corrected opening balance loads where the last was reversed, before the branch trades';
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'FAIL 69v/w  the reversal or the reload was refused (%): %', SQLSTATE, SQLERRM;
+END $$;
+
+SET CONSTRAINTS document_reversal_posted DEFERRED;
+SET CONSTRAINTS document_opening_posted DEFERRED;
+
+SELECT pg_temp.refuses('69x ', 'a reversed opening balance unmarked',
+    format('UPDATE opening_balance SET is_reversed = FALSE WHERE document_id = %L', pg_temp.fx_id('opb_posted')),
+    '23Z02', '%never unmarked%');
+
+-- ---- 69y  the close reads a reversal as an adjustment ----------------
+DO $$
+DECLARE f RECORD;
+BEGIN
+    SELECT * INTO f FROM close_figures((SELECT id FROM branch WHERE code = '_VREV'), kigali_today());
+    -- 69a's reversal took 100 sheets at 1,000 back out; nothing at _VREV was dispatched.
+    IF f.dispatches_value = 0 AND f.adjustments_value = -100000 THEN
+        RAISE NOTICE 'ok   69y  the close counts a reversal as an adjustment, never as goods leaving';
+    ELSE
+        RAISE WARNING 'FAIL 69y  dispatches %, adjustments %', f.dispatches_value, f.adjustments_value;
+    END IF;
+END $$;
+
+-- ---- 69z  the rights and the chain ------------------------------------
+DO $$
+DECLARE wrong INT; chain TEXT;
+BEGIN
+    SELECT COUNT(*) INTO wrong
+      FROM role_permission rp JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id
+     WHERE p.code LIKE 'reversal.%'
+       AND (r.code = 'SYS_ADMIN' OR (r.code = 'INTERNAL_CTRL' AND p.code <> ALL (ARRAY['reversal.view', 'reversal.verify'])));
+    SELECT string_agg(ws.action_label || ' ' || r.code, ' > ' ORDER BY ws.sequence_no) INTO chain
+      FROM workflow_definition wd JOIN document_type dt ON dt.id = wd.document_type_id AND dt.code = 'REV'
+      JOIN workflow_step ws ON ws.workflow_definition_id = wd.id JOIN role r ON r.id = ws.required_role_id;
+    IF wrong = 0 AND chain = 'PREPARE WH_MANAGER > VERIFY INTERNAL_CTRL > APPROVE MANAGING_DIR' THEN
+        RAISE NOTICE 'ok   69z  nothing of a reversal for the administrator, the Internal Controller only verifies it, and the chain is WM > IC > MD';
+    ELSE
+        RAISE WARNING 'FAIL 69z  % misplaced rights; chain %', wrong, chain;
+    END IF;
+END $$;
+
 ROLLBACK;
 
 \echo ''

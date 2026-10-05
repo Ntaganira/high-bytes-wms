@@ -55,7 +55,7 @@ public class SecurityConfig {
     /** Holding any one of these lets a user read some kind of document. */
     private static final String[] DOCUMENT_VIEW = {
             "opening.view", "receiving.view", "dispatch.view", "transfer.view", "cutting.view",
-            "damage.view", "count.view", "ticket.view"
+            "damage.view", "count.view", "ticket.view", "reversal.view"
     };
 
     @Bean
@@ -109,6 +109,7 @@ public class SecurityConfig {
                 .requestMatchers("/damage/**")         .hasAuthority("damage.view")
                 .requestMatchers("/tickets/**")        .hasAuthority("ticket.view")
                 .requestMatchers("/counts/**")         .hasAuthority("count.view")
+                .requestMatchers("/reversals/**")      .hasAuthority("reversal.view")
                 .requestMatchers("/variances/**")      .hasAuthority("count.view")
                 .requestMatchers("/stock/**")          .hasAuthority("stock.view")
                 .requestMatchers("/daily-close/**")    .hasAuthority("close.view")

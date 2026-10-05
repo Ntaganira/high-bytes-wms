@@ -787,8 +787,9 @@ public class DamageService {
                 sign.step(),
                 cancel.allowed(),
                 "POSTED".equals(status) && (create || poster) ? h.serialNo() + " has been posted, so it cannot be "
-                        + "cancelled: the stock has moved. A wrong report is corrected by a reversing document "
-                        + "(not built yet)." : null,
+                        + "cancelled: the stock has moved. A wrong write-off or quarantine release is corrected by "
+                        + "a reversing document raised from this page; reversing a transit loss or a customer "
+                        + "return is not built yet." : null,
                 canPost,
                 postReason);
     }

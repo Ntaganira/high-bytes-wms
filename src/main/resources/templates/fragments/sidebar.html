@@ -33,7 +33,7 @@
 
     <!-- Shown to whoever reads a document here, or has a signature waiting anywhere. -->
     <a th:href="@{/approvals}" class="side-link"
-       th:if="${awaitingYou > 0 or #authorization.expression('hasAnyAuthority(''opening.view'',''receiving.view'',''dispatch.view'',''transfer.view'',''cutting.view'',''damage.view'',''count.view'',''ticket.view'')')}"
+       th:if="${awaitingYou > 0 or #authorization.expression('hasAnyAuthority(''opening.view'',''receiving.view'',''dispatch.view'',''transfer.view'',''cutting.view'',''damage.view'',''count.view'',''ticket.view'',''reversal.view'')')}"
        th:classappend="${activeNav == 'approvals'} ? 'active'"
        th:attr="aria-current=${activeNav == 'approvals'} ? 'page' : null">
       <i class="bi bi-pen"></i> <span class="side-text">Approval Queue</span>
@@ -42,7 +42,7 @@
     </a>
 
     <!-- Documents -->
-    <th:block sec:authorize="hasAnyAuthority('opening.view','receiving.view','dispatch.view','transfer.view','cutting.view','damage.view','count.view','ticket.view')">
+    <th:block sec:authorize="hasAnyAuthority('opening.view','receiving.view','dispatch.view','transfer.view','cutting.view','damage.view','count.view','ticket.view','reversal.view')">
       <button class="side-label" type="button" data-bs-toggle="collapse"
               data-bs-target="#navDocuments" aria-expanded="true" aria-controls="navDocuments">
         Documents <i class="bi bi-chevron-down"></i>
@@ -104,6 +104,11 @@
         <a th:href="@{/tickets}" class="side-link" sec:authorize="hasAuthority('ticket.view')"
            th:classappend="${activeNav == 'tickets'} ? 'active'">
           <i class="bi bi-ticket-perforated"></i> <span class="side-text">Transaction Tickets</span>
+        </a>
+
+        <a th:href="@{/reversals}" class="side-link" sec:authorize="hasAuthority('reversal.view')"
+           th:classappend="${activeNav == 'reversals'} ? 'active'">
+          <i class="bi bi-arrow-counterclockwise"></i> <span class="side-text">Reversals</span>
         </a>
       </div>
     </th:block>

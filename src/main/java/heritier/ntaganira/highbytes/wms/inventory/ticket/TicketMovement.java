@@ -23,7 +23,9 @@ public enum TicketMovement {
     DAMAGE("Damage or loss"),
     CUT_CONSUME("Cutting: sheet consumed"),
     CUT_OUTPUT("Cutting: pieces and off-cuts"),
-    ADJUSTMENT("Count adjustment");
+    ADJUSTMENT("Count adjustment"),
+    OPENING("Opening balance"),
+    REVERSAL("Reversal");
 
     private final String label;
 

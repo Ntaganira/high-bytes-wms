@@ -11,6 +11,7 @@
 <div layout:fragment="content">
 
   <div th:replace="~{fragments/ui :: documentHeader(${opb})}"></div>
+  <th:block th:replace="~{fragments/reversal :: banner(${reversedBy}, ${opb.id}, ${opb.status == 'POSTED'})}"></th:block>
 
   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
     <div>

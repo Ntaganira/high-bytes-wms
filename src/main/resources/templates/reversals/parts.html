@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+  <!--
+    Every movement of the original and its mirror. Shared with the view.
+    A place under a live count shows the count, never the book.
+  -->
+  <th:block th:fragment="movements(lines)">
+    <div class="table-responsive">
+      <table class="table hb-table compact mb-0">
+        <thead>
+          <tr>
+            <th scope="col">Ticket · line</th>
+            <th scope="col">Item</th>
+            <th scope="col">Place</th>
+            <th scope="col">Original</th>
+            <th scope="col" class="num">Quantity</th>
+            <th scope="col" class="num">Value (RWF)</th>
+            <th scope="col">Reversal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr th:each="l : ${lines}">
+            <td class="mono small">
+              <span th:text="${l.ticketSerial()}">TT-KGL-2026-0001</span> · <span th:text="${l.lineNo()}">1</span>
+            </td>
+            <td>
+              <span class="mono" th:text="${l.itemCode()}">GL-CF-6</span>
+              <span class="d-block small text-body-secondary" th:text="${l.description()}">Clear float 6mm</span>
+            </td>
+            <td class="mono">
+              <span th:text="${l.locationCode()}">KGL-MAIN</span>
+              <span class="d-block small text-body-secondary" th:if="${l.binCode() != null}" th:text="'bin ' + ${l.binCode()}">bin A-01</span>
+            </td>
+            <td class="mono small" th:text="${l.direction()} + ' · ' + ${l.movementType()}">IN · RECEIPT</td>
+            <td class="num mono">
+              <span th:text="${#numbers.formatDecimal(l.quantityBase(), 1, 'COMMA', 3, 'POINT')}">120.000</span>
+              <span class="small text-body-secondary" th:text="${l.baseUomCode()}">SHEET</span>
+            </td>
+            <td class="num mono" th:text="${#numbers.formatDecimal(l.valueRwf(), 1, 'COMMA', 2, 'POINT')}">5,040,000.00</td>
+            <td class="small">
+              <span class="mono fw-semibold" th:text="${l.mirrorDirection()}">OUT</span>
+              <th:block th:if="${l.mirrorId() != null}">
+                <span th:replace="~{fragments/ui :: chip('POSTED')}"></span>
+              </th:block>
+              <span class="d-block" th:if="${l.problem() != null}" style="color: var(--color-danger)" th:text="${l.problem()}">Short of stock</span>
+            </td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(lines)}">
+            <td colspan="7">
+              <div th:replace="~{fragments/ui :: emptyState('bi-list-ol', 'No movements', 'This document moved no stock.')}"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </th:block>
+
+</body>
+</html>

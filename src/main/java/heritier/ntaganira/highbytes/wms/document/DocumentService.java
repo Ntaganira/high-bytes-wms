@@ -107,7 +107,17 @@ public class DocumentService {
 
     static final String POSTED_REVERSAL_NOTE =
             "stock has moved. A posted document is never cancelled or edited: what it did is corrected with a "
-            + "reversing document, which keeps both the original and the correction in the ledger (not built yet).";
+            + "reversing document, which keeps both the original and the correction in the ledger";
+
+    /** Where the correction comes from, for the types a reversing document undoes today (V21) and the rest. */
+    static String postedReversalNote(DocumentKind kind) {
+        return switch (kind) {
+            case GRN, OPB, CNT -> POSTED_REVERSAL_NOTE + ". Raise one from its page.";
+            case DMG -> POSTED_REVERSAL_NOTE + ". A write-off or a quarantine release is reversed from its page; "
+                    + "reversing a transit loss or a customer return is not built yet.";
+            default -> POSTED_REVERSAL_NOTE + " (not built yet for this type).";
+        };
+    }
 
     private final JdbcClient jdbc;
     private final SerialService serials;
@@ -187,6 +197,19 @@ public class DocumentService {
                     roleName, r.decision(), r.actorId(), r.actorName(), r.decidedAt(), r.comment(), state));
         }
         return steps;
+    }
+
+    /** The reversal raised against a document and still live, if any (V21: one at a time). */
+    public Optional<ReversedBy> reversedBy(UUID documentId) {
+        return jdbc.sql("""
+                SELECT d.id, d.serial_no, d.status
+                  FROM document d
+                 WHERE d.reverses_document_id = :id AND d.status NOT IN ('CANCELLED', 'REJECTED')
+                """)
+                .param("id", documentId, Types.OTHER)
+                .query((rs, n) -> new ReversedBy(rs.getObject("id", UUID.class), rs.getString("serial_no"),
+                        rs.getString("status")))
+                .optional();
     }
 
     public Optional<ChainInfo> chainInfo(UUID documentId) {
@@ -332,7 +355,8 @@ public class DocumentService {
     public StepCheck canCancel(DocumentHeader d) {
         switch (d.status()) {
             case "POSTED" -> {
-                return StepCheck.no(null, d.serialNo() + " is posted, so it cannot be cancelled: " + POSTED_REVERSAL_NOTE);
+                return StepCheck.no(null, d.serialNo() + " is posted, so it cannot be cancelled: "
+                        + postedReversalNote(d.kind()));
             }
             case "REJECTED", "CANCELLED" -> {
                 return StepCheck.no(null, d.serialNo() + " is " + d.status() + " and final.");
@@ -358,15 +382,27 @@ public class DocumentService {
      */
     @Transactional
     public OpenedDocument open(DocumentKind kind, UUID branchId, String reference, String notes, UUID supersedesId) {
+        return open(kind, branchId, reference, notes, supersedesId, null);
+    }
+
+    /**
+     * Opens a draft that reverses a posted document. The database judges the
+     * pairing when the row is written (V21): a reversing document names one
+     * posted document of a type it can undo, at its own branch, and its
+     * creator neither raised nor posted that document.
+     */
+    @Transactional
+    public OpenedDocument open(DocumentKind kind, UUID branchId, String reference, String notes, UUID supersedesId,
+                               UUID reversesId) {
         UUID user = CurrentUser.get().orElseThrow(() -> new AccessDeniedException("Not signed in")).id();
         String serial = serials.next(kind.code(), branchId);
         UUID id = UUID.randomUUID();
         try {
             jdbc.sql("""
                     INSERT INTO document (id, document_type_id, branch_id, serial_no, reference, notes,
-                                          created_by, supersedes_document_id)
+                                          created_by, supersedes_document_id, reverses_document_id)
                     VALUES (:id, (SELECT dt.id FROM document_type dt WHERE dt.code = :code),
-                            :branch, :serial, :reference, :notes, :user, :supersedes)
+                            :branch, :serial, :reference, :notes, :user, :supersedes, :reverses)
                     """)
                     .param("id", id, Types.OTHER)
                     .param("code", kind.code())
@@ -376,6 +412,7 @@ public class DocumentService {
                     .param("notes", blankToNull(notes))
                     .param("user", user, Types.OTHER)
                     .param("supersedes", supersedesId, Types.OTHER)
+                    .param("reverses", reversesId, Types.OTHER)
                     .update();
         } catch (DataAccessException e) {
             throw DbRefusal.asRefusal(e);

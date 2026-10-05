@@ -145,6 +145,7 @@ public class ReceivingController {
     public String view(@PathVariable UUID id, Model model) {
         var detail = receiving.detail(id);
         model.addAttribute("grn", detail.header());
+        model.addAttribute("reversedBy", documents.reversedBy(id).orElse(null));
         model.addAttribute("lines", detail.lines());
         model.addAttribute("chain", detail.chain());
         model.addAttribute("chainInfo", detail.chainInfo());

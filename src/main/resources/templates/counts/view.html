@@ -11,6 +11,7 @@
 <div layout:fragment="content">
 
   <div th:replace="~{fragments/ui :: documentHeader(${cnt})}"></div>
+  <th:block th:replace="~{fragments/reversal :: banner(${reversedBy}, ${cnt.id}, ${cnt.status == 'POSTED'})}"></th:block>
 
   <!-- The state of the approval and the posting, in the one banner every controlled document uses. -->
   <div th:replace="~{fragments/ui :: releaseGate(${gate})}"></div>

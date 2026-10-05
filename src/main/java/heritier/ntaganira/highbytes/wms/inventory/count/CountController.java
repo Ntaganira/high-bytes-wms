@@ -143,6 +143,7 @@ public class CountController {
     public String view(@PathVariable UUID id, Model model) {
         var detail = counts.detail(id);
         model.addAttribute("cnt", detail.header());
+        model.addAttribute("reversedBy", documents.reversedBy(id).orElse(null));
         model.addAttribute("lines", detail.lines());
         model.addAttribute("progress", detail.progress());
         model.addAttribute("chain", detail.chain());

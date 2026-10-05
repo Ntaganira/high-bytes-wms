@@ -150,6 +150,7 @@ public class DocumentController {
             case "DMG" -> { return "redirect:/damage/" + target[0]; }
             case "CNT" -> { return "redirect:/counts/" + target[0]; }
             case "CUT" -> { return "redirect:/cutting/" + target[0]; }
+            case "REV" -> { return "redirect:/reversals/" + target[0]; }
             default -> { /* a type whose screen is not built yet stays a 404 */ }
         }
         throw new ResponseStatusException(NOT_FOUND);

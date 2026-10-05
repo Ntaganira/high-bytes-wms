@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/main}">
+<head>
+  <title th:text="${form.new} ? 'New reversal' : 'Edit ' + ${rev.serialNo}">Reversal</title>
+</head>
+<body>
+<div layout:fragment="content">
+
+  <div class="mb-4">
+    <p class="eyebrow">DOCUMENTS · CORRECTIONS</p>
+    <h1 class="page-title" th:text="${form.new} ? 'New reversal' : 'Edit ' + ${rev.serialNo}">New reversal</h1>
+    <p class="page-sub" th:if="${form.new}">
+      Undoes a posted document whole: every movement it made is mirrored, the same item, place, bin, quantity and
+      value, the other way. Nothing is keyed but the reason; the Internal Controller and the Managing Director judge
+      the reversal by it.
+    </p>
+  </div>
+
+  <!-- Step 1: which document. Leaving the form for a GET keeps the choice in the address. -->
+  <th:block th:if="${preview == null}">
+    <form class="hb-card hb-card-body" method="get" th:action="@{/reversals/new}">
+      <div class="card-head">
+        <div class="card-title-row">
+          <i class="bi bi-search" aria-hidden="true"></i>
+          <div>
+            <h2 class="card-title">Which posted document?</h2>
+            <p class="card-sub">Goods received, opening balances, counts, write-offs and quarantine releases at this branch.
+              Documents you raised or posted are not listed: whoever raised or posted a document takes no part in undoing it.</p>
+          </div>
+        </div>
+      </div>
+      <div th:if="${#lists.isEmpty(candidates)}">
+        <div th:replace="~{fragments/ui :: emptyState('bi-arrow-counterclockwise', 'Nothing here to reverse', 'No posted document at this branch can be reversed by you today.')}"></div>
+      </div>
+      <div class="row g-2 align-items-end" th:unless="${#lists.isEmpty(candidates)}">
+        <div class="col-12 col-md-8">
+          <label for="original" class="form-label small fw-semibold" style="color: var(--color-heading)">Posted document</label>
+          <select id="original" name="original" class="form-select" required>
+            <option value="">Choose…</option>
+            <option th:each="c : ${candidates}" th:value="${c.id()}" th:text="${c.label()}">GRN-KGL-2026-0412 · Goods Received Note</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-4">
+          <button type="submit" class="btn btn-primary w-100"><i class="bi bi-eye"></i> See what it would undo</button>
+        </div>
+      </div>
+    </form>
+  </th:block>
+
+  <!-- Step 2: what it undoes, and why. -->
+  <th:block th:if="${preview != null}">
+    <form th:action="${form.new} ? @{/reversals} : @{'/reversals/' + ${form.id}}"
+          th:object="${form}" method="post" novalidate>
+
+      <input type="hidden" th:field="*{version}">
+      <input type="hidden" th:field="*{originalId}">
+
+      <div th:if="${#fields.hasGlobalErrors()}" class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+        <i class="bi bi-exclamation-octagon-fill"></i>
+        <div><p th:each="e : ${#fields.globalErrors()}" th:text="${e}" class="mb-0"></p></div>
+      </div>
+
+      <div class="alert alert-danger d-flex align-items-start gap-2" role="alert"
+           th:if="${form.new and preview.obstacle() != null}">
+        <i class="bi bi-slash-circle-fill"></i>
+        <div>
+          <p class="mb-1 fw-semibold">This document cannot be reversed by you</p>
+          <p class="mb-0" th:text="${preview.obstacle()}">reason</p>
+        </div>
+      </div>
+
+      <div class="alert alert-warning d-flex align-items-start gap-2" role="status"
+           th:if="${preview.obstacle() == null and preview.anyProblem()}">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <div>
+          Some places cannot take their reversal today, for the reasons on the lines below. It can still be raised and
+          signed; the ledger will refuse to post it until those places can.
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12 col-xl-8">
+          <section class="hb-card hb-card-body mb-3">
+            <div class="card-head">
+              <div class="card-title-row">
+                <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+                <div>
+                  <h2 class="card-title">
+                    <span th:text="${preview.original().title()}">Goods Received Note</span>
+                    <a class="doc-link" th:href="@{'/documents/' + ${preview.original().id()}}"
+                       th:text="${preview.original().serialNo()}">GRN-KGL-2026-0412</a>
+                  </h2>
+                  <p class="card-sub">
+                    Raised by <span th:text="${preview.original().createdByName()}">Name</span>,
+                    posted by <span th:text="${preview.original().postedByName()}">Name</span>
+                    <th:block th:if="${preview.original().postedAt() != null}">
+                      on <span class="mono" th:text="${#temporals.format(preview.original().postedAt(), 'dd MMM yyyy HH:mm')}">04 Oct 2026 10:00</span></th:block>.
+                    Neither takes any part in its reversal.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div th:replace="~{reversals/parts :: movements(${preview.lines()})}"></div>
+          </section>
+        </div>
+
+        <div class="col-12 col-xl-4">
+          <section class="hb-card hb-card-body mb-3">
+            <div class="card-head">
+              <div class="card-title-row">
+                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+                <h2 class="card-title">Why it is reversed</h2>
+              </div>
+            </div>
+            <label for="reason" class="form-label small fw-semibold" style="color: var(--color-heading)">Reason</label>
+            <textarea id="reason" th:field="*{reason}" rows="6" maxlength="600" class="form-control"
+                      th:classappend="${#fields.hasErrors('reason')} ? 'is-invalid'"
+                      placeholder="What was wrong with the original, and how it was found"></textarea>
+            <div class="invalid-feedback" th:if="${#fields.hasErrors('reason')}" th:errors="*{reason}">Reason</div>
+            <p class="small text-body-secondary mt-2 mb-3">
+              The Internal Controller verifies it and the Managing Director approves it; Finance posts it. A wrong
+              document is reversed whole and, if it was partly right, raised again correctly.
+            </p>
+            <button type="submit" class="btn btn-primary-action w-100"
+                    th:disabled="${form.new and preview.obstacle() != null}">
+              <i class="bi bi-save"></i>
+              <span th:text="${form.new} ? 'Raise the reversal as a draft' : 'Save'">Raise</span>
+            </button>
+            <a th:href="${form.new} ? @{/reversals/new} : @{'/reversals/' + ${form.id}}"
+               class="btn btn-outline-secondary w-100 mt-2">Back</a>
+          </section>
+        </div>
+      </div>
+    </form>
+  </th:block>
+
+
+</div>
+</body>
+</html>

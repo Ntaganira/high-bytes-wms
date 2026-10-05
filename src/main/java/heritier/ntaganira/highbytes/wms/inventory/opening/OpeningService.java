@@ -249,7 +249,7 @@ public class OpeningService {
         String loaded = jdbc.sql("""
                 SELECT d.serial_no
                   FROM opening_balance o JOIN document d ON d.id = o.document_id
-                 WHERE o.location_id = :id AND o.is_posted
+                 WHERE o.location_id = :id AND o.is_posted AND NOT o.is_reversed
                  LIMIT 1
                 """)
                 .param("id", locationId, Types.OTHER)
@@ -257,7 +257,8 @@ public class OpeningService {
         if (loaded != null) {
             return new Obstacle(true, false, place.locationCode()
                     + " already has its opening balance: " + loaded
-                    + ". A place is loaded once, and what is there now is corrected by a stock count.");
+                    + ". A place is loaded once; a wrong one is reversed in full before a corrected one loads, "
+                    + "and once the branch trades what is there is corrected by a stock count.");
         }
 
         record Traded(String serialNo, LocalDate on) {}
@@ -269,6 +270,10 @@ public class OpeningService {
                   LEFT JOIN document src         ON src.id = t.source_document_id
                   LEFT JOIN document_type st     ON st.id = src.document_type_id
                  WHERE m.branch_id = :branchId AND COALESCE(st.code, '') <> 'OPB'
+                   -- V21: reversing an opening balance is part of the cutover, not trading.
+                   AND NOT (st.code = 'REV'
+                            AND EXISTS (SELECT 1 FROM document o JOIN document_type ot ON ot.id = o.document_type_id
+                                         WHERE o.id = src.reverses_document_id AND ot.code = 'OPB'))
                  ORDER BY m.id
                  LIMIT 1
                 """)
