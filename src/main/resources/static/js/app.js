@@ -56,6 +56,29 @@
     desktop.addEventListener('change', railTips);
   }
 
+  /* ---- A file chosen is a file sent ---------------------------------
+     The profile photo: picking the file is the decision. A file over the
+     limit is refused here, at once, rather than after it has uploaded;
+     the server checks again either way. */
+  document.querySelectorAll('input[type="file"][data-autosubmit]').forEach(function (input) {
+    input.addEventListener('change', function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var max  = Number(input.dataset.maxBytes || 0);
+      var note = document.getElementById(input.getAttribute('aria-describedby'));
+      if (max && file.size > max) {
+        if (note) {
+          note.textContent = 'That photo is over ' + Math.round(max / 1048576) + ' MB. Choose a smaller one.';
+          note.classList.add('is-error');
+          note.setAttribute('role', 'alert');
+        }
+        input.value = '';
+        return;
+      }
+      input.form.submit();
+    });
+  });
+
   /* ---- Stock movement chart ------------------------------------------
      Data comes from the server as JSON in the page, never hardcoded. */
   var dataEl = document.getElementById('chartData');

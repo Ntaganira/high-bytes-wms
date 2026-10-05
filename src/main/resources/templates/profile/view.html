@@ -10,10 +10,39 @@
 <div layout:fragment="content">
 
   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
-    <div>
-      <p class="eyebrow">MY PROFILE</p>
-      <h1 class="page-title" th:text="${me.fullName()}">Jeanne Uwase</h1>
-      <p class="page-sub"><span class="mono" th:text="${me.username()}">juwase</span></p>
+    <div class="d-flex flex-wrap align-items-center gap-3">
+
+      <!-- The photo is the holder's own, and grants nothing. What is kept is
+           a 256 px square the server re-encodes, never the file chosen. -->
+      <div class="profile-photo">
+        <img th:if="${userPhotoVersion}" th:src="@{/profile/photo(v=${userPhotoVersion})}"
+             alt="Your profile photo">
+        <span th:unless="${userPhotoVersion}" aria-hidden="true" th:text="${userInitials} ?: 'HB'">JU</span>
+      </div>
+
+      <div>
+        <p class="eyebrow">MY PROFILE</p>
+        <h1 class="page-title" th:text="${me.fullName()}">Jeanne Uwase</h1>
+        <p class="page-sub"><span class="mono" th:text="${me.username()}">juwase</span></p>
+
+        <div class="photo-actions">
+          <!-- Choosing the file is the decision: it sends at once (app.js). -->
+          <form th:action="@{/profile/photo}" method="post" enctype="multipart/form-data" class="photo-picker">
+            <input type="file" id="photoInput" name="photo" class="visually-hidden"
+                   accept="image/jpeg,image/png" data-autosubmit data-max-bytes="5242880"
+                   aria-describedby="photoHelp">
+            <label for="photoInput" class="btn btn-sm btn-outline-secondary mb-0">
+              <i class="bi bi-camera" aria-hidden="true"></i>
+              <span th:text="${userPhotoVersion} ? 'Change photo' : 'Add a photo'">Add a photo</span>
+            </label>
+            <noscript><button type="submit" class="btn btn-sm btn-outline-secondary">Upload</button></noscript>
+          </form>
+          <form th:if="${userPhotoVersion}" th:action="@{/profile/photo/remove}" method="post">
+            <button type="submit" class="btn btn-sm btn-link photo-remove">Remove</button>
+          </form>
+        </div>
+        <p id="photoHelp" class="photo-help">JPEG or PNG, up to 5 MB. It is cut to a square from the centre.</p>
+      </div>
     </div>
     <a th:href="@{/profile/password}" class="btn btn-primary-action">
       <i class="bi bi-key"></i> Change password

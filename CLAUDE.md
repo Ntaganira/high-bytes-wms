@@ -113,7 +113,7 @@ src/main/java/heritier/ntaganira/highbytes/wms/
 │   ├── branch/    branches: create, amend, deactivate once finished with
 │   ├── workflow/  the approval chains read whole; a switchover to come moved
 │   └── audit/     the audit log, searched, as far as the reader's right reaches
-├── profile/       My profile, change password (forced for temporary ones)
+├── profile/       My profile, change password (forced for temporary ones), the holder's own photo
 ├── dashboard/
 ├── masterdata/
 │   ├── item/      item master, glass attributes

@@ -99,7 +99,10 @@
 
     <div class="dropdown">
       <button class="user-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="User menu">
-        <span class="user-avatar" aria-hidden="true" th:text="${userInitials} ?: 'HB'">HN</span>
+        <img class="user-avatar" th:if="${userPhotoVersion}" alt="" aria-hidden="true"
+             th:src="@{/profile/photo(v=${userPhotoVersion})}">
+        <span class="user-avatar" th:unless="${userPhotoVersion}" aria-hidden="true"
+              th:text="${userInitials} ?: 'HB'">HN</span>
         <span class="d-none d-sm-block">
           <span class="user-name d-block" sec:authentication="principal.fullName">Heritier Ntaganira</span>
           <span class="user-role d-block" th:text="${primaryRoleName}">Warehouse Manager</span>

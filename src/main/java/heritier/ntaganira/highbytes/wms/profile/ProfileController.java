@@ -7,7 +7,7 @@ package heritier.ntaganira.highbytes.wms.profile;
  * - File       : ProfileController.java
  * - Date       : 2026-09-29
  * - Author     : NTAGANIRA Heritier
- * - Desc       : My profile: the signed-in user's account, roles and rights, and changing their password
+ * - Desc       : My profile: the signed-in user's account, roles and rights, their password and their photo
  * </pre>
  */
 
@@ -20,6 +20,9 @@ import heritier.ntaganira.highbytes.wms.security.PasswordService;
 import heritier.ntaganira.highbytes.wms.security.SessionAccess;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -27,13 +30,19 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.io.IOException;
+import java.time.Duration;
+
 /**
- * The signed-in user's own account. Everyone may see what they hold and
- * change their own password; nothing else about the account is theirs to
- * change, because an account whose holder edits its access is the control
- * failure this system exists to prevent.
+ * The signed-in user's own account. Everyone may see what they hold, change
+ * their own password and set their own photo; nothing else about the
+ * account is theirs to change, because an account whose holder edits its
+ * access is the control failure this system exists to prevent. A photo
+ * grants nothing.
  *
  * <p>The page also shows the account's sign-ins and the changes made to it.
  * An administrator issues temporary passwords and so could sign in as
@@ -48,13 +57,15 @@ public class ProfileController {
     private final PasswordService passwords;
     private final SessionAccess sessions;
     private final AuditService audit;
+    private final ProfilePhotoService photos;
 
     public ProfileController(UserService users, PasswordService passwords, SessionAccess sessions,
-                             AuditService audit) {
+                             AuditService audit, ProfilePhotoService photos) {
         this.users = users;
         this.passwords = passwords;
         this.sessions = sessions;
         this.audit = audit;
+        this.photos = photos;
     }
 
     @GetMapping
@@ -102,6 +113,52 @@ public class ProfileController {
         redirect.addFlashAttribute("flashSuccess",
                 "Password changed. Any other session of your account ends on its next page.");
         return "redirect:/";
+    }
+
+    /**
+     * The signed-in user's photo. Pages ask for it with its version in the
+     * address, so a browser may keep it: a new photo is a new address. Kept
+     * private, never in a shared cache.
+     */
+    @GetMapping("/photo")
+    public ResponseEntity<byte[]> photo() {
+        return photos.mine()
+                .map(p -> ResponseEntity.ok()
+                        .contentType(MediaType.IMAGE_JPEG)
+                        .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate())
+                        .eTag(p.version())
+                        .body(p.content()))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/photo")
+    public String uploadPhoto(@RequestParam(name = "photo", required = false) MultipartFile upload,
+                              @ModelAttribute("currentBranch") BranchView branch,
+                              RedirectAttributes redirect) {
+        try {
+            // Refused before it is read: the size is known from the request.
+            if (upload != null && upload.getSize() > PhotoProcessor.MAX_UPLOAD_BYTES) {
+                throw new PhotoRejectedException("That photo is over 5 MB. Choose a smaller one.");
+            }
+            byte[] bytes = upload == null ? new byte[0] : upload.getBytes();
+            boolean changed = photos.replaceMine(bytes, branch);
+            redirect.addFlashAttribute("flashSuccess", changed
+                    ? "Photo saved. It is cut to a square from the centre."
+                    : "That is already your photo.");
+        } catch (PhotoRejectedException e) {
+            redirect.addFlashAttribute("flashError", e.getMessage());
+        } catch (IOException e) {
+            redirect.addFlashAttribute("flashError", "The photo did not arrive whole. Try again.");
+        }
+        return "redirect:/profile";
+    }
+
+    @PostMapping("/photo/remove")
+    public String removePhoto(@ModelAttribute("currentBranch") BranchView branch, RedirectAttributes redirect) {
+        if (photos.removeMine(branch)) {
+            redirect.addFlashAttribute("flashSuccess", "Photo removed. Your initials show instead.");
+        }
+        return "redirect:/profile";
     }
 
     /** Someone who must change their password sees nothing else, so the page stands alone. */

@@ -240,6 +240,27 @@ th.num, td.num { text-align: right; }
 .user-name { color: var(--color-heading); font-weight: 700; font-size: .875rem; line-height: 1.2; }
 .user-role { color: var(--color-muted); font-size: .75rem; }
 .user-btn .bi-chevron-down { color: var(--color-muted); font-size: .75rem; }
+img.user-avatar { object-fit: cover; background: var(--color-divider); }
+
+/* ---- Profile photo ------------------------------------------------------
+   The holder's own; the initials stand in until there is one. */
+.profile-photo {
+  width: 88px; height: 88px; flex-shrink: 0; overflow: hidden;
+  display: grid; place-items: center;
+  border: 3px solid var(--color-card); border-radius: 50%;
+  background: var(--color-heading); color: #fff;
+  font-size: 1.75rem; font-weight: 700;
+  box-shadow: var(--shadow-card);
+}
+.profile-photo img { width: 100%; height: 100%; object-fit: cover; }
+.photo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 10px; }
+.photo-actions form { margin: 0; }
+.photo-picker label { cursor: pointer; }
+.photo-picker:focus-within label { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.photo-remove { color: var(--color-danger); text-decoration: none; }
+.photo-remove:hover, .photo-remove:focus { color: var(--color-danger); text-decoration: underline; }
+.photo-help { margin: 6px 0 0; color: var(--color-muted); font-size: .78rem; }
+.photo-help.is-error { color: var(--color-danger); font-weight: 600; }
 
 .dropdown-menu { border-color: var(--color-border); box-shadow: var(--shadow-card); border-radius: var(--radius-sm); font-size: .875rem; }
 .dropdown-item { color: var(--color-text); }

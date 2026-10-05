@@ -135,6 +135,21 @@ public class GlobalModelAdvice {
     }
 
     /**
+     * The version of the user's profile photo, or null for none, when the
+     * initials show instead. It is part of the photo's address, so a new
+     * photo is fetched at once and an unchanged one never again.
+     */
+    @ModelAttribute("userPhotoVersion")
+    public String userPhotoVersion(@AuthenticationPrincipal AppUserDetails user) {
+        if (user == null) return null;
+        return jdbc.sql("SELECT left(sha256, 16) FROM user_photo WHERE user_id = :id")
+                .param("id", user.id())
+                .query(String.class)
+                .optional()
+                .orElse(null);
+    }
+
+    /**
      * The counts on the navigation. This is the warehouse manager's morning
      * triage before they click anything, and the main argument for a sidebar
      * over top navigation.
